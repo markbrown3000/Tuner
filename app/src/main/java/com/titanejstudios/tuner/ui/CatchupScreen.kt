@@ -74,7 +74,7 @@ fun CatchupScreen(vm: TunerViewModel) {
         delay(80)
         runCatching { first.requestFocus() }
     }
-    Column(Modifier.fillMaxSize().skyBackground().padding(horizontal = 44.dp, vertical = 26.dp)) {
+    Column(Modifier.fillMaxSize().skyBackground().padding(horizontal = if (narrowScreen()) 12.dp else 44.dp, vertical = if (narrowScreen()) 12.dp else 26.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text("Catch-up", color = Color.White, fontSize = 32.sp, fontWeight = FontWeight.Bold)
@@ -135,6 +135,15 @@ fun CatchupScreen(vm: TunerViewModel) {
                 }
             }
             Spacer(Modifier.height(12.dp))
+        }
+        // Phones: channels as a row of chips, programmes underneath.
+        if (narrowScreen()) {
+            CategoryChips(channels.map { it.id }, selected?.id, label = { id -> channels.firstOrNull { it.id == id }?.name ?: id }) { id ->
+                selected = channels.firstOrNull { it.id == id }
+            }
+            Spacer(Modifier.height(10.dp))
+            selected?.let { ch -> CatchupList(vm, ch, channels) }
+            return@Column
         }
         Row(Modifier.fillMaxSize()) {
             LazyColumn(Modifier.width(320.dp).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(4.dp), contentPadding = PaddingValues(4.dp)) {

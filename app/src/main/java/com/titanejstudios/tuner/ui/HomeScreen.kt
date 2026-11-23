@@ -461,6 +461,10 @@ fun HomeScreen(vm: TunerViewModel) {
         val heroHeight = (maxHeight - 44.dp - 52.dp - 8.dp - safeBanner - 52.dp - 10.dp - (TILE_H + 46.dp) - 18.dp)
             .coerceIn(118.dp, 232.dp)
         val roomy = heroHeight >= 190.dp
+        if (compactLayout(vm)) {
+            PhoneHomeBody(vm, h, rows, cards, apps, allChannels, firstTile)
+            return@BoxWithConstraints
+        }
         // The highlighted item's wide picture, behind the menu and fading into the background.
         if (h?.image != null && h.wide) {
             Box(Modifier.align(Alignment.TopEnd).fillMaxWidth(0.68f).height(heroHeight + 150.dp)) {
@@ -606,16 +610,95 @@ fun HomeScreen(vm: TunerViewModel) {
 }
 
 @Composable
-private fun HomeCardRail(cards: List<HomeCard>, firstModifier: Modifier, onFocus: (HeroInfo) -> Unit) {
-    LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp), contentPadding = PaddingValues(horizontal = 6.dp, vertical = 8.dp)) {
+private fun HomeCardRail(cards: List<HomeCard>, firstModifier: Modifier, small: Boolean = false, onFocus: (HeroInfo) -> Unit) {
+    LazyRow(horizontalArrangement = Arrangement.spacedBy(if (small) 10.dp else 14.dp), contentPadding = PaddingValues(horizontal = 6.dp, vertical = 8.dp)) {
         items(cards.size, key = { cards[it].key }) { i ->
-            HomeTile(cards[i], if (i == 0) firstModifier else Modifier, onFocus)
+            HomeTile(cards[i], if (i == 0) firstModifier else Modifier, onFocus, small)
+        }
+    }
+}
+
+/** Home on a phone held upright: a featured picture, quick buttons, then rows of smaller tiles. */
+@Composable
+private fun PhoneHomeBody(
+    vm: TunerViewModel,
+    h: HeroInfo?,
+    rows: List<HomeRow>,
+    cards: Map<HomeRow, List<HomeCard>>,
+    apps: List<TvApp>,
+    allChannels: List<Channel>,
+    firstTile: FocusRequester,
+) {
+    val featured = rows.firstOrNull()?.let { cards[it]?.firstOrNull() }
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        item(key = "top") {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Tuner", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.weight(1f))
+                if (vm.vpn.connected) Text("🔒  ", fontSize = 16.sp)
+                Box(Modifier.tvClickable({ vm.navigate(Screen.ProfilePicker) })) {
+                    ProfileAvatar(vm.activeProfile, 34.dp, vm.profiles.indexOfFirst { it.id == vm.activeProfile.id })
+                }
+            }
+        }
+        if (vm.safeMode && !vm.safeModeBannerHidden) item(key = "safe") { Box(Modifier.padding(horizontal = 12.dp)) { SafeModeBanner(vm) } }
+        // The featured item: the first tile of the first row, big.
+        val hero = featured?.hero ?: h
+        if (hero != null) item(key = "hero") {
+            Box(
+                Modifier.padding(horizontal = 12.dp).fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(16.dp))
+                    .background(TunerColors.Panel).tvClickable({ featured?.onClick?.invoke() }, featured?.onLongClick),
+            ) {
+                when {
+                    hero.image != null && hero.wide -> AsyncImage(model = hero.image, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                    hero.image != null -> AsyncImage(
+                        model = hero.image, contentDescription = null, contentScale = ContentScale.Fit,
+                        modifier = Modifier.align(Alignment.TopEnd).fillMaxHeight().aspectRatio(2f / 3f),
+                    )
+                    hero.channel != null -> ChannelLogo(hero.channel.logo, hero.channel.name, Modifier.align(Alignment.TopCenter).padding(top = 24.dp).size(width = 160.dp, height = 80.dp))
+                }
+                Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0.35f to Color.Transparent, 1f to Color(0xEE050A1E))))
+                Column(Modifier.align(Alignment.BottomStart).padding(14.dp)) {
+                    hero.label?.let { Text(it, color = hero.labelColor, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp, maxLines = 1) }
+                    Text(hero.title, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold, maxLines = 2, overflow = TextOverflow.Ellipsis, lineHeight = 26.sp)
+                    hero.score?.let { Text(it, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold) }
+                    Text(hero.subtitle, color = Color(0xFFD4DDF5), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        }
+        item(key = "quick") {
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)) {
+                vm.lastChannel?.let { last -> item { PillButton("▶  ${last.name}", { vm.play(last, allChannels) }, compact = true) } }
+                item { PillButton("Sport", { vm.navigate(Screen.Sports) }, compact = true) }
+                item { PillButton("What's On", { vm.openWhatsOn(vm.whatsOnGenre) }, compact = true) }
+                item { PillButton("Catch-up", { vm.navigate(Screen.Catchup) }, compact = true) }
+                item { PillButton("🎤  Say it", { vm.startVoiceSearch() }, compact = true) }
+            }
+        }
+        if (rows.isEmpty()) item(key = "empty") {
+            Text(
+                vm.status?.let { "⟳ $it" } ?: if (vm.sources.isEmpty()) "No channels yet – add a playlist in More › Playlists" else "Loading…",
+                color = TunerColors.TextSecondary, fontSize = 15.sp, modifier = Modifier.padding(16.dp),
+            )
+        }
+        rows.forEachIndexed { i, row ->
+            item(key = "row" + row.name) {
+                Column {
+                    val because = vm.plexFeature.similarTo ?: vm.becauseFilmOf
+                    Text(
+                        if (row == HomeRow.Because && because != null) "Because you watched $because" else row.title,
+                        color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 14.dp, top = 6.dp),
+                    )
+                    val m = if (i == 0) Modifier.focusRequester(firstTile) else Modifier
+                    if (row == HomeRow.Apps) AppRail(vm, apps, m) { }
+                    else HomeCardRail(cards[row].orEmpty(), m, small = true) { }
+                }
+            }
         }
     }
 }
 
 @Composable
-private fun HomeTile(c: HomeCard, modifier: Modifier, onFocus: (HeroInfo) -> Unit) {
+private fun HomeTile(c: HomeCard, modifier: Modifier, onFocus: (HeroInfo) -> Unit, small: Boolean = false) {
     FocusSurface(
         onClick = c.onClick,
         onLongClick = c.onLongClick,
@@ -623,7 +706,7 @@ private fun HomeTile(c: HomeCard, modifier: Modifier, onFocus: (HeroInfo) -> Uni
         baseColor = TunerColors.Panel,
         shape = RoundedCornerShape(12.dp),
         zoom = true,
-        modifier = modifier.size(width = TILE_W, height = TILE_H),
+        modifier = modifier.size(width = if (small) 172.dp else TILE_W, height = if (small) 120.dp else TILE_H),
     ) { focused ->
         val sub = if (focused) Color(0xEEFFFFFF) else Color(0xFFC3CDEA)
         if (c.poster && c.image != null) {
@@ -693,8 +776,8 @@ fun HomeRowsScreen(vm: TunerViewModel) {
         list.add(to.coerceIn(0, list.size), row)
         vm.saveHomeRows(list.map { it.name }, hidden)
     }
-    Row(Modifier.fillMaxSize().skyBackground().padding(horizontal = 56.dp, vertical = 36.dp), horizontalArrangement = Arrangement.spacedBy(44.dp)) {
-        Column(Modifier.width(600.dp)) {
+    val paneA: @Composable (Modifier) -> Unit = { pane ->
+        Column(pane) {
             Text("Home rows", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.Bold)
             Text("OK switches a row on or off. Hold OK to move it.", color = TunerColors.TextSecondary, fontSize = 15.sp)
             Spacer(Modifier.height(14.dp))
@@ -717,7 +800,9 @@ fun HomeRowsScreen(vm: TunerViewModel) {
                 }
             }
         }
-        Column(Modifier.weight(1f).padding(top = 70.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    }
+    val paneB: @Composable (Modifier) -> Unit = { pane ->
+        Column(pane, verticalArrangement = Arrangement.spacedBy(12.dp)) {
             FocusSurface(
                 onClick = { vm.toggleHomeSmart() },
                 baseColor = TunerColors.Panel,
@@ -737,6 +822,19 @@ fun HomeRowsScreen(vm: TunerViewModel) {
                 }
             }
             PillButton("Back to the standard order", { vm.saveHomeRows(emptyList(), emptySet()) }, compact = true)
+        }
+    }
+    // Phones held upright: one above the other instead of side by side.
+    if (narrowScreen()) {
+        Column(Modifier.fillMaxSize().skyBackground().padding(14.dp)) {
+            paneA(Modifier.fillMaxWidth())
+            Spacer(Modifier.height(14.dp))
+            paneB(Modifier.fillMaxWidth().weight(1f))
+        }
+    } else {
+        Row(Modifier.fillMaxSize().skyBackground().padding(horizontal = 56.dp, vertical = 36.dp), horizontalArrangement = Arrangement.spacedBy(44.dp)) {
+            paneA(Modifier.width(600.dp))
+            paneB(Modifier.weight(1f).padding(top = 70.dp))
         }
     }
     moving?.let { row ->

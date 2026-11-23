@@ -103,7 +103,7 @@ fun SportsScreen(vm: TunerViewModel) {
     val counts = all.orEmpty().groupingBy { it.type }.eachCount()
     val todayEnd = endOfDay(now, 0)
 
-    Column(Modifier.fillMaxSize().skyBackground().padding(horizontal = 48.dp, vertical = 28.dp)) {
+    Column(Modifier.fillMaxSize().skyBackground().padding(horizontal = if (narrowScreen()) 12.dp else 48.dp, vertical = if (narrowScreen()) 10.dp else 28.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Sport", fontSize = 32.sp, fontWeight = FontWeight.Bold, color = TunerColors.TextPrimary)
             Spacer(Modifier.width(16.dp))
@@ -190,7 +190,7 @@ private fun SportRow(vm: TunerViewModel, ev: SportEvent, now: Long, restorer: Fo
         modifier = Modifier.fillMaxWidth().height(74.dp).then(restorer.mod(key)),
     ) { focused ->
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.width(120.dp)) {
+            Column(Modifier.width(if (narrowScreen()) 64.dp else 120.dp)) {
                 Text(
                     if (onNow) "On now" else hhmm(p.start),
                     color = if (onNow) TunerColors.NowLine else Color.White,
@@ -223,7 +223,7 @@ private fun SportRow(vm: TunerViewModel, ev: SportEvent, now: Long, restorer: Fo
                     fontSize = 14.sp,
                     maxLines = 1,
                 )
-                if (onNow) ProgressBar(progressOf(p, now), Modifier.padding(top = 4.dp).width(200.dp), color = if (focused) Color.White else TunerColors.NowLine)
+                if (onNow) ProgressBar(progressOf(p, now), Modifier.padding(top = 4.dp).width(if (narrowScreen()) 120.dp else 200.dp), color = if (focused) Color.White else TunerColors.NowLine)
             }
             Text(
                 when {

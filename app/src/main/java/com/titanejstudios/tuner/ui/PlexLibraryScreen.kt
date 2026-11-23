@@ -1,6 +1,7 @@
 package com.titanejstudios.tuner.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Column
@@ -49,6 +50,7 @@ private const val PLEX_RESULTS = "🔍 Search results"
 @Composable
 fun PlexLibraryScreen(vm: TunerViewModel) {
     val plex = vm.plexFeature
+    val compact = compactLayout(vm)
     val kids = vm.activeProfile.kids
     // Kids' profiles only see the libraries picked for them.
     val sections = remember(plex.sections, kids, plex.kidsSections) { plex.sections.filter { vm.plexSectionAllowed(it) } }
@@ -93,9 +95,12 @@ fun PlexLibraryScreen(vm: TunerViewModel) {
     Column(
         Modifier.fillMaxSize()
             .background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(tint, TunerColors.BackgroundBottom)))
-            .padding(horizontal = 40.dp, vertical = 24.dp)
+            .padding(horizontal = if (compact) 12.dp else 40.dp, vertical = if (compact) 10.dp else 24.dp)
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = if (compact) Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()) else Modifier,
+        ) {
             Text("Plex", fontSize = 30.sp, fontWeight = FontWeight.Bold, color = TunerColors.TextPrimary)
             Spacer(Modifier.width(16.dp))
             Text(
@@ -136,7 +141,13 @@ fun PlexLibraryScreen(vm: TunerViewModel) {
             }, compact = true)
         }
         Spacer(Modifier.height(10.dp))
-        focusedEntry?.let { e ->
+        if (compact && categories.isNotEmpty()) {
+            CategoryChips(categories, category, label = { c ->
+                if (c == PLEX_CONTINUE || c == PLEX_RESULTS) c else labels[c] ?: c
+            }) { plex.libraryCategory = it }
+            Spacer(Modifier.height(10.dp))
+        }
+        if (!compact) focusedEntry?.let { e ->
             FocusStrip(
                 e.title,
                 listOfNotNull(e.year, if (e.isShow) "TV" else "Film", e.rating, e.library).joinToString("  ·  "),
@@ -150,7 +161,7 @@ fun PlexLibraryScreen(vm: TunerViewModel) {
             return@Column
         }
         Row(Modifier.weight(1f)) {
-            LazyColumn(Modifier.width(230.dp).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            if (!compact) LazyColumn(Modifier.width(230.dp).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 items(categories.size, key = { categories[it] }) { i ->
                     val c = categories[i]
                     val selected = c == category
@@ -176,7 +187,7 @@ fun PlexLibraryScreen(vm: TunerViewModel) {
                     }
                 }
             }
-            Spacer(Modifier.width(20.dp))
+            if (!compact) Spacer(Modifier.width(20.dp))
             when {
                 category == PLEX_RESULTS -> {
                     val results = plex.searchResults?.let { r -> if (kids) r.filter { plex.isKidsEntry(it) } else r }
@@ -186,7 +197,7 @@ fun PlexLibraryScreen(vm: TunerViewModel) {
                         CenterMessage("Nothing on Plex matches \"${plex.query}\"")
                     } else {
                         LazyVerticalGrid(
-                            columns = GridCells.Adaptive(116.dp),
+                            columns = GridCells.Adaptive(if (compact) 104.dp else 116.dp),
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                             verticalArrangement = Arrangement.spacedBy(10.dp),
                             modifier = Modifier.weight(1f),
@@ -209,7 +220,7 @@ fun PlexLibraryScreen(vm: TunerViewModel) {
                 category == PLEX_CONTINUE -> {
                     val deck = vm.plexItems
                     LazyVerticalGrid(
-                        columns = GridCells.Adaptive(116.dp),
+                        columns = GridCells.Adaptive(if (compact) 104.dp else 116.dp),
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                         modifier = Modifier.weight(1f),
@@ -234,7 +245,7 @@ fun PlexLibraryScreen(vm: TunerViewModel) {
                         CenterMessage("${section.title} is empty")
                     } else {
                         LazyVerticalGrid(
-                            columns = GridCells.Adaptive(116.dp),
+                            columns = GridCells.Adaptive(if (compact) 104.dp else 116.dp),
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                             verticalArrangement = Arrangement.spacedBy(10.dp),
                             modifier = Modifier.weight(1f),
@@ -386,24 +397,10 @@ fun PlexShowScreen(vm: TunerViewModel) {
         delay(80)
         runCatching { first.requestFocus() }
     }
-    Row(Modifier.fillMaxSize().skyBackground().padding(horizontal = 40.dp, vertical = 28.dp)) {
-        Column(Modifier.width(300.dp)) {
-            if (show.image != null) {
-                AsyncImage(
-                    model = show.image, contentDescription = null, contentScale = ContentScale.Crop,
-                    modifier = Modifier.size(width = 240.dp, height = 360.dp).clip(RoundedCornerShape(14.dp)),
-                )
-                Spacer(Modifier.height(14.dp))
-            }
-            Text(show.title, color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            Text(
-                listOfNotNull(show.year, show.rating, "${show.leafCount} episodes").joinToString("  ·  "),
-                color = TunerColors.TextSecondary, fontSize = 15.sp,
-            )
-            show.summary?.let { AutoScrollText(it, Modifier.weight(1f).padding(top = 10.dp)) }
-        }
-        Spacer(Modifier.width(28.dp))
-        Column(Modifier.weight(1f)) {
+    val compact = compactLayout(vm)
+    // The seasons and episodes, beside the poster on a TV, under a small header on a phone.
+    val episodesPane: @Composable (Modifier) -> Unit = { paneModifier ->
+        Column(paneModifier) {
             if (episodes == null) {
                 CenterMessage("Loading episodes…")
                 return@Column
@@ -474,6 +471,46 @@ fun PlexShowScreen(vm: TunerViewModel) {
                     }
                 }
             }
+        }
+    }
+    if (compact) {
+        Column(Modifier.fillMaxSize().skyBackground().padding(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (show.image != null) {
+                    AsyncImage(
+                        model = show.image, contentDescription = null, contentScale = ContentScale.Crop,
+                        modifier = Modifier.size(width = 80.dp, height = 120.dp).clip(RoundedCornerShape(10.dp)),
+                    )
+                    Spacer(Modifier.width(12.dp))
+                }
+                Column(Modifier.weight(1f)) {
+                    Text(show.title, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(listOfNotNull(show.year, show.rating, "${show.leafCount} episodes").joinToString("  ·  "), color = TunerColors.TextSecondary, fontSize = 13.sp)
+                    show.summary?.let { Text(it, color = TunerColors.TextSecondary, fontSize = 12.sp, maxLines = 3, overflow = TextOverflow.Ellipsis) }
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+            episodesPane(Modifier.weight(1f))
+        }
+    } else {
+        Row(Modifier.fillMaxSize().skyBackground().padding(horizontal = 40.dp, vertical = 28.dp)) {
+        Column(Modifier.width(300.dp)) {
+            if (show.image != null) {
+                AsyncImage(
+                    model = show.image, contentDescription = null, contentScale = ContentScale.Crop,
+                    modifier = Modifier.size(width = 240.dp, height = 360.dp).clip(RoundedCornerShape(14.dp)),
+                )
+                Spacer(Modifier.height(14.dp))
+            }
+            Text(show.title, color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(
+                listOfNotNull(show.year, show.rating, "${show.leafCount} episodes").joinToString("  ·  "),
+                color = TunerColors.TextSecondary, fontSize = 15.sp,
+            )
+            show.summary?.let { AutoScrollText(it, Modifier.weight(1f).padding(top = 10.dp)) }
+        }
+            Spacer(Modifier.width(28.dp))
+            episodesPane(Modifier.weight(1f))
         }
     }
 }

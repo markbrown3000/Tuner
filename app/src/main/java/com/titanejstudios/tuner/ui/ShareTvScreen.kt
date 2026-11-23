@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -48,32 +49,35 @@ fun ShareTvScreen(vm: TunerViewModel) {
         runCatching { first.requestFocus() }
     }
 
-    Column(Modifier.fillMaxSize().skyBackground().padding(horizontal = 64.dp, vertical = 32.dp)) {
+    val narrow = narrowScreen()
+    // On a phone the words talk about devices rather than TVs, since either end could be a phone.
+    val other = if (vm.isPhone) "device" else "TV"
+    Column(Modifier.fillMaxSize().skyBackground().padding(screenPadding(64.dp, 32.dp))) {
         Text(
-            if (vm.shareMode == "send") "Copy to another TV" else "Copy from another TV",
-            fontSize = 32.sp, fontWeight = FontWeight.Bold, color = TunerColors.TextPrimary,
+            if (vm.shareMode == "send") "Copy to another $other" else "Copy from another $other",
+            fontSize = if (narrow) 26.sp else 32.sp, fontWeight = FontWeight.Bold, color = TunerColors.TextPrimary,
         )
         Text(
-            "Copies playlists, favourites, profiles, PIN, reminders and settings. Both TVs need to be on the same Wi-Fi.",
+            "Copies playlists, favourites, profiles, PIN, reminders and settings. Both ${other}s need to be on the same Wi-Fi.",
             color = TunerColors.TextSecondary, fontSize = 15.sp,
         )
         Spacer(Modifier.height(24.dp))
 
         when (vm.shareMode) {
             "send" -> {
-                Text("On the other TV, open Tuner › Settings › Copy from another TV, pick this TV and enter:", color = Color.White, fontSize = 20.sp)
+                Text("On the other $other, open Tuner › Settings › Copy from another $other, pick this one and enter:", color = Color.White, fontSize = if (narrow) 17.sp else 20.sp)
                 Spacer(Modifier.height(18.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                     (vm.shareCode ?: "----").forEach { d ->
                         Box(
-                            Modifier.size(width = 90.dp, height = 110.dp).clip(RoundedCornerShape(14.dp)).background(TunerColors.Panel),
+                            Modifier.size(width = if (narrow) 64.dp else 90.dp, height = if (narrow) 80.dp else 110.dp).clip(RoundedCornerShape(14.dp)).background(TunerColors.Panel),
                             contentAlignment = Alignment.Center,
-                        ) { Text(d.toString(), color = Color.White, fontSize = 60.sp, fontWeight = FontWeight.Bold) }
+                        ) { Text(d.toString(), color = Color.White, fontSize = if (narrow) 42.sp else 60.sp, fontWeight = FontWeight.Bold) }
                     }
                 }
                 Spacer(Modifier.height(18.dp))
                 vm.shareStatus?.let { Text(it, color = TunerColors.Error, fontSize = 16.sp) }
-                Text("Keep this screen open until the other TV says it's done.", color = TunerColors.TextSecondary, fontSize = 15.sp)
+                Text("Keep this screen open until the other $other says it's done.", color = TunerColors.TextSecondary, fontSize = 15.sp)
                 Spacer(Modifier.height(20.dp))
                 PillButton("Done", { vm.back() }, Modifier.focusRequester(first))
             }
@@ -84,7 +88,7 @@ fun ShareTvScreen(vm: TunerViewModel) {
                     Spacer(Modifier.height(12.dp))
                     if (vm.shareFound.isEmpty()) {
                         Text(
-                            "On the other TV, open Tuner › Settings › Copy to another TV. It will appear here.",
+                            "On the other $other, open Tuner › Settings › Copy to another $other. It will appear here.",
                             color = Color.White, fontSize = 18.sp,
                         )
                         Spacer(Modifier.height(16.dp))
@@ -99,10 +103,10 @@ fun ShareTvScreen(vm: TunerViewModel) {
                                         code = ""
                                     },
                                     baseColor = TunerColors.Panel,
-                                    modifier = (if (i == 0) Modifier.focusRequester(first) else Modifier).width(700.dp).height(64.dp),
+                                    modifier = (if (i == 0) Modifier.focusRequester(first) else Modifier).fillMaxWidth().height(64.dp),
                                 ) { _ ->
                                     Row(Modifier.padding(horizontal = 18.dp).align(Alignment.CenterStart), verticalAlignment = Alignment.CenterVertically) {
-                                        Text("📺  " + f.name, color = Color.White, fontSize = 20.sp)
+                                        Text((if (vm.isPhone) "📱  " else "📺  ") + f.name, color = Color.White, fontSize = 20.sp)
                                     }
                                 }
                             }
@@ -149,7 +153,7 @@ fun ShareTvScreen(vm: TunerViewModel) {
                                                 else -> addDigit(k[0])
                                             }
                                         },
-                                        (if (r == 0 && c == 0) Modifier.focusRequester(first) else Modifier).width(90.dp),
+                                        (if (r == 0 && c == 0) Modifier.focusRequester(first) else Modifier).width(if (narrow) 76.dp else 90.dp),
                                     )
                                 }
                             }

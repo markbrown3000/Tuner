@@ -19,6 +19,7 @@ import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -50,6 +51,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
@@ -244,6 +246,13 @@ fun Modifier.tvClickable(onClick: () -> Unit, onLongClick: (() -> Unit)? = null)
             }
         }
         .focusable()
+        // Phones and tablets: tap = OK, press and hold = hold OK.
+        .pointerInput(Unit) {
+            androidx.compose.foundation.gestures.detectTapGestures(
+                onTap = { click() },
+                onLongPress = { longClick?.invoke() ?: click() },
+            )
+        }
 }
 
 /** A focusable tile that turns accent-blue when focused. */
@@ -365,7 +374,7 @@ fun TimesUpDialog(vm: TunerViewModel) {
     ModalLayer(onDismiss = { vm.dismissTimesUp() }) {
         Column(
             Modifier
-                .width(620.dp)
+                .fillMaxWidth(0.94f).widthIn(max = 620.dp)
                 .clip(RoundedCornerShape(16.dp))
                 .background(TunerColors.Panel)
                 .padding(32.dp),
@@ -527,7 +536,7 @@ fun MenuDialog(
     ModalLayer(onDismiss) {
         Column(
             Modifier
-                .width(560.dp)
+                .fillMaxWidth(0.94f).widthIn(max = 560.dp)
                 .clip(RoundedCornerShape(16.dp))
                 .background(TunerColors.Panel)
                 .padding(24.dp)
@@ -585,7 +594,7 @@ fun PinDialog(prompt: PinPrompt, onCancel: () -> Unit) {
     ModalLayer(onCancel) {
         Column(
             Modifier
-                .width(420.dp)
+                .fillMaxWidth(0.94f).widthIn(max = 420.dp)
                 .clip(RoundedCornerShape(16.dp))
                 .background(TunerColors.Panel)
                 .onPreviewKeyEvent { e ->
@@ -660,7 +669,7 @@ fun ReminderPopup(reminder: Reminder, onWatch: () -> Unit, onDismiss: () -> Unit
     ModalLayer(onDismiss) {
         Column(
             Modifier
-                .width(600.dp)
+                .fillMaxWidth(0.94f).widthIn(max = 600.dp)
                 .clip(RoundedCornerShape(16.dp))
                 .background(TunerColors.Panel)
                 .padding(28.dp)
@@ -782,6 +791,8 @@ fun MiniPreview(vm: TunerViewModel, modifier: Modifier = Modifier) {
 /** The menu bar along the top of the main screens. */
 @Composable
 fun TopNav(vm: TunerViewModel, current: Screen, modifier: Modifier = Modifier) {
+    // Phones get a menu bar along the bottom instead (MainActivity).
+    if (vm.isPhone) return
     val items = buildList {
         add("Home" to Screen.Home)
         add("TV Guide" to Screen.Channels)

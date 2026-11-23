@@ -72,7 +72,7 @@ fun SourceEditScreen(vm: TunerViewModel) {
             .fillMaxSize()
             .skyBackground()
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 64.dp, vertical = 40.dp),
+            .padding(screenPadding(64.dp, 40.dp)),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Text(

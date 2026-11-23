@@ -60,6 +60,10 @@ import kotlinx.coroutines.launch
 
 @Composable
 fun ChannelsScreen(vm: TunerViewModel) {
+    if (compactLayout(vm)) {
+        PhoneGuideScreen(vm)
+        return
+    }
     // Category tabs: the highlight follows the remote instantly, but the channel list only
     // switches once you pause on a category – so flicking through categories stays smooth.
     var tab by remember { mutableStateOf(vm.selectedGroup) }

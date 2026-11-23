@@ -63,7 +63,7 @@ fun EpgMapScreen(vm: TunerViewModel) {
         }
     }
 
-    Column(Modifier.fillMaxSize().skyBackground().padding(horizontal = 64.dp, vertical = 32.dp)) {
+    Column(Modifier.fillMaxSize().skyBackground().padding(screenPadding(64.dp, 32.dp))) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             ChannelLogo(channel.logo, channel.name, Modifier.size(width = 76.dp, height = 50.dp))
             Spacer(Modifier.width(16.dp))

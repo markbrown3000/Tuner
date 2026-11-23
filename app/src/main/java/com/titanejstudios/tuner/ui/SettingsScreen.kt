@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
@@ -63,7 +64,7 @@ fun SettingsScreen(vm: TunerViewModel) {
         Modifier
             .fillMaxSize()
             .skyBackground()
-            .padding(horizontal = 64.dp, vertical = 32.dp)
+            .padding(horizontal = if (narrowScreen()) 12.dp else 64.dp, vertical = if (narrowScreen()) 12.dp else 32.dp)
     ) {
         Text("Settings", fontSize = 32.sp, fontWeight = FontWeight.Bold, color = TunerColors.TextPrimary)
         Spacer(Modifier.height(16.dp))
@@ -115,8 +116,9 @@ fun SettingsScreen(vm: TunerViewModel) {
 
             item {
                 SettingRow(
-                    "📱 Set up from your phone",
-                    subtitle = "Add playlists, Home Assistant webhook, backup and restore – no typing on the TV",
+                    if (vm.isPhone) "💻 Set up from a computer" else "📱 Set up from your phone",
+                    subtitle = if (vm.isPhone) "Paste long playlist links, add a VPN, back up and restore from a computer's browser"
+                    else "Add playlists, Home Assistant webhook, backup and restore – no typing on the TV",
                     onClick = { vm.navigate(Screen.PhoneSetup) },
                 )
             }
@@ -143,6 +145,15 @@ fun SettingsScreen(vm: TunerViewModel) {
                     subtitle = "Home, the TV Guide on the category and channel you left, or straight into the last channel",
                     detail = vm.startScreenLabel,
                     onClick = { vm.cycleStartScreen() },
+                )
+            }
+
+            item {
+                SettingRow(
+                    "This device is a",
+                    subtitle = "Phone: touch controls, a menu bar along the bottom, and the video turns sideways to fill the screen",
+                    detail = if (vm.isPhone) "📱 Phone" else "📺 TV",
+                    onClick = { vm.chooseDevice(if (vm.isPhone) "tv" else "phone") },
                 )
             }
 
@@ -392,7 +403,7 @@ fun SettingsScreen(vm: TunerViewModel) {
                     onClick = { vm.showNotice("Try: \"Hey Google, play Sky Sports Main Event on Tuner\"") },
                 )
             }
-            item {
+            if (!vm.isPhone) item {
                 SettingRow(
                     "Screensaver",
                     subtitle = "Clock + what's on now on your favourites. Choose \"Tuner – what's on\" in the TV's screensaver settings (see README)",
@@ -400,8 +411,9 @@ fun SettingsScreen(vm: TunerViewModel) {
                 )
             }
 
-            item { SectionTitle("Phone remote") }
-            item {
+            // A phone remote for a phone makes no sense, so these rows only show on a TV.
+            if (!vm.isPhone) item { SectionTitle("Phone remote") }
+            if (!vm.isPhone) item {
                 SettingRow(
                     "Phone remote",
                     subtitle = "Control Tuner from your phone's browser – buttons, channel list, what's on",
@@ -409,7 +421,7 @@ fun SettingsScreen(vm: TunerViewModel) {
                     onClick = { vm.toggleRemote() },
                 )
             }
-            vm.remoteUrl?.let { url ->
+            if (!vm.isPhone) vm.remoteUrl?.let { url ->
                 item {
                     val qr = remember(url) { PhoneSetupServer.qrCode(url, 320).asImageBitmap() }
                     Row(
@@ -544,14 +556,14 @@ fun SettingsScreen(vm: TunerViewModel) {
 
             item { SectionTitle("This TV") }
             item { SettingRow("Watch time", subtitle = "What each profile watched this week", onClick = { vm.openStats() }) }
-            item { SettingRow("Copy to another TV", subtitle = "Send playlists, favourites and settings to a TV on the same Wi-Fi", onClick = { vm.startShareSend() }) }
-            item { SettingRow("Copy from another TV", subtitle = "Get everything from another TV running Tuner", onClick = { vm.startShareReceive() }) }
+            item { SettingRow(if (vm.isPhone) "Copy to another device" else "Copy to another TV", subtitle = if (vm.isPhone) "Send playlists, favourites and settings to a TV or phone on the same Wi-Fi" else "Send playlists, favourites and settings to a TV on the same Wi-Fi", onClick = { vm.startShareSend() }) }
+            item { SettingRow(if (vm.isPhone) "Copy from another device" else "Copy from another TV", subtitle = if (vm.isPhone) "Get everything from a TV or phone running Tuner" else "Get everything from another TV running Tuner", onClick = { vm.startShareReceive() }) }
 
             item { SectionTitle("Help") }
             item {
                 SettingRow(
                     "Check everything",
-                    subtitle = "Tries each part of Tuner on this TV and says what works and what doesn't",
+                    subtitle = if (vm.isPhone) "Tries each part of Tuner on this phone and says what works and what doesn't" else "Tries each part of Tuner on this TV and says what works and what doesn't",
                     onClick = { vm.openSelfTest() },
                 )
             }
@@ -770,13 +782,17 @@ fun SettingRow(
     FocusSurface(
         onClick = onClick,
         baseColor = TunerColors.Panel,
-        modifier = modifier.fillMaxWidth().height(if (subtitle != null) 72.dp else 58.dp),
+        // Phones: the row grows so long explanations wrap instead of being cut off.
+        modifier = modifier.fillMaxWidth().then(
+            if (narrowScreen()) Modifier.heightIn(min = 58.dp) else Modifier.height(if (subtitle != null) 72.dp else 58.dp)
+        ),
     ) { focused ->
-        Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
+        val narrow = narrowScreen()
+        Row(Modifier.fillMaxWidth().padding(horizontal = if (narrow) 14.dp else 20.dp, vertical = if (narrow) 10.dp else 0.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text(title, color = Color.White, fontSize = 18.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(title, color = Color.White, fontSize = if (narrow) 16.sp else 18.sp, maxLines = if (narrow) 2 else 1, overflow = TextOverflow.Ellipsis)
                 subtitle?.let {
-                    Text(it, color = if (focused) Color(0xDDFFFFFF) else TunerColors.TextSecondary, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(it, color = if (focused) Color(0xDDFFFFFF) else TunerColors.TextSecondary, fontSize = if (narrow) 13.sp else 14.sp, maxLines = if (narrow) 4 else 1, overflow = TextOverflow.Ellipsis)
                 }
             }
             detail?.let {

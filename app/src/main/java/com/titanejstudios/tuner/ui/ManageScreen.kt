@@ -76,7 +76,7 @@ fun ManageScreen(vm: TunerViewModel) {
         Modifier
             .fillMaxSize()
             .skyBackground()
-            .padding(horizontal = 64.dp, vertical = 32.dp)
+            .padding(screenPadding(64.dp, 32.dp))
     ) {
         Text("Manage groups and channels", fontSize = 30.sp, fontWeight = FontWeight.Bold, color = TunerColors.TextPrimary)
         Spacer(Modifier.height(14.dp))

@@ -3,6 +3,7 @@ package com.titanejstudios.tuner.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -45,7 +46,7 @@ fun StillWatchingDialog(vm: TunerViewModel) {
     }
     ModalLayer(onDismiss = { vm.keepWatching() }) {
         Column(
-            Modifier.width(620.dp).clip(RoundedCornerShape(16.dp)).background(TunerColors.Panel).padding(32.dp),
+            Modifier.fillMaxWidth(0.94f).widthIn(max = 620.dp).clip(RoundedCornerShape(16.dp)).background(TunerColors.Panel).padding(32.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text("📺", fontSize = 44.sp)
@@ -75,7 +76,7 @@ fun FilmInfoDialog(vm: TunerViewModel) {
     }
     ModalLayer(onDismiss = { vm.closeFilmInfo() }) {
         Column(
-            Modifier.width(900.dp).clip(RoundedCornerShape(16.dp)).background(TunerColors.Panel)
+            Modifier.fillMaxWidth(0.94f).widthIn(max = 900.dp).clip(RoundedCornerShape(16.dp)).background(TunerColors.Panel)
         ) {
             if (info == null) {
                 Column(Modifier.fillMaxWidth().padding(32.dp)) {
@@ -133,7 +134,7 @@ fun UpdateDialog(vm: TunerViewModel, release: com.titanejstudios.tuner.apps.Upda
     }
     ModalLayer(onDismiss = { vm.updateLater() }) {
         Column(
-            Modifier.width(680.dp).clip(RoundedCornerShape(16.dp)).background(TunerColors.Panel).padding(32.dp),
+            Modifier.fillMaxWidth(0.94f).widthIn(max = 680.dp).clip(RoundedCornerShape(16.dp)).background(TunerColors.Panel).padding(32.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text("⬆", fontSize = 40.sp, color = Color.White)

@@ -69,7 +69,7 @@ fun SearchScreen(vm: TunerViewModel) {
         Modifier
             .fillMaxSize()
             .skyBackground()
-            .padding(horizontal = 48.dp, vertical = 28.dp)
+            .padding(horizontal = if (narrowScreen()) 12.dp else 48.dp, vertical = if (narrowScreen()) 10.dp else 28.dp)
     ) {
         // The remote's microphone: say what you're looking for.
         val voice = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
@@ -215,7 +215,7 @@ fun SearchScreen(vm: TunerViewModel) {
                         modifier = Modifier.fillMaxWidth().height(70.dp).then(restorer.mod(key)),
                     ) { focused ->
                         Row(Modifier.fillMaxSize().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Column(Modifier.width(150.dp)) {
+                            Column(Modifier.width(if (narrowScreen()) 78.dp else 150.dp)) {
                                 Text(dayLabel(p.start), color = if (focused) Color.White else TunerColors.TextSecondary, fontSize = 14.sp)
                                 Text("${hhmm(p.start)} – ${hhmm(p.stop)}", color = Color.White, fontSize = 16.sp)
                             }

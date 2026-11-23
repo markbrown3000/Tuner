@@ -38,8 +38,8 @@ fun RecommendationsScreen(vm: TunerViewModel) {
         delay(80)
         runCatching { first.requestFocus() }
     }
-    Row(Modifier.fillMaxSize().skyBackground().padding(horizontal = 56.dp, vertical = 32.dp), horizontalArrangement = Arrangement.spacedBy(48.dp)) {
-        Column(Modifier.width(520.dp)) {
+    val paneA: @Composable (Modifier) -> Unit = { pane ->
+        Column(pane) {
             Text("Recommendations", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.Bold)
             Text(
                 "Learned from what ${vm.activeProfile.name} actually watches (a quick flick past doesn't count), and from 👍 / 👎 – hold OK on a programme. Kept on this TV, separately for each profile.",
@@ -61,7 +61,9 @@ fun RecommendationsScreen(vm: TunerViewModel) {
                 }
             }
         }
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    }
+    val paneB: @Composable (Modifier) -> Unit = { pane ->
+        Column(pane, verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Spacer(Modifier.height(48.dp))
             Text("Your shows", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
             Text(if (shows.isEmpty()) "None yet" else shows.joinToString("  ·  "), color = TunerColors.TextSecondary, fontSize = 15.sp)
@@ -79,6 +81,19 @@ fun RecommendationsScreen(vm: TunerViewModel) {
                 subtitle = "Forget everything learned for ${vm.activeProfile.name}",
                 onClick = { vm.resetTaste() },
             )
+        }
+    }
+    // Phones held upright: one above the other instead of side by side.
+    if (narrowScreen()) {
+        Column(Modifier.fillMaxSize().skyBackground().padding(14.dp)) {
+            paneA(Modifier.fillMaxWidth())
+            Spacer(Modifier.height(14.dp))
+            paneB(Modifier.fillMaxWidth().weight(1f))
+        }
+    } else {
+        Row(Modifier.fillMaxSize().skyBackground().padding(horizontal = 56.dp, vertical = 32.dp), horizontalArrangement = Arrangement.spacedBy(48.dp)) {
+            paneA(Modifier.width(520.dp))
+            paneB(Modifier.weight(1f))
         }
     }
 }

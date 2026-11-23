@@ -54,11 +54,11 @@ fun ProfilePickerScreen(vm: TunerViewModel) {
         runCatching { current.requestFocus() }
     }
     Column(
-        Modifier.fillMaxSize().skyBackground().padding(48.dp),
+        Modifier.fillMaxSize().skyBackground().padding(screenPadding(48.dp, 48.dp)),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        Text("Who's watching?", fontSize = 40.sp, fontWeight = FontWeight.Bold, color = TunerColors.TextPrimary)
+        Text("Who's watching?", fontSize = if (narrowScreen()) 30.sp else 40.sp, fontWeight = FontWeight.Bold, color = TunerColors.TextPrimary)
         Spacer(Modifier.height(36.dp))
         LazyRow(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
             items(vm.profiles.size, key = { vm.profiles[it].id }) { i ->
@@ -128,7 +128,7 @@ fun ProfileEditScreen(vm: TunerViewModel) {
         )
     }
 
-    Column(Modifier.fillMaxSize().skyBackground().padding(horizontal = 64.dp, vertical = 24.dp)) {
+    Column(Modifier.fillMaxSize().skyBackground().padding(screenPadding(64.dp, 24.dp))) {
         // Title with Save / Cancel always in view, however long the page gets.
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(if (existing == null) "New profile" else "Edit profile", fontSize = 30.sp, fontWeight = FontWeight.Bold, color = TunerColors.TextPrimary)

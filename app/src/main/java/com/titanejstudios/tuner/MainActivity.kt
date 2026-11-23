@@ -10,6 +10,21 @@ import androidx.activity.viewModels
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.material3.Text
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.titanejstudios.tuner.ui.TunerColors
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -151,43 +166,66 @@ private fun TunerApp(vm: TunerViewModel) {
         val vpnIntent = vm.vpn.permissionIntent
         LaunchedEffect(vpnIntent) { if (vpnIntent != null) runCatching { vpnAsk.launch(vpnIntent) } }
 
-        when (vm.screen) {
-            Screen.Home -> HomeScreen(vm)
-            Screen.Channels -> ChannelsScreen(vm)
-            Screen.Guide -> GuideScreen(vm)
-            Screen.Player -> PlayerScreen(vm)
-            Screen.Search -> SearchScreen(vm)
-            Screen.Movies -> MoviesScreen(vm)
-            Screen.Series -> SeriesScreen(vm)
-            Screen.SeriesDetail -> SeriesDetailScreen(vm)
-            Screen.Settings -> SettingsScreen(vm)
-            Screen.SourceEdit -> SourceEditScreen(vm)
-            Screen.Manage -> ManageScreen(vm)
-            Screen.ProfilePicker -> ProfilePickerScreen(vm)
-            Screen.ProfileEdit -> ProfileEditScreen(vm)
-            Screen.PhoneSetup -> PhoneSetupScreen(vm)
-            Screen.EpgMap -> EpgMapScreen(vm)
-            Screen.Recordings -> RecordingsScreen(vm)
-            Screen.MultiView -> MultiViewScreen(vm)
-            Screen.Sports -> SportsScreen(vm)
-            Screen.Apps -> AppsScreen(vm)
-            Screen.Log -> LogScreen(vm)
-            Screen.WhatsOn -> WhatsOnScreen(vm)
-            Screen.Stats -> StatsScreen(vm)
-            Screen.ShareTv -> ShareTvScreen(vm)
-            Screen.Catchup -> CatchupScreen(vm)
-            Screen.Categories -> CategoriesScreen(vm)
-            Screen.Plex -> PlexScreen(vm)
-            Screen.Football -> FootballScreen(vm)
-            Screen.Update -> UpdateScreen(vm)
-            Screen.SelfTest -> SelfTestScreen(vm)
-            Screen.PlexLibrary -> com.titanejstudios.tuner.ui.PlexLibraryScreen(vm)
-            Screen.PlexShow -> com.titanejstudios.tuner.ui.PlexShowScreen(vm)
-            Screen.HomeRows -> com.titanejstudios.tuner.ui.HomeRowsScreen(vm)
-            Screen.Languages -> com.titanejstudios.tuner.ui.LanguagesScreen(vm)
-            Screen.Recommendations -> com.titanejstudios.tuner.ui.RecommendationsScreen(vm)
-            Screen.Vpn -> com.titanejstudios.tuner.ui.VpnScreen(vm)
+        // Phones: upright for browsing, sideways and full screen for watching.
+        val phone = vm.isPhone
+        val watching = vm.screen == Screen.Player || vm.screen == Screen.MultiView
+        LaunchedEffect(phone, watching) {
+            val a = activity ?: return@LaunchedEffect
+            if (!phone) return@LaunchedEffect
+            a.requestedOrientation = if (watching) android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            else android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+            val bars = androidx.core.view.WindowCompat.getInsetsController(a.window, a.window.decorView)
+            if (watching) {
+                bars.systemBarsBehavior = androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                bars.hide(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+            } else bars.show(androidx.core.view.WindowInsetsCompat.Type.systemBars())
         }
+
+        Column(Modifier.fillMaxSize().then(if (phone && !watching) Modifier.background(TunerColors.BackgroundBottom).safeDrawingPadding() else Modifier)) {
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            when (vm.screen) {
+                Screen.Home -> HomeScreen(vm)
+                Screen.Channels -> ChannelsScreen(vm)
+                Screen.Guide -> GuideScreen(vm)
+                Screen.Player -> PlayerScreen(vm)
+                Screen.Search -> SearchScreen(vm)
+                Screen.Movies -> MoviesScreen(vm)
+                Screen.Series -> SeriesScreen(vm)
+                Screen.SeriesDetail -> SeriesDetailScreen(vm)
+                Screen.Settings -> SettingsScreen(vm)
+                Screen.SourceEdit -> SourceEditScreen(vm)
+                Screen.Manage -> ManageScreen(vm)
+                Screen.ProfilePicker -> ProfilePickerScreen(vm)
+                Screen.ProfileEdit -> ProfileEditScreen(vm)
+                Screen.PhoneSetup -> PhoneSetupScreen(vm)
+                Screen.EpgMap -> EpgMapScreen(vm)
+                Screen.Recordings -> RecordingsScreen(vm)
+                Screen.MultiView -> MultiViewScreen(vm)
+                Screen.Sports -> SportsScreen(vm)
+                Screen.Apps -> AppsScreen(vm)
+                Screen.Log -> LogScreen(vm)
+                Screen.WhatsOn -> WhatsOnScreen(vm)
+                Screen.Stats -> StatsScreen(vm)
+                Screen.ShareTv -> ShareTvScreen(vm)
+                Screen.Catchup -> CatchupScreen(vm)
+                Screen.Categories -> CategoriesScreen(vm)
+                Screen.Plex -> PlexScreen(vm)
+                Screen.Football -> FootballScreen(vm)
+                Screen.Update -> UpdateScreen(vm)
+                Screen.SelfTest -> SelfTestScreen(vm)
+                Screen.PlexLibrary -> com.titanejstudios.tuner.ui.PlexLibraryScreen(vm)
+                Screen.PlexShow -> com.titanejstudios.tuner.ui.PlexShowScreen(vm)
+                Screen.HomeRows -> com.titanejstudios.tuner.ui.HomeRowsScreen(vm)
+                Screen.Languages -> com.titanejstudios.tuner.ui.LanguagesScreen(vm)
+                Screen.Recommendations -> com.titanejstudios.tuner.ui.RecommendationsScreen(vm)
+                Screen.Vpn -> com.titanejstudios.tuner.ui.VpnScreen(vm)
+            }
+        }
+        if (phone && !watching && vm.screen in PhoneTabs) PhoneBottomBar(vm)
+        }
+
+        // First time on something that isn't a TV: "Is this a TV, or a phone?"
+        if (vm.askDevice) DeviceChoice(vm)
 
         if (!vm.inPip) {
             vm.dueReminder?.let { r ->
@@ -218,6 +256,81 @@ private fun TunerApp(vm: TunerViewModel) {
                 com.titanejstudios.tuner.ui.StartUpScreen(vm.status)
             }
             if (vm.saverOn) com.titanejstudios.tuner.ui.ArtScreensaver(vm)
+        }
+    }
+}
+
+
+/** Screens that show the phone's bottom menu bar. */
+private val PhoneTabs = setOf(
+    Screen.Home, Screen.Channels, Screen.Guide, Screen.Movies, Screen.Series, Screen.PlexLibrary, Screen.Search,
+    Screen.Settings, Screen.Sports, Screen.WhatsOn, Screen.Recordings, Screen.Catchup, Screen.Apps,
+)
+
+/** Phones: Home, TV Guide, Films & TV, Search and More along the bottom. */
+@Composable
+private fun PhoneBottomBar(vm: TunerViewModel) {
+    val films = when {
+        vm.hasVod -> Screen.Movies
+        vm.plexLinked -> Screen.PlexLibrary
+        else -> Screen.Catchup
+    }
+    val items = listOf(
+        Triple("🏠", "Home", Screen.Home),
+        Triple("📺", "TV Guide", Screen.Channels),
+        Triple("🎬", if (films == Screen.Catchup) "Catch-up" else "Films & TV", films),
+        Triple("🔍", "Search", Screen.Search),
+        Triple("☰", "More", Screen.Settings),
+    )
+    androidx.compose.foundation.layout.Row(
+        Modifier.fillMaxWidth().height(64.dp).background(TunerColors.Panel),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        items.forEach { (icon, label, target) ->
+            val on = vm.screen == target || (target == Screen.Movies && vm.screen == Screen.Series) || (target == Screen.Channels && vm.screen == Screen.Guide)
+            androidx.compose.foundation.layout.Column(
+                Modifier.weight(1f).fillMaxSize().clickable {
+                    when (target) {
+                        Screen.Home -> vm.goHome()
+                        Screen.PlexLibrary -> vm.openPlexLibrary()
+                        else -> if (vm.screen != target) vm.navigate(target)
+                    }
+                },
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center,
+            ) {
+                Text(icon, fontSize = 20.sp)
+                Text(label, color = if (on) TunerColors.Accent else TunerColors.TextSecondary, fontSize = 11.sp, fontWeight = if (on) FontWeight.Bold else FontWeight.Normal)
+            }
+        }
+    }
+}
+
+/** Asked once, the first time Tuner opens on something that isn't a TV. */
+@Composable
+private fun DeviceChoice(vm: TunerViewModel) {
+    Box(Modifier.fillMaxSize().background(TunerColors.Background).safeDrawingPadding().padding(28.dp), contentAlignment = Alignment.Center) {
+        androidx.compose.foundation.layout.Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(18.dp),
+        ) {
+            Text("Welcome to Tuner", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.ExtraBold)
+            Text("What are you watching on?", color = TunerColors.TextSecondary, fontSize = 17.sp)
+            listOf(
+                Triple("📱", "A phone or tablet", "phone"),
+                Triple("📺", "A TV (with a remote)", "tv"),
+            ).forEach { (icon, label, mode) ->
+                androidx.compose.foundation.layout.Row(
+                    Modifier.fillMaxWidth().height(78.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(18.dp))
+                        .background(TunerColors.Panel).clickable { vm.chooseDevice(mode) }.padding(horizontal = 22.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(icon, fontSize = 30.sp)
+                    androidx.compose.foundation.layout.Spacer(Modifier.width(16.dp))
+                    Text(label, color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
+            Text("You can change this later in Settings", color = TunerColors.TextSecondary, fontSize = 13.sp)
         }
     }
 }

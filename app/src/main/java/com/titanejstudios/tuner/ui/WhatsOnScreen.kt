@@ -1,6 +1,8 @@
 package com.titanejstudios.tuner.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -61,7 +63,7 @@ fun WhatsOnScreen(vm: TunerViewModel) {
     val slotIndex = vm.whatsOnSlot.coerceIn(0, slots.lastIndex)
     val channels = remember(results) { results.orEmpty().map { it.channel } }
 
-    Column(Modifier.fillMaxSize().skyBackground().padding(horizontal = 44.dp, vertical = 22.dp)) {
+    Column(Modifier.fillMaxSize().skyBackground().padding(horizontal = if (narrowScreen()) 12.dp else 44.dp, vertical = if (narrowScreen()) 10.dp else 22.dp)) {
         TopNav(vm, Screen.WhatsOn)
         Spacer(Modifier.height(6.dp))
         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(vertical = 6.dp)) {
@@ -155,7 +157,7 @@ fun WhatsOnScreen(vm: TunerViewModel) {
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                 )
-                                if (onNow) ProgressBar(progressOf(p, vm.now), Modifier.padding(top = 5.dp).width(220.dp), color = if (focused) Color.White else TunerColors.Accent)
+                                if (onNow) ProgressBar(progressOf(p, vm.now), Modifier.padding(top = 5.dp).width(if (narrowScreen()) 120.dp else 220.dp), color = if (focused) Color.White else TunerColors.Accent)
                             }
                             if (vm.hasReminder(pick.channel, p)) Text("🔔", fontSize = 18.sp)
                             if (vm.recordingFor(pick.channel, p) != null) Text("  ●", color = TunerColors.NowLine, fontSize = 18.sp)
@@ -194,58 +196,91 @@ fun StatsScreen(vm: TunerViewModel) {
         delay(80)
         runCatching { first.requestFocus() }
     }
-    Column(Modifier.fillMaxSize().skyBackground().padding(horizontal = 64.dp, vertical = 32.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Watch time", fontSize = 32.sp, fontWeight = FontWeight.Bold, color = TunerColors.TextPrimary)
-            Spacer(Modifier.width(16.dp))
-            Text((if (profile.kids) "🧸 " else "👤 ") + profile.name, color = TunerColors.TextSecondary, fontSize = 18.sp)
-            Spacer(Modifier.weight(1f))
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(vm.profiles.size, key = { vm.profiles[it].id }) { i ->
-                    val p = vm.profiles[i]
-                    PillButton(p.name, { vm.openStats(p) }, if (i == 0) Modifier.focusRequester(first) else Modifier, selected = p.id == profile.id, compact = true)
-                }
+    val narrow = narrowScreen()
+    val profilePills: @Composable () -> Unit = {
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(vm.profiles.size, key = { vm.profiles[it].id }) { i ->
+                val p = vm.profiles[i]
+                PillButton(p.name, { vm.openStats(p) }, if (i == 0) Modifier.focusRequester(first) else Modifier, selected = p.id == profile.id, compact = true)
             }
         }
-        Text("Time spent watching in Tuner on this TV over the last 7 days.", color = TunerColors.TextSecondary, fontSize = 15.sp)
+    }
+    Column(
+        Modifier.fillMaxSize().skyBackground()
+            .then(if (narrow) Modifier.verticalScroll(rememberScrollState()) else Modifier)
+            .padding(screenPadding(64.dp, 32.dp))
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Watch time", fontSize = if (narrow) 26.sp else 32.sp, fontWeight = FontWeight.Bold, color = TunerColors.TextPrimary)
+            Spacer(Modifier.width(16.dp))
+            Text((if (profile.kids) "🧸 " else "👤 ") + profile.name, color = TunerColors.TextSecondary, fontSize = 18.sp)
+            if (!narrow) {
+                Spacer(Modifier.weight(1f))
+                profilePills()
+            }
+        }
+        if (narrow && vm.profiles.size > 1) {
+            Spacer(Modifier.height(8.dp))
+            profilePills()
+        }
+        Text(
+            if (vm.isPhone) "Time spent watching in Tuner on this phone over the last 7 days."
+            else "Time spent watching in Tuner on this TV over the last 7 days.",
+            color = TunerColors.TextSecondary, fontSize = 15.sp,
+        )
         Spacer(Modifier.height(16.dp))
         if (s == null) {
             CenterMessage("⟳")
             return@Column
         }
-        Row(Modifier.fillMaxSize()) {
-            Column(Modifier.weight(1f).fillMaxHeight()) {
-                Text(WatchStats.hoursText(s.totalSeconds), color = Color.White, fontSize = 44.sp, fontWeight = FontWeight.Bold)
-                val prev = s.previousWeekSeconds
-                Text(
-                    when {
-                        prev == 0L -> "this week"
-                        s.totalSeconds >= prev -> "this week · up ${WatchStats.hoursText(s.totalSeconds - prev)} on the week before"
-                        else -> "this week · down ${WatchStats.hoursText(prev - s.totalSeconds)} on the week before"
-                    },
-                    color = TunerColors.TextSecondary,
-                    fontSize = 16.sp,
-                )
-                Spacer(Modifier.height(20.dp))
-                val max = (s.days.maxOfOrNull { it.second } ?: 0L).coerceAtLeast(1L)
-                Row(Modifier.height(220.dp), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                    s.days.forEach { (label, secs) ->
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(WatchStats.hoursText(secs), color = TunerColors.TextSecondary, fontSize = 12.sp)
-                            Box(
-                                Modifier.padding(vertical = 4.dp).width(44.dp).height((170f * secs / max).coerceAtLeast(3f).dp)
-                                    .clip(RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp)).background(TunerColors.Accent)
-                            )
-                            Text(label, color = Color.White, fontSize = 14.sp)
-                        }
+        val week: @Composable () -> Unit = {
+            Text(WatchStats.hoursText(s.totalSeconds), color = Color.White, fontSize = if (narrow) 36.sp else 44.sp, fontWeight = FontWeight.Bold)
+            val prev = s.previousWeekSeconds
+            Text(
+                when {
+                    prev == 0L -> "this week"
+                    s.totalSeconds >= prev -> "this week · up ${WatchStats.hoursText(s.totalSeconds - prev)} on the week before"
+                    else -> "this week · down ${WatchStats.hoursText(prev - s.totalSeconds)} on the week before"
+                },
+                color = TunerColors.TextSecondary,
+                fontSize = 16.sp,
+            )
+            Spacer(Modifier.height(20.dp))
+            val max = (s.days.maxOfOrNull { it.second } ?: 0L).coerceAtLeast(1L)
+            val barHeight = if (narrow) 120f else 170f
+            Row(
+                Modifier.height(if (narrow) 170.dp else 220.dp).then(if (narrow) Modifier.fillMaxWidth() else Modifier),
+                verticalAlignment = Alignment.Bottom,
+                horizontalArrangement = if (narrow) Arrangement.SpaceBetween else Arrangement.spacedBy(14.dp),
+            ) {
+                s.days.forEach { (label, secs) ->
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(WatchStats.hoursText(secs), color = TunerColors.TextSecondary, fontSize = if (narrow) 10.sp else 12.sp, maxLines = 1)
+                        Box(
+                            Modifier.padding(vertical = 4.dp).width(if (narrow) 30.dp else 44.dp).height((barHeight * secs / max).coerceAtLeast(3f).dp)
+                                .clip(RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp)).background(TunerColors.Accent)
+                        )
+                        Text(label, color = Color.White, fontSize = if (narrow) 12.sp else 14.sp)
                     }
                 }
             }
-            Spacer(Modifier.width(32.dp))
-            Column(Modifier.width(330.dp)) {
-                StatList("Top channels", s.channels)
-                Spacer(Modifier.height(18.dp))
-                StatList("Kinds of programme", s.genres)
+        }
+        if (narrow) {
+            week()
+            Spacer(Modifier.height(24.dp))
+            StatList("Top channels", s.channels)
+            Spacer(Modifier.height(18.dp))
+            StatList("Kinds of programme", s.genres)
+            Spacer(Modifier.height(24.dp))
+        } else {
+            Row(Modifier.fillMaxSize()) {
+                Column(Modifier.weight(1f).fillMaxHeight()) { week() }
+                Spacer(Modifier.width(32.dp))
+                Column(Modifier.width(330.dp)) {
+                    StatList("Top channels", s.channels)
+                    Spacer(Modifier.height(18.dp))
+                    StatList("Kinds of programme", s.genres)
+                }
             }
         }
     }

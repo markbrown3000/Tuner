@@ -34,6 +34,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
@@ -291,6 +292,80 @@ fun PlayerScreen(vm: TunerViewModel) {
         return true
     }
 
+    // Phones: tap for controls, swipe up/down in the middle to change channel, on the left for
+    // brightness and on the right for volume; double-tap a side to jump 10 seconds.
+    var controls by remember { mutableStateOf(false) }
+    var controlsToken by remember { mutableIntStateOf(0) }
+    var gestureLabel by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(controls, controlsToken) {
+        if (controls) {
+            delay(4_500)
+            if (!playback.isPaused) controls = false
+        }
+    }
+    LaunchedEffect(gestureLabel) {
+        if (gestureLabel != null) {
+            delay(900)
+            gestureLabel = null
+        }
+    }
+    val activity = context as? android.app.Activity
+    val audioManager = remember { context.getSystemService(android.media.AudioManager::class.java) }
+    val phoneGestures = if (!vm.isPhone) Modifier else Modifier
+        .pointerInput(isLive) {
+            androidx.compose.foundation.gestures.detectTapGestures(
+                onTap = {
+                    controls = !controls
+                    controlsToken++
+                    if (controls) pokeInfo()
+                },
+                onDoubleTap = { o ->
+                    val back = o.x < size.width / 2f
+                    seek(if (back) -10_000L else 10_000L, true)
+                    gestureLabel = if (back) "⏪ 10 s" else "10 s ⏩"
+                },
+            )
+        }
+        .pointerInput(isLive) {
+            var startX = 0f
+            var total = 0f
+            var volStart = 0
+            var brightStart = 0.5f
+            androidx.compose.foundation.gestures.detectVerticalDragGestures(
+                onDragStart = { o ->
+                    startX = o.x
+                    total = 0f
+                    volStart = audioManager?.getStreamVolume(android.media.AudioManager.STREAM_MUSIC) ?: 0
+                    brightStart = activity?.window?.attributes?.screenBrightness?.takeIf { it >= 0f } ?: 0.5f
+                },
+                onDragEnd = {
+                    val third = size.width / 3f
+                    if (startX in third..(2 * third) && isLive && kotlin.math.abs(total) > 120f) {
+                        // Swipe up = next channel, down = previous.
+                        vm.zap(if (total < 0) 1 else -1)
+                    }
+                },
+                onVerticalDrag = { _, dy ->
+                    total += dy
+                    val third = size.width / 3f
+                    val frac = -total / size.height
+                    when {
+                        startX < third -> activity?.window?.let { w ->
+                            val b = (brightStart + frac).coerceIn(0.02f, 1f)
+                            w.attributes = w.attributes.apply { screenBrightness = b }
+                            gestureLabel = "☀ ${(b * 100).toInt()}%"
+                        }
+                        startX > 2 * third -> audioManager?.let { am ->
+                            val max = am.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC)
+                            val v = (volStart + (frac * max * 1.5f).toInt()).coerceIn(0, max)
+                            am.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, v, 0)
+                            gestureLabel = "🔊 ${v * 100 / maxOf(max, 1)}%"
+                        }
+                    }
+                },
+            )
+        }
+
     Box(
         Modifier
             .fillMaxSize()
@@ -298,8 +373,31 @@ fun PlayerScreen(vm: TunerViewModel) {
             .focusRequester(rootFocus)
             .onKeyEvent { handleKey(it) }
             .focusable()
+            .then(phoneGestures)
     ) {
         VideoSurface(playback.player, Modifier.fillMaxSize(), resizeMode = vm.pictureMode, keepLastFrame = isLive)
+
+        if (vm.isPhone && !vm.inPip) {
+            gestureLabel?.let {
+                Text(
+                    it, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold,
+                    modifier = Modifier.align(Alignment.Center).clip(RoundedCornerShape(12.dp)).background(Color(0xAA000000)).padding(horizontal = 18.dp, vertical = 10.dp),
+                )
+            }
+            if (controls && overlay == Overlay.None) {
+                PhoneControls(
+                    vm = vm,
+                    isLive = isLive,
+                    position = position,
+                    duration = duration,
+                    onChannels = { overlay = Overlay.Channels; controls = false },
+                    onMenu = { overlay = Overlay.Options; controls = false },
+                    onSeek = { playback.seekTo(it); controlsToken++ },
+                    onPoke = { controlsToken++ },
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+        }
 
         if (!vm.inPip) {
             // Top-right: number entry and reconnect status
@@ -1095,6 +1193,69 @@ private fun FavouritesStrip(vm: TunerViewModel, current: Channel?, modifier: Mod
                     badge = if (c.id == current?.id) "WATCHING" else null,
                     modifier = if (i == startIndex) Modifier.focusRequester(focus) else Modifier,
                 )
+            }
+        }
+    }
+}
+
+
+/** Phones: on-screen controls over the video (tap the video to show or hide them). */
+@Composable
+private fun PhoneControls(
+    vm: TunerViewModel,
+    isLive: Boolean,
+    position: Long,
+    duration: Long,
+    onChannels: () -> Unit,
+    onMenu: () -> Unit,
+    onSeek: (Long) -> Unit,
+    onPoke: () -> Unit,
+    modifier: Modifier,
+) {
+    val playback = vm.playback
+    val title = when (val m = vm.mode) {
+        is PlayMode.Live -> m.channel.name
+        is PlayMode.CatchupPlay -> m.programme.title
+        is PlayMode.Vod -> m.title
+        is PlayMode.RecordingPlay -> m.recording.title
+        null -> ""
+    }
+    @Composable
+    fun RoundButton(label: String, size: Int = 52, onClick: () -> Unit) {
+        Box(
+            Modifier.size(size.dp).clip(RoundedCornerShape(50)).background(Color(0x66000000))
+                .tvClickable({ onClick(); onPoke() }),
+            contentAlignment = Alignment.Center,
+        ) { Text(label, color = Color.White, fontSize = (size * 0.4f).sp) }
+    }
+    Box(modifier.background(Color(0x55000000))) {
+        // Top: back, title, channels and the menu.
+        Row(Modifier.align(Alignment.TopStart).fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            RoundButton("←", 44) { vm.back() }
+            Spacer(Modifier.width(12.dp))
+            Text(title, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            if (isLive) {
+                RoundButton("☰", 44, onChannels)
+                Spacer(Modifier.width(10.dp))
+            }
+            RoundButton("⋮", 44, onMenu)
+        }
+        // Middle: previous / play-pause / next (or 10 seconds back and forward).
+        Row(Modifier.align(Alignment.Center), horizontalArrangement = Arrangement.spacedBy(36.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (isLive) RoundButton("⏮") { vm.zap(-1) } else RoundButton("⏪") { playback.seekBy(-10_000L) }
+            RoundButton(if (playback.isPaused) "▶" else "⏸", 72) { playback.togglePause() }
+            if (isLive) RoundButton("⏭") { vm.zap(1) } else RoundButton("⏩") { playback.seekBy(10_000L) }
+        }
+        // Bottom: a scrub bar for films, episodes, catch-up and recordings.
+        if (!isLive && duration > 0) {
+            Row(Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(horizontal = 20.dp, vertical = 18.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(clock(position), color = Color.White, fontSize = 13.sp)
+                androidx.compose.material3.Slider(
+                    value = (position.toFloat() / duration).coerceIn(0f, 1f),
+                    onValueChange = { onSeek((it * duration).toLong()) },
+                    modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
+                )
+                Text(clock(duration), color = Color.White, fontSize = 13.sp)
             }
         }
     }

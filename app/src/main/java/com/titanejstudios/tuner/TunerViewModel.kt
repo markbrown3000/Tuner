@@ -344,6 +344,22 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     var homeSmart by mutableStateOf(store.homeSmart); private set
     var voiceSearchPending by mutableStateOf(false)
     var tintFromPicture by mutableStateOf(store.tintFromPicture); private set
+    /** "tv" or "phone" (asked when Tuner first opens on something that isn't a TV). */
+    var deviceMode by mutableStateOf(
+        store.deviceMode.ifEmpty {
+            val ui = app.getSystemService(android.app.UiModeManager::class.java)
+            if (ui?.currentModeType == android.content.res.Configuration.UI_MODE_TYPE_TELEVISION) "tv".also { store.deviceMode = it } else ""
+        }
+    ); private set
+    val isPhone: Boolean get() = deviceMode == "phone"
+    /** Still to ask "TV or phone?". */
+    val askDevice: Boolean get() = deviceMode.isEmpty()
+
+    fun chooseDevice(mode: String) {
+        deviceMode = mode
+        store.deviceMode = mode
+    }
+
     /** Tuner's own VPN (WireGuard). */
     val vpn = com.titanejstudios.tuner.features.VpnFeature(app, store, viewModelScope)
     /** What this profile likes, learned from what it watches. */

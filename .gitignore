@@ -10,3 +10,5 @@
 .cxx
 keys.properties
 .kotlin
+/desktop/build
+/desktop/.gradle

@@ -2,6 +2,7 @@ package com.titanejstudios.tuner.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -52,7 +53,7 @@ fun TextInputDialog(
     }
     ModalLayer(onDismiss) {
         Column(
-            Modifier.width(620.dp).background(TunerColors.Panel, RoundedCornerShape(16.dp)).padding(24.dp)
+            Modifier.fillMaxWidth(0.94f).widthIn(max = 620.dp).background(TunerColors.Panel, RoundedCornerShape(16.dp)).padding(24.dp)
         ) {
             Text(title, color = TunerColors.TextPrimary, fontSize = 24.sp, fontWeight = FontWeight.Bold)
             hint?.let {

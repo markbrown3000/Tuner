@@ -38,7 +38,7 @@ fun LanguagesScreen(vm: TunerViewModel) {
         delay(80)
         runCatching { first.requestFocus() }
     }
-    Column(Modifier.fillMaxSize().skyBackground().padding(horizontal = 56.dp, vertical = 32.dp)) {
+    Column(Modifier.fillMaxSize().skyBackground().padding(screenPadding(56.dp, 32.dp))) {
         Text("Languages & countries", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.Bold)
         Text(
             "Found from the tags in your provider's names (\"UK |\", \"[AR]\", \"French\"…). Hidden ones disappear from the TV Guide, Home, Search, Films and Series.",

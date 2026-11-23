@@ -52,7 +52,7 @@ fun PlexScreen(vm: TunerViewModel) {
         delay(80)
         runCatching { first.requestFocus() }
     }
-    Column(Modifier.fillMaxSize().skyBackground().padding(horizontal = 64.dp, vertical = 32.dp)) {
+    Column(Modifier.fillMaxSize().skyBackground().padding(screenPadding(64.dp, 32.dp))) {
         Text("Plex", fontSize = 32.sp, fontWeight = FontWeight.Bold, color = TunerColors.TextPrimary)
         Text("Shows your Plex \"Continue watching\" on Tuner's Home screen, and plays it here.", color = TunerColors.TextSecondary, fontSize = 15.sp)
         Spacer(Modifier.height(22.dp))
@@ -144,7 +144,7 @@ fun FootballScreen(vm: TunerViewModel) {
         delay(80)
         runCatching { first.requestFocus() }
     }
-    Column(Modifier.fillMaxSize().skyBackground().padding(horizontal = 64.dp, vertical = 32.dp)) {
+    Column(Modifier.fillMaxSize().skyBackground().padding(screenPadding(64.dp, 32.dp))) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("⚽ Live scores", fontSize = 32.sp, fontWeight = FontWeight.Bold, color = TunerColors.TextPrimary)
             Spacer(Modifier.weight(1f))
@@ -228,7 +228,7 @@ fun UpdateScreen(vm: TunerViewModel) {
         delay(80)
         runCatching { first.requestFocus() }
     }
-    Column(Modifier.fillMaxSize().skyBackground().padding(horizontal = 64.dp, vertical = 32.dp)) {
+    Column(Modifier.fillMaxSize().skyBackground().padding(screenPadding(64.dp, 32.dp))) {
         Text("Update Tuner", fontSize = 32.sp, fontWeight = FontWeight.Bold, color = TunerColors.TextPrimary)
         Text("This TV has Tuner ${vm.installedVersion}.", color = TunerColors.TextSecondary, fontSize = 16.sp)
         Spacer(Modifier.height(20.dp))

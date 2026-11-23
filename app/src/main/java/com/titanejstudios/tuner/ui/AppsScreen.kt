@@ -42,7 +42,7 @@ fun AppsScreen(vm: TunerViewModel) {
         delay(80)
         runCatching { first.requestFocus() }
     }
-    Column(Modifier.fillMaxSize().skyBackground().padding(horizontal = 44.dp, vertical = 22.dp)) {
+    Column(Modifier.fillMaxSize().skyBackground().padding(screenPadding(44.dp, 22.dp))) {
         TopNav(vm, Screen.Apps)
         Spacer(Modifier.height(8.dp))
         Text("Apps", color = Color.White, fontSize = 32.sp, fontWeight = FontWeight.Bold)
@@ -94,7 +94,7 @@ fun LogScreen(vm: TunerViewModel) {
         runCatching { first.requestFocus() }
     }
     val lines = remember(vm.logText) { vm.logText.lines() }
-    Column(Modifier.fillMaxSize().skyBackground().padding(horizontal = 64.dp, vertical = 32.dp)) {
+    Column(Modifier.fillMaxSize().skyBackground().padding(screenPadding(64.dp, 32.dp))) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Problem log", fontSize = 32.sp, fontWeight = FontWeight.Bold, color = TunerColors.TextPrimary)
             Spacer(Modifier.weight(1f))

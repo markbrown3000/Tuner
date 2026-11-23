@@ -65,7 +65,9 @@ class VpnFeature(private val context: Context, private val store: Store, private
         if (!clean.contains("[Interface]", ignoreCase = true) || !clean.contains("[Peer]", ignoreCase = true)) {
             return "That isn't a WireGuard config file – it should have [Interface] and [Peer] sections"
         }
-        if (!Regex("(?im)^\\s*PrivateKey\\s*=\\s*\\S+").containsMatchIn(clean)) {
+        val key = Regex("(?im)^\\s*PrivateKey\\s*=\\s*(\\S+)").find(clean)?.groupValues?.get(1)
+        // Surfshark puts "<insert_your_private_key_here>" in files downloaded before a key pair was made.
+        if (key == null || key.startsWith("<") || key.length < 40) {
             return "The file has no PrivateKey. On Surfshark, create a key pair first (Manual setup › WireGuard › I don't have a key pair), then download the location again"
         }
         runCatching { parse(clean) }.onFailure { return "Couldn't read the file: ${it.message}" }

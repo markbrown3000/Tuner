@@ -1,6 +1,7 @@
 package com.titanejstudios.tuner.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -122,6 +123,8 @@ private fun <T> CatalogueScreen(
     imageOf: (T) -> String? = { null },
     detailsOf: (T) -> String? = { null },
     tintOn: Boolean = true,
+    /** Phone held upright: categories as chips along the top. */
+    compact: Boolean = false,
 ) {
     var focusedItem by remember { mutableStateOf<T?>(null) }
     var category by remember { mutableStateOf(if (continueEntries.isNotEmpty()) CONTINUE else ALL_ITEMS) }
@@ -152,9 +155,12 @@ private fun <T> CatalogueScreen(
         Modifier
             .fillMaxSize()
             .background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(tint, TunerColors.BackgroundBottom)))
-            .padding(horizontal = 40.dp, vertical = 24.dp)
+            .padding(horizontal = if (compact) 12.dp else 40.dp, vertical = if (compact) 10.dp else 24.dp)
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = if (compact) Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()) else Modifier,
+        ) {
             Text(title, fontSize = 30.sp, fontWeight = FontWeight.Bold, color = TunerColors.TextPrimary)
             Spacer(Modifier.width(16.dp))
             Text(category, fontSize = 18.sp, color = TunerColors.TextSecondary)
@@ -174,8 +180,12 @@ private fun <T> CatalogueScreen(
             PillButton("Reload", onReload, compact = true)
         }
         Spacer(Modifier.height(10.dp))
-        focusedItem?.let { f ->
+        if (!compact) focusedItem?.let { f ->
             FocusStrip(nameOf(f), detailsOf(f), imageOf(f), "OK to watch  ·  hold OK for info, trailer and My list")
+            Spacer(Modifier.height(10.dp))
+        }
+        if (compact && items != null && status == null && items.isNotEmpty()) {
+            CategoryChips(categories, category) { category = it }
             Spacer(Modifier.height(10.dp))
         }
         if (items == null || status != null) {
@@ -184,7 +194,7 @@ private fun <T> CatalogueScreen(
             CenterMessage("Nothing here – your provider may not include $title.")
         } else {
             Row(Modifier.weight(1f)) {
-                LazyColumn(Modifier.width(260.dp).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                if (!compact) LazyColumn(Modifier.width(260.dp).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     items(categories, key = { it }) { c ->
                         val selected = c == category
                         FocusSurface(
@@ -207,10 +217,10 @@ private fun <T> CatalogueScreen(
                         }
                     }
                 }
-                Spacer(Modifier.width(20.dp))
+                if (!compact) Spacer(Modifier.width(20.dp))
                 if (category == CONTINUE) {
                     LazyVerticalGrid(
-                        columns = GridCells.Adaptive(124.dp),
+                        columns = GridCells.Adaptive(if (compact) 104.dp else 124.dp),
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                         modifier = Modifier.weight(1f),
@@ -227,7 +237,7 @@ private fun <T> CatalogueScreen(
                     }
                 } else {
                     LazyVerticalGrid(
-                        columns = GridCells.Adaptive(124.dp),
+                        columns = GridCells.Adaptive(if (compact) 104.dp else 124.dp),
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                         modifier = Modifier.weight(1f),
@@ -281,6 +291,7 @@ fun MoviesScreen(vm: TunerViewModel) {
         updating = vm.vodUpdating,
         onPlex = if (vm.plexLinked) ({ vm.openPlexLibrary() }) else null,
         tintOn = vm.tintFromPicture,
+        compact = compactLayout(vm),
     )
     menuFor?.let { m ->
         MenuDialog(
@@ -343,6 +354,7 @@ fun SeriesScreen(vm: TunerViewModel) {
         updating = vm.vodUpdating,
         onPlex = if (vm.plexLinked) ({ vm.openPlexLibrary() }) else null,
         tintOn = vm.tintFromPicture,
+        compact = compactLayout(vm),
     )
     menuFor?.let { s ->
         MenuDialog(
@@ -391,13 +403,8 @@ fun SeriesDetailScreen(vm: TunerViewModel) {
         } else runCatching { firstFocus.requestFocus() }
     }
 
-    Row(
-        Modifier
-            .fillMaxSize()
-            .skyBackground()
-            .padding(horizontal = 40.dp, vertical = 28.dp)
-    ) {
-        Column(Modifier.width(300.dp)) {
+val paneA: @Composable (Modifier) -> Unit = { pane ->
+        Column(pane) {
             Box(Modifier.fillMaxWidth().aspectRatio(2f / 3f).clip(RoundedCornerShape(10.dp)).background(TunerColors.Panel)) {
                 if (s.cover != null) AsyncImage(model = s.cover, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
             }
@@ -411,8 +418,9 @@ fun SeriesDetailScreen(vm: TunerViewModel) {
                 PillButton("ℹ Info", { vm.openFilmInfo(s.name, isSeries = true) }, compact = true)
             }
         }
-        Spacer(Modifier.width(32.dp))
-        Column(Modifier.weight(1f)) {
+    }
+    val paneB: @Composable (Modifier) -> Unit = { pane ->
+        Column(pane) {
             if (eps == null) {
                 CenterMessage("Loading episodes…")
                 return@Column
@@ -470,6 +478,37 @@ fun SeriesDetailScreen(vm: TunerViewModel) {
                     }
                 }
             }
+        }
+    }
+    // Phones held upright: one above the other instead of side by side.
+    if (narrowScreen()) {
+        Column(Modifier.fillMaxSize().skyBackground().padding(14.dp)) {
+            // A small header instead of the big poster.
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(width = 70.dp, height = 105.dp).clip(RoundedCornerShape(8.dp)).background(TunerColors.Panel)) {
+                    if (s.cover != null) AsyncImage(model = s.cover, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                }
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(s.name, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = TunerColors.TextPrimary, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 6.dp)) {
+                        PillButton(if (vm.inWatchlist(s.id)) "✓ My list" else "＋ My list", { vm.toggleWatchlist(s) }, compact = true)
+                        PillButton("ℹ Info", { vm.openFilmInfo(s.name, isSeries = true) }, compact = true)
+                    }
+                }
+            }
+            Spacer(Modifier.height(14.dp))
+            paneB(Modifier.fillMaxWidth().weight(1f))
+        }
+    } else {
+        Row(
+        Modifier
+            .fillMaxSize()
+            .skyBackground()
+            .padding(horizontal = 40.dp, vertical = 28.dp)
+    ) {
+            paneA(Modifier.width(300.dp))
+            paneB(Modifier.weight(1f))
         }
     }
 

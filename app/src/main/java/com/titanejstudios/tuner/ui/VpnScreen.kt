@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -38,8 +39,8 @@ fun VpnScreen(vm: TunerViewModel) {
         delay(80)
         runCatching { first.requestFocus() }
     }
-    Row(Modifier.fillMaxSize().skyBackground().padding(horizontal = 56.dp, vertical = 32.dp), horizontalArrangement = Arrangement.spacedBy(44.dp)) {
-        Column(Modifier.widthIn(max = 560.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    val paneA: @Composable (Modifier) -> Unit = { pane ->
+        Column(pane, verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("VPN", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.Bold)
             Text(
                 if (v.connected) "🔒 " + (v.status ?: "Connected") else (v.status ?: if (v.enabled) "On – not connected" else "Off"),
@@ -70,7 +71,9 @@ fun VpnScreen(vm: TunerViewModel) {
                 onClick = { vm.navigate(Screen.PhoneSetup) },
             )
         }
-        Column(Modifier.weight(1f)) {
+    }
+    val paneB: @Composable (Modifier) -> Unit = { pane ->
+        Column(pane) {
             Spacer(Modifier.height(48.dp))
             Text("Servers", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
             Text("OK to use one · hold OK to remove it", color = TunerColors.TextSecondary, fontSize = 13.sp)
@@ -100,6 +103,19 @@ fun VpnScreen(vm: TunerViewModel) {
                     }
                 }
             }
+        }
+    }
+    // Phones held upright: one above the other instead of side by side.
+    if (narrowScreen()) {
+        Column(Modifier.fillMaxSize().skyBackground().padding(14.dp)) {
+            paneA(Modifier.fillMaxWidth())
+            Spacer(Modifier.height(14.dp))
+            paneB(Modifier.fillMaxWidth().weight(1f))
+        }
+    } else {
+        Row(Modifier.fillMaxSize().skyBackground().padding(horizontal = 56.dp, vertical = 32.dp), horizontalArrangement = Arrangement.spacedBy(44.dp)) {
+            paneA(Modifier.widthIn(max = 560.dp))
+            paneB(Modifier.weight(1f))
         }
     }
     removeAsk?.let { name ->

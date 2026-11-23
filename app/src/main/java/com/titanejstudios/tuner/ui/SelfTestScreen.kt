@@ -39,7 +39,7 @@ fun SelfTestScreen(vm: TunerViewModel) {
     val fails = results.count { it.state == SelfTest.State.Fail }
     val warns = results.count { it.state == SelfTest.State.Warn }
 
-    Column(Modifier.fillMaxSize().skyBackground().padding(horizontal = 64.dp, vertical = 32.dp)) {
+    Column(Modifier.fillMaxSize().skyBackground().padding(screenPadding(64.dp, 32.dp))) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Check everything", fontSize = 32.sp, fontWeight = FontWeight.Bold, color = TunerColors.TextPrimary)
             Spacer(Modifier.width(18.dp))

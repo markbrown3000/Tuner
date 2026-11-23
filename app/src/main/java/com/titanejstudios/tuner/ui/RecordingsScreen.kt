@@ -76,7 +76,7 @@ fun RecordingsScreen(vm: TunerViewModel) {
     val done = list.filter { it.status == RecStatus.DONE || it.status == RecStatus.FAILED }.sortedByDescending { it.start }
     val storage = remember(tick / 15) { vm.storageOptions().firstOrNull { it.path == vm.recordingDir } }
 
-    Column(Modifier.fillMaxSize().skyBackground().padding(horizontal = 64.dp, vertical = 32.dp)) {
+    Column(Modifier.fillMaxSize().skyBackground().padding(horizontal = if (narrowScreen()) 12.dp else 64.dp, vertical = if (narrowScreen()) 10.dp else 32.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Recordings", fontSize = 32.sp, fontWeight = FontWeight.Bold, color = TunerColors.TextPrimary)
             Spacer(Modifier.width(18.dp))

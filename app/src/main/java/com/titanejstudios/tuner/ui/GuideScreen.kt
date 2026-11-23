@@ -49,8 +49,9 @@ import com.titanejstudios.tuner.data.Programme
 import kotlinx.coroutines.delay
 
 private const val HALF_HOUR = 30 * 60_000L
-private const val WINDOW = 2 * 3600_000L
-private val CHANNEL_COL = 230.dp
+// The grid's width in time and the channel column. Phones held upright show an hour and just the logos.
+private var WINDOW = 2 * 3600_000L
+private var CHANNEL_COL = 230.dp
 
 /** A slice of the timeline in one row: a programme, or a gap with no guide data. */
 private data class Segment(val start: Long, val end: Long, val programme: Programme?)
@@ -81,6 +82,9 @@ private data class PendingFocus(val channelId: String, val toLast: Boolean)
 
 @Composable
 fun GuideScreen(vm: TunerViewModel) {
+    val narrow = narrowScreen()
+    WINDOW = if (narrow) 3600_000L else 2 * 3600_000L
+    CHANNEL_COL = if (narrow) 64.dp else 230.dp
     val group = vm.selectedGroup
     val list = remember(group, vm.channels, vm.favourites, vm.recents, vm.unlocked, vm.lockedGroups) {
         vm.channelsFor(group)
@@ -135,12 +139,24 @@ fun GuideScreen(vm: TunerViewModel) {
         Modifier
             .fillMaxSize()
             .skyBackground()
-            .padding(horizontal = 32.dp, vertical = 20.dp)
+            .padding(horizontal = if (narrow) 6.dp else 32.dp, vertical = if (narrow) 8.dp else 20.dp)
     ) {
-        GuideHeader(vm, focused, group, groupButton = restorer.mod("groups"), onGroups = {
-            restorer.key = "groups"
-            showGroups = true
-        })
+        if (narrow) {
+            // Phones: categories as chips, and buttons to move through time (there's no ◀ ▶ on a phone).
+            CategoryChips(vm.groupNames, group) { vm.selectedGroup = it }
+            Spacer(Modifier.height(6.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                PillButton("◀ Earlier", { windowStart = (windowStart - HALF_HOUR * 2).coerceIn(minStart, maxStart) }, compact = true)
+                PillButton("Now", { windowStart = startOfNow }, compact = true)
+                PillButton("Later ▶", { windowStart = (windowStart + HALF_HOUR * 2).coerceIn(minStart, maxStart) }, compact = true)
+                Text(hhmm(windowStart), color = TunerColors.TextSecondary, fontSize = 13.sp)
+            }
+        } else {
+            GuideHeader(vm, focused, group, groupButton = restorer.mod("groups"), onGroups = {
+                restorer.key = "groups"
+                showGroups = true
+            })
+        }
         Spacer(Modifier.height(10.dp))
 
         if (list.isEmpty()) {
@@ -379,19 +395,24 @@ private fun GuideRow(
                 .padding(end = 3.dp)
                 .clip(RoundedCornerShape(6.dp))
                 .background(TunerColors.Panel)
-                .padding(horizontal = 10.dp),
+                .padding(horizontal = if (CHANNEL_COL < 100.dp) 4.dp else 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("$number", color = TunerColors.TextSecondary, fontSize = 14.sp, modifier = Modifier.width(36.dp))
-            ChannelLogo(channel.logo, channel.name, Modifier.size(width = 54.dp, height = 36.dp))
-            Spacer(Modifier.width(10.dp))
-            Text(
-                channel.name,
-                color = TunerColors.TextPrimary,
-                fontSize = 15.sp,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
+            if (CHANNEL_COL < 100.dp) {
+                // Phones: just the logo.
+                ChannelLogo(channel.logo, channel.name, Modifier.size(width = 44.dp, height = 32.dp))
+            } else {
+                Text("$number", color = TunerColors.TextSecondary, fontSize = 14.sp, modifier = Modifier.width(36.dp))
+                ChannelLogo(channel.logo, channel.name, Modifier.size(width = 54.dp, height = 36.dp))
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    channel.name,
+                    color = TunerColors.TextPrimary,
+                    fontSize = 15.sp,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
 
         // Programme cells
