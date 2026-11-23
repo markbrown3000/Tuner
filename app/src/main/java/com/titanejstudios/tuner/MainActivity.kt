@@ -165,6 +165,8 @@ private fun TunerApp(vm: TunerViewModel) {
             Screen.Football -> FootballScreen(vm)
             Screen.Update -> UpdateScreen(vm)
             Screen.SelfTest -> SelfTestScreen(vm)
+            Screen.PlexLibrary -> com.titanejstudios.tuner.ui.PlexLibraryScreen(vm)
+            Screen.PlexShow -> com.titanejstudios.tuner.ui.PlexShowScreen(vm)
         }
 
         if (!vm.inPip) {

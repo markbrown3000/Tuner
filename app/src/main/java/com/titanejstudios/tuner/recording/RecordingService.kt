@@ -224,9 +224,20 @@ class RecordingAlarmReceiver : BroadcastReceiver() {
 
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action == Intent.ACTION_BOOT_COMPLETED) {
+        if (intent.action == Intent.ACTION_BOOT_COMPLETED || intent.action == "android.intent.action.QUICKBOOT_POWERON") {
             runCatching { RecordingScheduler.rescheduleAll(context) }
             runCatching { com.titanejstudios.tuner.integrations.ReminderAlarms.rescheduleAll(context) }
+            // Settings › When the TV turns on, open Tuner. Android only lets an app open itself from
+            // the background with "Display over other apps" allowed.
+            runCatching {
+                if (com.titanejstudios.tuner.data.Store(context).openOnBoot &&
+                    (android.os.Build.VERSION.SDK_INT < 23 || android.provider.Settings.canDrawOverlays(context))
+                ) {
+                    context.packageManager.getLaunchIntentForPackage(context.packageName)
+                        ?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        ?.let { context.startActivity(it) }
+                }
+            }.onFailure { com.titanejstudios.tuner.data.AppLog.warn("Couldn't open Tuner at start-up", it) }
         }
     }
 }

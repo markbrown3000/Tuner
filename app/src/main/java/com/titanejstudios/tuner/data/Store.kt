@@ -619,6 +619,11 @@ class Store(context: Context) {
         get() = prefs.getLong("nas_backup_at", 0L)
         set(value) = prefs.edit().putLong("nas_backup_at", value).apply()
 
+    /** Open Tuner by itself when the TV starts up. */
+    var openOnBoot: Boolean
+        get() = prefs.getBoolean("open_on_boot", false)
+        set(value) = prefs.edit().putBoolean("open_on_boot", value).apply()
+
     /** Show one entry for HD/SD copies of the same channel. */
     var mergeVersions: Boolean
         get() = prefs.getBoolean("merge_versions", true)

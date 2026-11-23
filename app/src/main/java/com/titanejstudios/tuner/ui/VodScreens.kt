@@ -52,7 +52,7 @@ private const val ALL_ITEMS = "All"
 
 /** Poster tile used for films and series. */
 @Composable
-private fun PosterCard(
+internal fun PosterCard(
     title: String,
     image: String?,
     caption: String?,
@@ -115,6 +115,8 @@ private fun <T> CatalogueScreen(
     myList: List<T> = emptyList(),
     /** True while a saved list is being refreshed in the background. */
     updating: Boolean = false,
+    /** "Plex ›" button, when Plex is linked. */
+    onPlex: (() -> Unit)? = null,
 ) {
     var category by remember { mutableStateOf(if (continueEntries.isNotEmpty()) CONTINUE else ALL_ITEMS) }
     val categories = remember(items, continueEntries.isNotEmpty(), myList.isNotEmpty()) {
@@ -156,6 +158,10 @@ private fun <T> CatalogueScreen(
                 color = TunerColors.TextSecondary,
             )
             Spacer(Modifier.weight(1f))
+            if (onPlex != null) {
+                PillButton("Plex ›", onPlex, compact = true)
+                Spacer(Modifier.width(8.dp))
+            }
             PillButton(switchLabel, onSwitch, compact = true)
             Spacer(Modifier.width(8.dp))
             PillButton("Reload", onReload, compact = true)
@@ -257,6 +263,7 @@ fun MoviesScreen(vm: TunerViewModel) {
         },
         myList = remember(vm.watchlist) { vm.watchlist.filter { !it.isSeries }.mapNotNull { it.toVod() } },
         updating = vm.vodUpdating,
+        onPlex = if (vm.plexLinked) ({ vm.openPlexLibrary() }) else null,
     )
     menuFor?.let { m ->
         MenuDialog(
@@ -314,6 +321,7 @@ fun SeriesScreen(vm: TunerViewModel) {
         },
         myList = remember(vm.watchlist) { vm.watchlist.filter { it.isSeries }.mapNotNull { it.toSeries() } },
         updating = vm.vodUpdating,
+        onPlex = if (vm.plexLinked) ({ vm.openPlexLibrary() }) else null,
     )
     menuFor?.let { s ->
         MenuDialog(

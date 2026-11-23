@@ -118,6 +118,116 @@ class Plex(private val clientId: String) {
         return out.sortedByDescending { it.first }.map { it.second }
     }
 
+    // ---------------- Library browsing ----------------
+
+    /** One Plex library ("Films", "TV Programmes"…) on one server. */
+    class Section(val key: String, val title: String, val type: String, val server: Server) {
+        val id: String get() = server.machineId + "/" + key
+        val isShows: Boolean get() = type == "show"
+    }
+
+    /** A film, a show or an episode in a library. */
+    class Entry(
+        val ratingKey: String,
+        val title: String,
+        val year: String?,
+        /** Poster for films and shows, a still for episodes. */
+        val image: String?,
+        val type: String,
+        val playUrl: String?,
+        val viewOffsetMs: Long,
+        val durationMs: Long,
+        val watched: Boolean,
+        val summary: String?,
+        val rating: String?,
+        val season: Int,
+        val episode: Int,
+        /** Shows: how many episodes, and how many you've watched. */
+        val leafCount: Int,
+        val viewedLeafCount: Int,
+        val server: Server,
+    ) {
+        val isShow: Boolean get() = type == "show"
+
+        /** For the player (which plays Plex.Item). */
+        fun toItem(showTitle: String? = null): Item = Item(
+            ratingKey,
+            if (type == "episode" && showTitle != null) showTitle else title,
+            if (type == "episode") "S$season E$episode  $title" else year,
+            image, playUrl, viewOffsetMs, durationMs, server,
+        )
+    }
+
+    /** Film and TV libraries on every server (music and photos are left out). */
+    fun sections(servers: List<Server>): List<Section> {
+        val out = ArrayList<Section>()
+        for (s in servers) {
+            try {
+                val root = JSONObject(read(open("${s.uri}/library/sections", token = s.token)))
+                val dirs = root.optJSONObject("MediaContainer")?.optJSONArray("Directory") ?: continue
+                for (i in 0 until dirs.length()) {
+                    val d = dirs.getJSONObject(i)
+                    val type = d.optString("type")
+                    if (type != "movie" && type != "show") continue
+                    out += Section(d.optString("key"), d.optString("title"), type, s)
+                }
+            } catch (e: Exception) {
+                AppLog.warn("Plex: couldn't list the libraries on ${s.name}", e)
+            }
+        }
+        return out
+    }
+
+    /** Everything in a library, in Plex's own A–Z order. */
+    fun sectionItems(section: Section): List<Entry> {
+        val s = section.server
+        val root = JSONObject(read(open("${s.uri}/library/sections/${section.key}/all", token = s.token, timeoutMs = 30_000)))
+        return entries(root, s, poster = true)
+    }
+
+    /** Every episode of a show, season by season. */
+    fun episodes(show: Entry): List<Entry> {
+        val s = show.server
+        val root = JSONObject(read(open("${s.uri}/library/metadata/${show.ratingKey}/allLeaves", token = s.token, timeoutMs = 20_000)))
+        return entries(root, s, poster = false).sortedWith(compareBy({ it.season }, { it.episode }))
+    }
+
+    private fun entries(root: JSONObject, s: Server, poster: Boolean): List<Entry> {
+        val md = root.optJSONObject("MediaContainer")?.optJSONArray("Metadata") ?: return emptyList()
+        val out = ArrayList<Entry>(md.length())
+        for (i in 0 until md.length()) {
+            val m = md.getJSONObject(i)
+            val thumb = m.optString("thumb").ifBlank { m.optString("parentThumb") }.ifBlank { m.optString("grandparentThumb") }
+            val (w, h) = if (poster) 300 to 450 else 480 to 270
+            val image = thumb.takeIf { it.isNotBlank() }?.let {
+                "${s.uri}/photo/:/transcode?width=$w&height=$h&minSize=1&upscale=1&url=" +
+                    URLEncoder.encode(it, "UTF-8") + "&X-Plex-Token=" + s.token
+            }
+            val part = m.optJSONArray("Media")?.optJSONObject(0)?.optJSONArray("Part")?.optJSONObject(0)?.optString("key")
+            val playUrl = part?.takeIf { it.isNotBlank() }?.let { "${s.uri}$it?X-Plex-Token=${s.token}" }
+            val rating = m.optDouble("audienceRating", m.optDouble("rating", 0.0)).takeIf { it > 0.0 }
+            out += Entry(
+                ratingKey = m.optString("ratingKey"),
+                title = m.optString("title"),
+                year = m.optString("year").takeIf { it.isNotBlank() && it != "0" },
+                image = image,
+                type = m.optString("type"),
+                playUrl = playUrl,
+                viewOffsetMs = m.optLong("viewOffset"),
+                durationMs = m.optLong("duration"),
+                watched = m.optInt("viewCount") > 0,
+                summary = m.optString("summary").takeIf { it.isNotBlank() },
+                rating = rating?.let { String.format(java.util.Locale.UK, "%.1f", it) },
+                season = m.optInt("parentIndex"),
+                episode = m.optInt("index"),
+                leafCount = m.optInt("leafCount"),
+                viewedLeafCount = m.optInt("viewedLeafCount"),
+                server = s,
+            )
+        }
+        return out
+    }
+
     /** Tells Plex where you are, so Continue watching stays right in the Plex app too. */
     fun timeline(item: Item, state: String, positionMs: Long, durationMs: Long) {
         val url = "${item.server.uri}/:/timeline?ratingKey=${item.ratingKey}" +

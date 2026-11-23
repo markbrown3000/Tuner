@@ -27,6 +27,11 @@ A TiviMate-style live TV app for Google TV / Android TV. Built with Kotlin, Jetp
 - **Nightly backup to the network drive**: each night Tuner saves its settings to `Tuner backups` on your network drive, keeping the last 7 for each TV. Press the setting to back up straight away.
 - **Check everything** now also tests the TMDB and OpenSubtitles keys and the sync drive.
 
+**Added since 5.4.0**
+- **Plex libraries**: Films & TV › **Plex ›** (or **Plex** in the top menu if you have no Xtream films) shows all your Plex film and TV libraries. Shows open to seasons and episodes, and episodes carry on to the next one automatically.
+- **Open Tuner when the TV turns on** (Settings, near the top). Android only allows this with "Display over other apps" allowed for Tuner. If your TV hides that setting, run this once from a computer: `adb shell appops set com.titanejstudios.tuner SYSTEM_ALERT_WINDOW allow`. It works after a full restart; Google TV doesn't tell apps when it simply wakes from standby.
+- HD/SD copies of a channel shown once, catch-up found on any copy, scrolling programme descriptions, update pop-up.
+
 ## What was new in 5.3
 **Making it solid**
 - **Check everything** (Settings › Help): tries each part of Tuner on this TV and shows ✓ / ! / ✗ with the reason. It covers your playlist login and expiry date, the guide, a test stream, recording storage and timers, night mode, frame-rate matching, the Live tab, screensaver, phone remote, Home Assistant, network drive, Plex, football scores and updates. Take a photo of anything red and send it over.

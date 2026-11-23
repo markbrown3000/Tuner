@@ -99,6 +99,68 @@ class PlexFeature(private val store: Store, private val scope: CoroutineScope) {
         if (linked) refresh(force = true)
     }
 
+    // ---------------- Library browsing ----------------
+
+    var sections by mutableStateOf<List<Plex.Section>>(emptyList()); private set
+    /** Section id → its films or shows (loaded when you open it, then kept). */
+    var sectionItems by mutableStateOf<Map<String, List<Plex.Entry>>>(emptyMap()); private set
+    var libraryStatus by mutableStateOf<String?>(null); private set
+    var show by mutableStateOf<Plex.Entry?>(null); private set
+    var showEpisodes by mutableStateOf<List<Plex.Entry>?>(null); private set
+    private var libraryJob: Job? = null
+
+    /** Finds the film and TV libraries on your servers. */
+    fun loadSections(force: Boolean = false) {
+        val token = store.plexToken ?: return
+        if (sections.isNotEmpty() && !force) return
+        libraryStatus = "Looking for your Plex libraries…"
+        scope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    if (servers.isEmpty() || force) servers = client().servers(token)
+                    client().sections(servers)
+                }
+            }
+            result.onSuccess { list ->
+                sections = list
+                if (force) sectionItems = emptyMap()
+                libraryStatus = if (list.isEmpty()) {
+                    if (servers.isEmpty()) "No Plex server answered on this network" else "No film or TV libraries found"
+                } else null
+            }.onFailure { libraryStatus = "Couldn't reach Plex: ${it.message}" }
+        }
+    }
+
+    /** Loads one library's contents (once; [force] reloads). */
+    fun loadSection(section: Plex.Section, force: Boolean = false) {
+        if (sectionItems.containsKey(section.id) && !force) return
+        libraryJob?.cancel()
+        libraryStatus = "Loading ${section.title}…"
+        libraryJob = scope.launch {
+            val result = withContext(Dispatchers.IO) { runCatching { client().sectionItems(section) } }
+            result.onSuccess { list ->
+                sectionItems = sectionItems + (section.id to list)
+                libraryStatus = null
+            }.onFailure {
+                AppLog.warn("Plex: couldn't load ${section.title}", it)
+                libraryStatus = "Couldn't load ${section.title}: ${it.message}"
+            }
+        }
+    }
+
+    /** Opens a show: loads all its episodes. */
+    fun openShow(entry: Plex.Entry) {
+        show = entry
+        showEpisodes = null
+        scope.launch {
+            val result = withContext(Dispatchers.IO) { runCatching { client().episodes(entry) } }
+            showEpisodes = result.getOrElse {
+                AppLog.warn("Plex: couldn't load episodes of ${entry.title}", it)
+                emptyList()
+            }
+        }
+    }
+
     /** Tells Plex where you got to (so its own apps carry on from there). */
     fun reportProgress(item: Plex.Item, stopped: Boolean, positionMs: Long, durationMs: Long) {
         scope.launch(Dispatchers.IO) {

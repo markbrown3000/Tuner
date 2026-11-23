@@ -146,6 +146,16 @@ fun SettingsScreen(vm: TunerViewModel) {
                 )
             }
 
+            item {
+                SettingRow(
+                    "Open Tuner when the TV turns on",
+                    subtitle = if (vm.openOnBoot && !vm.canOpenOnBoot) "Needs \"Display over other apps\" allowed – press to set it"
+                    else "After the TV fully restarts (not when it wakes from standby)",
+                    detail = if (vm.openOnBoot) "On" else "Off",
+                    onClick = { vm.toggleOpenOnBoot() },
+                )
+            }
+
             item { SectionTitle("Playback") }
             item {
                 SettingRow(

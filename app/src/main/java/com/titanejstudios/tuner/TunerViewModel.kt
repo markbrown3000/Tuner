@@ -98,7 +98,7 @@ import java.util.Locale
 enum class Screen {
     Home, Channels, Guide, Player, Search, Movies, Series, SeriesDetail, Settings, SourceEdit, Manage,
     ProfilePicker, ProfileEdit, PhoneSetup, EpgMap, Recordings, MultiView, Sports, Apps, Log,
-    WhatsOn, Stats, ShareTv, Catchup, Categories, Plex, Football, Update, SelfTest,
+    WhatsOn, Stats, ShareTv, Catchup, Categories, Plex, Football, Update, SelfTest, PlexLibrary, PlexShow,
 }
 
 const val FAVOURITES = "★ Favourites"
@@ -2048,6 +2048,12 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
                 if (episodeQueue.isNotEmpty()) {
                     showNotice("Playing next episode")
                     startNextEpisode(m)
+                } else if (m.contentId.startsWith("plex:") && plexEpisodeQueue.isNotEmpty()) {
+                    val next = plexEpisodeQueue.first()
+                    val rest = plexEpisodeQueue.drop(1)
+                    showNotice("Playing next episode")
+                    playPlexEntry(next, fromStart = true)
+                    plexEpisodeQueue = rest
                 } else if (screen == Screen.Player) back()
             }
             is PlayMode.CatchupPlay -> showNotice("End of programme – press BACK, or choose Live from the menu")
@@ -2690,12 +2696,41 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         if (mode is PlayMode.Vod) saveResume(syncHome = false)
         plexPlaying = item
         episodeQueue = emptyList()
+        plexEpisodeQueue = emptyList()
         mode = PlayMode.Vod("plex:" + item.ratingKey, item.title, item.subtitle, item.image, url, null)
         val meta = MediaMetadata.Builder().setTitle(item.title).setArtist(item.subtitle)
         playback.play(url, live = false, startPositionMs = if (fromStart) 0L else item.viewOffsetMs, metadata = meta.build())
         sendHa("playing", mapOf("kind" to "plex", "title" to item.title, "subtitle" to item.subtitle))
         navigate(Screen.Player)
     }
+
+    /** Films & TV › Plex: browse your Plex libraries. */
+    fun openPlexLibrary() {
+        if (!plexLinked) {
+            linkPlex()
+            return
+        }
+        navigate(Screen.PlexLibrary)
+        plexFeature.loadSections()
+    }
+
+    /** Plays a Plex film or episode. Episodes queue up the rest of the show after them. */
+    fun playPlexEntry(entry: com.titanejstudios.tuner.integrations.Plex.Entry, fromStart: Boolean = false) {
+        val show = plexFeature.show
+        val item = entry.toItem(if (entry.type == "episode") show?.title else null)
+        playPlex(item, fromStart)
+        if (entry.type == "episode") {
+            plexEpisodeQueue = plexFeature.showEpisodes.orEmpty().dropWhile { it.ratingKey != entry.ratingKey }.drop(1)
+        }
+    }
+
+    fun openPlexShow(entry: com.titanejstudios.tuner.integrations.Plex.Entry) {
+        plexFeature.openShow(entry)
+        navigate(Screen.PlexShow)
+    }
+
+    /** The rest of a Plex show to play after the current episode. */
+    private var plexEpisodeQueue: List<com.titanejstudios.tuner.integrations.Plex.Entry> = emptyList()
 
     fun openPlexApp() {
         val plexApp = tvApps.orEmpty().firstOrNull { it.packageName == "com.plexapp.android" }
@@ -3673,4 +3708,36 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     }
 
     fun updateLater() = updates.later()
+
+    // ---------------- Open on start-up ----------------
+
+    var openOnBoot by mutableStateOf(store.openOnBoot); private set
+
+    val canOpenOnBoot: Boolean
+        get() = android.os.Build.VERSION.SDK_INT < 23 || android.provider.Settings.canDrawOverlays(app)
+
+    /** Settings › Open Tuner when the TV turns on. Asks for "Display over other apps" if needed. */
+    fun toggleOpenOnBoot() {
+        openOnBoot = !openOnBoot
+        store.openOnBoot = openOnBoot
+        if (!openOnBoot) {
+            showNotice("Tuner won't open by itself any more")
+            return
+        }
+        if (canOpenOnBoot) {
+            showNotice("Tuner will open when the TV starts up")
+            return
+        }
+        // Android only lets apps open themselves at start-up with this permission.
+        val asked = runCatching {
+            app.startActivity(
+                Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + app.packageName))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+        }.isSuccess
+        showNotice(
+            if (asked) "Turn on \"Allow display over other apps\" for Tuner, then press BACK"
+            else "This TV hides that setting – see the README (Open on start-up) for the one-line fix"
+        )
+    }
 }
