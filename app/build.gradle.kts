@@ -106,6 +106,8 @@ dependencies {
     implementation("com.google.zxing:core:3.5.3")
     // Copying recordings to a network drive (SMB / Windows share / NAS).
     implementation("eu.agno3.jcifs:jcifs-ng:2.1.10")
+    // Built-in VPN (WireGuard – Surfshark, ProtonVPN, Mullvad… config files).
+    implementation("com.wireguard.android:tunnel:1.0.20230706")
 
     // Tests of the pure logic (run with ./gradlew testDebugUnitTest, and on GitHub with every build).
     testImplementation("junit:junit:4.13.2")

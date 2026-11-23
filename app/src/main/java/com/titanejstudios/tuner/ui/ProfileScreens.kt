@@ -97,7 +97,7 @@ fun ProfilePickerScreen(vm: TunerViewModel) {
 
 private val limitChoices = listOf(0, 30, 60, 90, 120, 180)
 
-/** Create or edit a profile, including kids settings. */
+/** Create or edit a profile, including kids settings. Scrolls, with Save always at the top. */
 @Composable
 fun ProfileEditScreen(vm: TunerViewModel) {
     val existing = vm.editingProfile
@@ -113,72 +113,106 @@ fun ProfileEditScreen(vm: TunerViewModel) {
         delay(60)
         runCatching { first.requestFocus() }
     }
-
-    Column(
-        Modifier.fillMaxSize().skyBackground().padding(horizontal = 64.dp, vertical = 32.dp)
-    ) {
-        Text(if (existing == null) "New profile" else "Edit profile", fontSize = 32.sp, fontWeight = FontWeight.Bold, color = TunerColors.TextPrimary)
-        Spacer(Modifier.height(14.dp))
-        OutlinedTextField(
-            value = name,
-            onValueChange = { name = it },
-            label = { Text("Name") },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-            modifier = Modifier.widthIn(max = 600.dp).fillMaxWidth(),
-        )
-        Spacer(Modifier.height(14.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            PillButton("Grown-up", { kids = false }, Modifier.focusRequester(first), selected = !kids)
-            PillButton("🧸 Kids", { kids = true }, selected = kids)
-        }
-        Spacer(Modifier.height(12.dp))
-        // Profile picture: a colour and an icon (or the first letter of the name).
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            ProfileAvatar(Profile("x", name.ifEmpty { "?" }, kids, colour = colour, icon = icon), 52.dp)
-            Spacer(Modifier.width(6.dp))
-            AvatarColours.indices.forEach { c ->
-                FocusSurface(onClick = { colour = c }, shape = CircleShape, selected = colour == c, modifier = Modifier.size(38.dp)) { _ ->
-                    Box(Modifier.fillMaxSize().padding(5.dp).clip(CircleShape).background(AvatarColours[c]))
-                }
-            }
-        }
-        Spacer(Modifier.height(6.dp))
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            items(AvatarIcons.size) { k ->
-                val ic = AvatarIcons[k]
-                PillButton(ic.ifEmpty { "Aa" }, { icon = ic }, selected = icon == ic, compact = true)
-            }
-        }
-        if (kids) {
-            Spacer(Modifier.height(14.dp))
-            Text("Daily TV time", color = TunerColors.TextSecondary, fontSize = 16.sp)
-            Spacer(Modifier.height(6.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                limitChoices.forEach { m ->
-                    PillButton(if (m == 0) "No limit" else "$m min", { limit = m }, selected = limit == m, compact = true)
-                }
-            }
-            Spacer(Modifier.height(10.dp))
-            Text("Bedtime – no TV from this time until 6am (they get a 5-minute warning)", color = TunerColors.TextSecondary, fontSize = 16.sp)
-            Spacer(Modifier.height(6.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                KidsRules.bedtimeChoices.forEach { b ->
-                    PillButton(KidsRules.label(b), { bedtime = b }, selected = bedtime == b, compact = true)
-                }
-            }
-            Spacer(Modifier.height(14.dp))
-            Text(
-                "Groups they can watch (${groups.size} chosen) – everything else is hidden",
-                color = TunerColors.TextSecondary,
-                fontSize = 16.sp,
+    fun save() {
+        vm.saveProfile(
+            Profile(
+                id = existing?.id ?: vm.newProfileId(),
+                name = name.trim().ifEmpty { if (kids) "Kids" else "Profile" },
+                kids = kids,
+                allowedGroups = if (kids) groups else emptySet(),
+                dailyLimitMinutes = if (kids) limit else 0,
+                bedtimeMinutes = if (kids) bedtime else -1,
+                colour = colour,
+                icon = icon,
             )
-            Spacer(Modifier.height(6.dp))
-            LazyColumn(
-                Modifier.weight(1f).widthIn(max = 900.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                items(vm.allGroups, key = { it }) { g ->
+        )
+    }
+
+    Column(Modifier.fillMaxSize().skyBackground().padding(horizontal = 64.dp, vertical = 24.dp)) {
+        // Title with Save / Cancel always in view, however long the page gets.
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(if (existing == null) "New profile" else "Edit profile", fontSize = 30.sp, fontWeight = FontWeight.Bold, color = TunerColors.TextPrimary)
+            Spacer(Modifier.weight(1f))
+            PillButton("✓ Save", { save() }, compact = true)
+            Spacer(Modifier.width(10.dp))
+            PillButton("Cancel", { vm.back() }, compact = true)
+            if (existing != null && existing.id != Store.MAIN_PROFILE) {
+                Spacer(Modifier.width(10.dp))
+                PillButton("Delete profile", {
+                    vm.deleteProfile(existing)
+                    vm.back()
+                }, compact = true)
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        LazyColumn(Modifier.weight(1f).widthIn(max = 1000.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            item {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Name") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    modifier = Modifier.widthIn(max = 600.dp).fillMaxWidth(),
+                )
+            }
+            item {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    PillButton("Grown-up", { kids = false }, Modifier.focusRequester(first), selected = !kids)
+                    PillButton("🧸 Kids", { kids = true }, selected = kids)
+                }
+            }
+            // Profile picture: a colour and an icon (or the first letter of the name).
+            item {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ProfileAvatar(Profile("x", name.ifEmpty { "?" }, kids, colour = colour, icon = icon), 52.dp)
+                    Spacer(Modifier.width(6.dp))
+                    AvatarColours.indices.forEach { c ->
+                        FocusSurface(onClick = { colour = c }, shape = CircleShape, selected = colour == c, modifier = Modifier.size(38.dp)) { _ ->
+                            Box(Modifier.fillMaxSize().padding(5.dp).clip(CircleShape).background(AvatarColours[c]))
+                        }
+                    }
+                }
+            }
+            item {
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    items(AvatarIcons.size) { k ->
+                        val ic = AvatarIcons[k]
+                        PillButton(ic.ifEmpty { "Aa" }, { icon = ic }, selected = icon == ic, compact = true)
+                    }
+                }
+            }
+            if (kids) {
+                item {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("Daily TV time", color = TunerColors.TextSecondary, fontSize = 16.sp)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            limitChoices.forEach { m ->
+                                PillButton(if (m == 0) "No limit" else "$m min", { limit = m }, selected = limit == m, compact = true)
+                            }
+                        }
+                    }
+                }
+                item {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("Bedtime – no TV from this time until 6am (they get a 5-minute warning)", color = TunerColors.TextSecondary, fontSize = 16.sp)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            KidsRules.bedtimeChoices.forEach { b ->
+                                PillButton(KidsRules.label(b), { bedtime = b }, selected = bedtime == b, compact = true)
+                            }
+                        }
+                    }
+                }
+                item {
+                    Text(
+                        "Groups they can watch (${groups.size} chosen) – everything else is hidden" +
+                            if (groups.isEmpty()) ". Pick at least one, otherwise there'll be no channels." else "",
+                        color = if (groups.isEmpty()) TunerColors.Gold else TunerColors.TextSecondary,
+                        fontSize = 16.sp,
+                    )
+                }
+                items(vm.allGroups.size, key = { "g" + vm.allGroups[it] }) { i ->
+                    val g = vm.allGroups[i]
                     val on = g in groups
                     SettingRow(
                         g,
@@ -187,35 +221,13 @@ fun ProfileEditScreen(vm: TunerViewModel) {
                     )
                 }
             }
-        } else {
-            Spacer(Modifier.weight(1f))
-        }
-        Spacer(Modifier.height(12.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            PillButton("Save", {
-                vm.saveProfile(
-                    Profile(
-                        id = existing?.id ?: vm.newProfileId(),
-                        name = name.trim().ifEmpty { if (kids) "Kids" else "Profile" },
-                        kids = kids,
-                        allowedGroups = if (kids) groups else emptySet(),
-                        dailyLimitMinutes = if (kids) limit else 0,
-                        bedtimeMinutes = if (kids) bedtime else -1,
-                        colour = colour,
-                        icon = icon,
-                    )
-                )
-            })
-            PillButton("Cancel", { vm.back() })
-            if (existing != null && existing.id != Store.MAIN_PROFILE) {
-                PillButton("Delete profile", {
-                    vm.deleteProfile(existing)
-                    vm.back()
-                })
+            // And at the bottom too, for after picking groups.
+            item {
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.padding(top = 6.dp, bottom = 20.dp)) {
+                    PillButton("✓ Save", { save() })
+                    PillButton("Cancel", { vm.back() })
+                }
             }
-        }
-        if (kids && groups.isEmpty()) {
-            Text("Tip: pick at least one group, otherwise the kids profile shows no channels.", color = TunerColors.Gold, fontSize = 14.sp, textAlign = TextAlign.Start)
         }
     }
 }

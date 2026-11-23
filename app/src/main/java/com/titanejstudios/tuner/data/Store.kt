@@ -643,6 +643,20 @@ class Store(context: Context) {
         get() = prefs.getStringSet("hidden_languages", emptySet())?.toSet() ?: emptySet()
         set(value) = prefs.edit().putStringSet("hidden_languages", value).apply()
 
+    // ---- Built-in VPN (kept on this TV only: the files hold your VPN key) ----
+    var vpnServers: String?
+        get() = prefs.getString("vpn_servers", null)
+        set(value) = prefs.edit().putString("vpn_servers", value).apply()
+    var vpnActive: String?
+        get() = prefs.getString("vpn_active", null)
+        set(value) = prefs.edit().putString("vpn_active", value).apply()
+    var vpnEnabled: Boolean
+        get() = prefs.getBoolean("vpn_enabled", false)
+        set(value) = prefs.edit().putBoolean("vpn_enabled", value).apply()
+    var vpnKillSwitch: Boolean
+        get() = prefs.getBoolean("vpn_kill_switch", false)
+        set(value) = prefs.edit().putBoolean("vpn_kill_switch", value).apply()
+
     /** What a profile likes (see Taste). */
     fun taste(profileId: String): String? = prefs.getString(profileKey("taste", profileId), null)
     fun setTaste(profileId: String, json: String) = prefs.edit().putString(profileKey("taste", profileId), json).apply()
@@ -699,7 +713,7 @@ class Store(context: Context) {
 
     // ---------------- Backup & restore ----------------
 
-    private val notBackedUp = listOf("preview_channel_id", "watch_next_ids", "last_refresh_", "usage_", "bonus_", "schema", "dead_channels", "health_checked_at", "recordings", "watch_stats", "live_tab_rows", "plex_client_id", "flaky_streams", "db_tidy_at", "new_eps_checked_at", "crash_reported_at", "sport_auto_done", "sync_stamp_", "synced_at", "nas_backup_at", "update_checked_at", "update_dismissed")
+    private val notBackedUp = listOf("preview_channel_id", "watch_next_ids", "last_refresh_", "usage_", "bonus_", "schema", "dead_channels", "health_checked_at", "recordings", "watch_stats", "live_tab_rows", "plex_client_id", "flaky_streams", "db_tidy_at", "new_eps_checked_at", "crash_reported_at", "sport_auto_done", "sync_stamp_", "synced_at", "nas_backup_at", "update_checked_at", "update_dismissed", "vpn_")
 
     /** Every setting as JSON (playlists, profiles, favourites, PIN, reminders, guide fixes…). */
     fun exportBackup(): String {

@@ -104,7 +104,7 @@ import java.util.Locale
 enum class Screen {
     Home, Channels, Guide, Player, Search, Movies, Series, SeriesDetail, Settings, SourceEdit, Manage,
     ProfilePicker, ProfileEdit, PhoneSetup, EpgMap, Recordings, MultiView, Sports, Apps, Log,
-    WhatsOn, Stats, ShareTv, Catchup, Categories, Plex, Football, Update, SelfTest, PlexLibrary, PlexShow, HomeRows, Languages, Recommendations,
+    WhatsOn, Stats, ShareTv, Catchup, Categories, Plex, Football, Update, SelfTest, PlexLibrary, PlexShow, HomeRows, Languages, Recommendations, Vpn,
 }
 
 const val FAVOURITES = "★ Favourites"
@@ -344,6 +344,8 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     var homeSmart by mutableStateOf(store.homeSmart); private set
     var voiceSearchPending by mutableStateOf(false)
     var tintFromPicture by mutableStateOf(store.tintFromPicture); private set
+    /** Tuner's own VPN (WireGuard). */
+    val vpn = com.titanejstudios.tuner.features.VpnFeature(app, store, viewModelScope)
     /** What this profile likes, learned from what it watches. */
     private var taste: Taste = Taste.fromJson(store.taste(store.activeProfileId))
     private val pendingTaste = HashMap<Pair<String, String?>, Long>()
@@ -629,6 +631,8 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         com.titanejstudios.tuner.apps.Updater.onStatus = { msg -> viewModelScope.launch { showNotice(msg) } }
         watchPlaybackForHomeAssistant()
 
+        // The VPN first, so nothing streams before it's up.
+        runCatching { vpn.autoStart() }
         // Start-up: channels first; everything else a few seconds later so the first screen is quick.
         viewModelScope.launch {
             delay(4_000)
@@ -1190,6 +1194,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     }
 
     private fun startLive(channel: Channel) {
+        if (vpnBlocks()) return
         if (zapPreview != null) {
             zapJob?.cancel()
             zapPreview = null
@@ -1314,6 +1319,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         catchupVersion(channel)?.let { Catchup.isAvailable(it, p, now) } == true
 
     fun playCatchup(requested: Channel, p: Programme, list: List<Channel>) {
+        if (vpnBlocks()) return
         val channel = catchupVersion(requested) ?: requested
         if (!isAllowed(channel)) {
             requestUnlock { playCatchup(channel, p, list) }
@@ -1954,6 +1960,16 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         }
     }
 
+    // ---------------- VPN ----------------
+
+    /** Kill switch: with the VPN on but not connected, your provider's streams don't play. */
+    private fun vpnBlocks(): Boolean {
+        if (!vpn.enabled || !vpn.killSwitch || vpn.connected) return false
+        showNotice("🔒 The VPN isn't connected, so streams are paused (kill switch) – Settings › VPN")
+        if (!vpn.connected) vpn.connect()
+        return true
+    }
+
     // ---------------- Trending ----------------
 
     /** This week's trending list from TMDB, matched against your Plex and your provider's films and series (every 6 hours). */
@@ -2387,6 +2403,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     }
 
     private fun startVod(m: PlayMode.Vod, fromStart: Boolean) {
+        if (vpnBlocks()) return
         if (mode is PlayMode.Vod) saveResume(syncHome = false)
         mode = m
         val start = if (fromStart) 0L else resume[m.contentId]?.positionMs ?: 0L
@@ -2688,6 +2705,10 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
                         showNotice("Home Assistant webhook saved")
                     }
                     PhoneSetupServer.Event.Restored -> afterRestore()
+                    is PhoneSetupServer.Event.VpnAdded -> {
+                        val err = vpn.add(event.name, event.text)
+                        showNotice(err ?: "🔒 VPN server added – Settings › VPN")
+                    }
                 }
             }
             phoneBase = runCatching { server.start() }.getOrNull()

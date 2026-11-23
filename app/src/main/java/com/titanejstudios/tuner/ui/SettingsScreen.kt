@@ -148,6 +148,19 @@ fun SettingsScreen(vm: TunerViewModel) {
 
             item {
                 SettingRow(
+                    "VPN",
+                    subtitle = "Tuner's own VPN (Surfshark and other WireGuard providers) – only Tuner's streams use it",
+                    detail = when {
+                        vm.vpn.connected -> "🔒 Connected"
+                        vm.vpn.enabled -> "On – not connected"
+                        else -> "Off"
+                    },
+                    onClick = { vm.navigate(Screen.Vpn) },
+                )
+            }
+
+            item {
+                SettingRow(
                     "Recommendations",
                     subtitle = "What Tuner has learned you like – and a reset if it gets it wrong",
                     detail = if (vm.learnTaste) "Learning" else "Off",

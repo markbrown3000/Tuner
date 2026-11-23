@@ -144,6 +144,13 @@ private fun TunerApp(vm: TunerViewModel) {
             if (vm.frameRateMatch && fullScreen && fps > 0f) FrameRateMatcher.apply(a, fps) else FrameRateMatcher.reset(a)
         }
 
+        // Android's one-time "allow Tuner to set up a VPN" screen.
+        val vpnAsk = androidx.activity.compose.rememberLauncherForActivityResult(
+            androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()
+        ) { r -> vm.vpn.permissionResult(r.resultCode == Activity.RESULT_OK) }
+        val vpnIntent = vm.vpn.permissionIntent
+        LaunchedEffect(vpnIntent) { if (vpnIntent != null) runCatching { vpnAsk.launch(vpnIntent) } }
+
         when (vm.screen) {
             Screen.Home -> HomeScreen(vm)
             Screen.Channels -> ChannelsScreen(vm)
@@ -179,6 +186,7 @@ private fun TunerApp(vm: TunerViewModel) {
             Screen.HomeRows -> com.titanejstudios.tuner.ui.HomeRowsScreen(vm)
             Screen.Languages -> com.titanejstudios.tuner.ui.LanguagesScreen(vm)
             Screen.Recommendations -> com.titanejstudios.tuner.ui.RecommendationsScreen(vm)
+            Screen.Vpn -> com.titanejstudios.tuner.ui.VpnScreen(vm)
         }
 
         if (!vm.inPip) {

@@ -60,6 +60,7 @@ class PhoneSetupServer(
         class SourceAdded(val source: Source) : Event()
         object SettingsChanged : Event()
         object Restored : Event()
+        class VpnAdded(val name: String, val text: String) : Event()
     }
 
     /** One-off code for the setup pages; null while the setup screen isn't open. */
@@ -304,6 +305,14 @@ class PhoneSetupServer(
                 post(Event.SettingsChanged)
                 respond(out, 200, "text/html", page("Saved ✓", "<p>Home Assistant webhook updated.</p>" + back()))
             }
+            "POST /vpn" -> {
+                val text = form["conf"].orEmpty()
+                if (!text.contains("[Interface]", ignoreCase = true)) {
+                    return respond(out, 200, "text/html", page("Not a WireGuard file", "<p>Choose the .conf file you downloaded from your VPN provider (it starts with [Interface]).</p>" + back()))
+                }
+                post(Event.VpnAdded(form["name"].orEmpty(), text))
+                respond(out, 200, "text/html", page("Sent ✓", "<p>The VPN server is on the TV now – turn it on in <b>Settings › VPN</b>.</p>" + back()))
+            }
             "POST /restore" -> {
                 val json = form["json"].orEmpty()
                 try {
@@ -500,6 +509,20 @@ a{color:#7ab0ff}.row{display:flex;gap:8px;align-items:center}.row input{width:au
 <label>Webhook URL (Tuner sends what's playing here)</label>
 <input name="webhook" value="$webhook" placeholder="http://homeassistant.local:8123/api/webhook/tuner">
 <button>Save</button></form>
+
+<h2>VPN (WireGuard)</h2>
+<form class="card" method="post" action="/vpn?t=$t" id="vf">
+<p style="color:#9aa4b2;font-size:14px">Surfshark: log in at surfshark.com › VPN › Manual setup › Desktop or mobile › WireGuard. Create a key pair, then on Locations download a server (e.g. United Kingdom). Choose that file here.</p>
+<label>Name (optional)</label><input name="name" placeholder="UK – London">
+<input type="file" accept=".conf,text/plain" id="vfile">
+<textarea name="conf" id="vconf" rows="4" placeholder="…or paste the file's text here"></textarea>
+<button>Send to the TV</button></form>
+<script>
+document.getElementById('vfile').addEventListener('change',function(e){
+ var f=e.target.files[0]; if(!f) return; var r=new FileReader();
+ r.onload=function(){document.getElementById('vconf').value=r.result}; r.readAsText(f);
+});
+</script>
 
 <h2>Backup</h2>
 <div class="card"><a class="btn" href="/backup.json?t=$t">Download backup</a>

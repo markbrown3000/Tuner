@@ -852,6 +852,9 @@ fun TopNav(vm: TunerViewModel, current: Screen, modifier: Modifier = Modifier) {
             }
             Spacer(Modifier.width(14.dp))
         }
+        if (vm.vpn.connected) {
+            Text("🔒", fontSize = 18.sp, modifier = Modifier.padding(end = 10.dp))
+        }
         Text(hhmm(vm.now), color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Medium, maxLines = 1, softWrap = false)
     }
 }
