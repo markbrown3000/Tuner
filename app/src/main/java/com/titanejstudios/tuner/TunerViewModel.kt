@@ -581,6 +581,8 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
                 if (ticks % 2 == 0 && mode is PlayMode.Vod && playback.isPlaying) saveResume(syncHome = false)
                 if (ticks % 4 == 3) refreshHomeFeed()
                 if (ticks % 4 == 1) keepGuideFresh()
+                // Tuner can stay open for days: look for updates (at most once a day).
+                if (ticks % 240 == 239) updates.autoCheck()
                 // A minute without crashing: start-up crashes no longer count towards safe mode.
                 if (ticks == 4) SafeMode.markStable()
                 trackStats(flush = ticks % 4 == 0)
@@ -595,6 +597,8 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     private fun startExtras() {
         if (extrasStarted) return
         extrasStarted = true
+        // Even in safe mode – a newer version may be the fix.
+        updates.autoCheck()
         runCatching { GuideRefreshWorker.schedule(app) }
         runCatching { RecordingScheduler.rescheduleAll(app) }
         loadApps()
@@ -3628,5 +3632,17 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
 
     private fun channelNumberFor(c: Channel): Int =
         if (c.number > 0) c.number else allowedAll.indexOfFirst { it.id == c.id } + 1
-}
 
+    // ---------------- Update pop-up ----------------
+
+    /** The update to offer now – never over full-screen video. */
+    val updateOffer: com.titanejstudios.tuner.apps.Updater.Release?
+        get() = if (screen == Screen.Player || screen == Screen.MultiView || inPip) null else updates.offered
+
+    fun installUpdateNow() {
+        showNotice("Downloading the update…")
+        updates.installOffered()
+    }
+
+    fun updateLater() = updates.later()
+}

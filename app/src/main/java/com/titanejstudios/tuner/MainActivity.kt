@@ -49,6 +49,7 @@ import com.titanejstudios.tuner.ui.SearchScreen
 import com.titanejstudios.tuner.ui.SelfTestScreen
 import com.titanejstudios.tuner.ui.FilmInfoDialog
 import com.titanejstudios.tuner.ui.StillWatchingDialog
+import com.titanejstudios.tuner.ui.UpdateDialog
 import com.titanejstudios.tuner.ui.SportsScreen
 import com.titanejstudios.tuner.ui.SeriesDetailScreen
 import com.titanejstudios.tuner.ui.SeriesScreen
@@ -174,6 +175,7 @@ private fun TunerApp(vm: TunerViewModel) {
             if (vm.timesUp) TimesUpDialog(vm)
             if (vm.filmInfoOpen) FilmInfoDialog(vm)
             if (vm.stillWatchingAsk) StillWatchingDialog(vm)
+            vm.updateOffer?.let { UpdateDialog(vm, it) }
             vm.pinPrompt?.let { p -> PinDialog(p, onCancel = { vm.cancelPin() }) }
             vm.notice?.let { NoticeToast(it, Modifier.align(Alignment.BottomCenter)) }
         }

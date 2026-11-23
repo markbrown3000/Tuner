@@ -122,3 +122,34 @@ fun FilmInfoDialog(vm: TunerViewModel) {
         }
     }
 }
+
+/** "A new version of Tuner is available" – from the daily check of your GitHub releases. */
+@Composable
+fun UpdateDialog(vm: TunerViewModel, release: com.titanejstudios.tuner.apps.Updater.Release) {
+    val first = remember { FocusRequester() }
+    LaunchedEffect(Unit) {
+        delay(40)
+        runCatching { first.requestFocus() }
+    }
+    ModalLayer(onDismiss = { vm.updateLater() }) {
+        Column(
+            Modifier.width(680.dp).clip(RoundedCornerShape(16.dp)).background(TunerColors.Panel).padding(32.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text("⬆", fontSize = 40.sp, color = Color.White)
+            Text("Tuner ${release.version.trimStart('v', 'V')} is available", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Bold)
+            Text("You have ${vm.installedVersion}", color = TunerColors.TextSecondary, fontSize = 16.sp)
+            release.notes?.let {
+                Spacer(Modifier.height(10.dp))
+                Text(it.take(400), color = Color(0xFFD5DCF2), fontSize = 14.sp, maxLines = 6, overflow = TextOverflow.Ellipsis)
+            }
+            Spacer(Modifier.height(22.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                PillButton("Install now", { vm.installUpdateNow() }, Modifier.focusRequester(first))
+                PillButton("Later", { vm.updateLater() })
+            }
+            Spacer(Modifier.height(8.dp))
+            Text("The TV will ask you to confirm. Your settings and recordings are kept.", color = TunerColors.TextSecondary, fontSize = 13.sp)
+        }
+    }
+}

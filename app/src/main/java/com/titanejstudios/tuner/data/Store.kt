@@ -469,9 +469,17 @@ class Store(context: Context) {
         set(value) = putList("football_teams", value)
 
     /** App updates from a GitHub repo's releases ("owner/repo"). */
+    /** GitHub repo checked for updates ("owner/repo"). Defaults to Tuner's own repo; "" = turned off. */
     var updateRepo: String?
-        get() = prefs.getString("update_repo", null)
-        set(value) = prefs.edit().putString("update_repo", value).apply()
+        get() = prefs.getString("update_repo", null).let { if (it == null) DEFAULT_UPDATE_REPO else it.takeIf { r -> r.isNotBlank() } }
+        set(value) = prefs.edit().putString("update_repo", value ?: "").apply()
+    /** When Tuner last looked for an update by itself, and a version you said "Later" to. */
+    var updateCheckedAt: Long
+        get() = prefs.getLong("update_checked_at", 0L)
+        set(value) = prefs.edit().putLong("update_checked_at", value).apply()
+    var updateDismissed: String?
+        get() = prefs.getString("update_dismissed", null)
+        set(value) = prefs.edit().putString("update_dismissed", value).apply()
 
     // ---- Look & sound (5.1) ----
     var themeAccent: String
@@ -625,7 +633,7 @@ class Store(context: Context) {
 
     // ---------------- Backup & restore ----------------
 
-    private val notBackedUp = listOf("preview_channel_id", "watch_next_ids", "last_refresh_", "usage_", "bonus_", "schema", "dead_channels", "health_checked_at", "recordings", "watch_stats", "live_tab_rows", "plex_client_id", "flaky_streams", "db_tidy_at", "new_eps_checked_at", "crash_reported_at", "sport_auto_done", "sync_stamp_", "synced_at", "nas_backup_at")
+    private val notBackedUp = listOf("preview_channel_id", "watch_next_ids", "last_refresh_", "usage_", "bonus_", "schema", "dead_channels", "health_checked_at", "recordings", "watch_stats", "live_tab_rows", "plex_client_id", "flaky_streams", "db_tidy_at", "new_eps_checked_at", "crash_reported_at", "sport_auto_done", "sync_stamp_", "synced_at", "nas_backup_at", "update_checked_at", "update_dismissed")
 
     /** Every setting as JSON (playlists, profiles, favourites, PIN, reminders, guide fixes…). */
     fun exportBackup(): String {
@@ -698,6 +706,7 @@ class Store(context: Context) {
 
     companion object {
         const val MAIN_PROFILE = "main"
+        const val DEFAULT_UPDATE_REPO = "markbrown3000/Tuner"
         private val RECORDING_LOCK = Any()
     }
 
