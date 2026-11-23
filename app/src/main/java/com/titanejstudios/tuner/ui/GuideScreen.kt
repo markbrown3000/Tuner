@@ -215,6 +215,9 @@ fun GuideScreen(vm: TunerViewModel) {
             if (p != null && p.start <= t && vm.canCatchup(ch, p)) {
                 add(MenuItem(if (p.stop > t) "Watch from the start" else "Watch (catch-up)") { vm.playCatchup(ch, p, list) })
             }
+            if (p != null && p.start <= t) {
+                vm.catchupAppFor(ch)?.let { (provider, _) -> add(MenuItem("▶ Watch on ${provider.name}", p.title) { vm.openInCatchupApp(ch, p.title) }) }
+            }
             if (p != null && p.start > t) {
                 add(MenuItem(if (vm.hasReminder(ch, p)) "Cancel reminder" else "Remind me") { vm.toggleReminder(ch, p) })
             }

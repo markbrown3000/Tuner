@@ -187,11 +187,14 @@ fun SearchScreen(vm: TunerViewModel) {
                     val live = p.start <= now && p.stop > now
                     val catchup = p.stop <= now && vm.canCatchup(ch, p)
                     val reminder = p.start > now && vm.hasReminder(ch, p)
+                    // Finished with no catch-up from your provider: the broadcaster's own app may have it.
+                    val onApp = if (!live && !catchup && p.stop <= now) vm.catchupAppFor(ch)?.first else null
                     val tag = when {
                         live -> "On now"
                         catchup -> "↺ Catch-up"
                         reminder -> "⏰ Reminder set"
                         p.start > now -> "Upcoming"
+                        onApp != null -> "▶ On ${onApp.name}"
                         else -> "Earlier"
                     }
                     FocusSurface(
@@ -200,6 +203,7 @@ fun SearchScreen(vm: TunerViewModel) {
                                 live -> vm.play(ch, all)
                                 catchup -> vm.playCatchup(ch, p, all)
                                 p.start > now -> vm.toggleReminder(ch, p)
+                                onApp != null -> vm.openInCatchupApp(ch, p.title)
                                 else -> vm.showNotice("This has finished and has no catch-up")
                             }
                         },
@@ -244,6 +248,7 @@ fun SearchScreen(vm: TunerViewModel) {
         val items = buildList {
             add(MenuItem("Watch ${ch.name} live") { vm.play(ch, all) })
             if (p.start <= t && vm.canCatchup(ch, p)) add(MenuItem("Watch this programme (catch-up)") { vm.playCatchup(ch, p, all) })
+            if (p.start <= t) vm.catchupAppFor(ch)?.let { (provider, _) -> add(MenuItem("▶ Watch on ${provider.name}") { vm.openInCatchupApp(ch, p.title) }) }
             if (p.start > t) add(MenuItem(if (vm.hasReminder(ch, p)) "Cancel reminder" else "Remind me") { vm.toggleReminder(ch, p) })
             if (p.stop > t && !vm.activeProfile.kids) {
                 val rec = vm.recordingFor(ch, p)

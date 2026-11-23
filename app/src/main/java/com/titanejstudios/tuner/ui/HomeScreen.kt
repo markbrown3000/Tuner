@@ -12,6 +12,8 @@ import androidx.compose.foundation.gestures.BringIntoViewSpec
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -113,8 +115,8 @@ private class HomeCard(
     val hero: HeroInfo,
 )
 
-private val TILE_W = 226.dp
-private val TILE_H = 150.dp
+private val TILE_W = 214.dp
+private val TILE_H = 140.dp
 private val PlexGold = Color(0xFFE5A00D)
 private val LiveRed = Color(0xFFE5213B)
 private val DoneGreen = Color(0xFF2FBF71)
@@ -316,7 +318,10 @@ fun HomeScreen(vm: TunerViewModel) {
     val allChannels = remember(vm.channels, vm.unlocked, vm.lockedGroups) { vm.channelsFor(ALL) }
     val recent = remember(vm.recents, vm.channels, vm.unlocked) { vm.channelsFor(RECENT).take(8) }
     val favourites = remember(vm.favourites, vm.channels, vm.unlocked) { vm.channelsFor(FAVOURITES).take(30) }
-    val apps = remember(vm.tvApps, vm.hiddenApps) { vm.visibleApps() }
+    // iPlayer, ITVX, Channel 4 and My5 first in Your apps.
+    val apps = remember(vm.tvApps, vm.hiddenApps) {
+        vm.visibleApps().sortedBy { a -> if (com.titanejstudios.tuner.data.CatchupApps.all.any { it.label.containsMatchIn(a.label.trim()) || a.packageName in it.packages }) 0 else 1 }
+    }
     var plexMenu by remember { mutableStateOf<com.titanejstudios.tuner.integrations.Plex.Item?>(null) }
 
     // Every row's tiles (minute by minute, as programmes change).
@@ -381,10 +386,16 @@ fun HomeScreen(vm: TunerViewModel) {
         runCatching { firstTile.requestFocus() }
     }
 
-    Box(Modifier.fillMaxSize().skyBackground()) {
+    BoxWithConstraints(Modifier.fillMaxSize().skyBackground()) {
+        // TVs differ in how tall the screen is in Android's units (often 540, sometimes 720), so
+        // the top area takes what's left after the menu, the quick buttons and one full row of tiles.
+        val safeBanner = if (vm.safeMode && !vm.safeModeBannerHidden) 70.dp else 0.dp
+        val heroHeight = (maxHeight - 44.dp - 52.dp - 8.dp - safeBanner - 52.dp - 10.dp - (TILE_H + 46.dp) - 18.dp)
+            .coerceIn(118.dp, 232.dp)
+        val roomy = heroHeight >= 190.dp
         // The highlighted item's wide picture, behind the menu and fading into the background.
         if (h?.image != null && h.wide) {
-            Box(Modifier.align(Alignment.TopEnd).fillMaxWidth(0.68f).height(440.dp)) {
+            Box(Modifier.align(Alignment.TopEnd).fillMaxWidth(0.68f).height(heroHeight + 150.dp)) {
                 AsyncImage(model = h.image, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
                 Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(listOf(TunerColors.Background, TunerColors.Background.copy(alpha = 0.75f), Color.Transparent))))
                 Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0.45f to Color.Transparent, 1f to TunerColors.Background)))
@@ -399,7 +410,7 @@ fun HomeScreen(vm: TunerViewModel) {
             }
 
             // The big area: what's highlighted, plus the live picture if something's playing.
-            Box(Modifier.fillMaxWidth().height(232.dp)) {
+            Box(Modifier.fillMaxWidth().height(heroHeight)) {
                 Column(Modifier.fillMaxWidth(0.56f).fillMaxHeight()) {
                     h?.label?.let {
                         Text(it, color = h.labelColor, fontSize = 13.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp, maxLines = 1)
@@ -407,8 +418,8 @@ fun HomeScreen(vm: TunerViewModel) {
                     }
                     Text(
                         h?.title ?: vm.playing?.name ?: if (vm.status != null || !vm.initialLoadDone) "Getting things ready…" else "Welcome",
-                        color = Color.White, fontSize = 36.sp, fontWeight = FontWeight.ExtraBold,
-                        maxLines = 2, overflow = TextOverflow.Ellipsis, lineHeight = 40.sp,
+                        color = Color.White, fontSize = if (roomy) 36.sp else 30.sp, fontWeight = FontWeight.ExtraBold,
+                        maxLines = if (roomy) 2 else 1, overflow = TextOverflow.Ellipsis, lineHeight = if (roomy) 40.sp else 34.sp,
                     )
                     h?.score?.let {
                         Spacer(Modifier.height(6.dp))
@@ -426,13 +437,15 @@ fun HomeScreen(vm: TunerViewModel) {
                     AutoScrollText(h?.description ?: "", Modifier.weight(1f).fillMaxWidth(), fontSize = 15.sp)
                 }
                 when {
-                    vm.mode != null -> MiniPreview(vm, Modifier.align(Alignment.TopEnd).size(width = 256.dp, height = 144.dp))
+                    vm.mode != null -> MiniPreview(
+                        vm, Modifier.align(Alignment.TopEnd).height(heroHeight.coerceAtMost(144.dp)).aspectRatio(16f / 9f),
+                    )
                     h?.image != null && !h.wide -> AsyncImage(
                         model = h.image, contentDescription = null, contentScale = ContentScale.Fit,
-                        modifier = Modifier.align(Alignment.TopEnd).size(width = 150.dp, height = 225.dp).clip(RoundedCornerShape(10.dp)),
+                        modifier = Modifier.align(Alignment.TopEnd).fillMaxHeight().aspectRatio(2f / 3f).clip(RoundedCornerShape(10.dp)),
                     )
                     h?.image == null && h?.channel != null -> ChannelLogo(
-                        h.channel.logo, h.channel.name, Modifier.align(Alignment.TopEnd).padding(top = 20.dp).size(width = 220.dp, height = 124.dp),
+                        h.channel.logo, h.channel.name, Modifier.align(Alignment.TopEnd).padding(top = 12.dp).size(width = 200.dp, height = 100.dp),
                     )
                 }
             }

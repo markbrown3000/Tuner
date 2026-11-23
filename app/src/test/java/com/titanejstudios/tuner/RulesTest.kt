@@ -169,4 +169,17 @@ class ChannelMergeTest {
         assertEquals("1917" to null, f.parse("1917"))
         assertEquals("Trolls" to null, f.parse("[EN] Trolls HD"))
     }
+
+    @Test
+    fun broadcasterAppsMatchTheirChannels() {
+        val c = com.titanejstudios.tuner.data.CatchupApps
+        assertEquals("BBC iPlayer", c.forChannel("UK: BBC One HD")?.name)
+        assertEquals("BBC iPlayer", c.forChannel("CBeebies")?.name)
+        assertEquals("ITVX", c.forChannel("ITV1 London FHD")?.name)
+        assertEquals("Channel 4", c.forChannel("UK| E4 HD")?.name)
+        assertEquals("Channel 4", c.forChannel("Film4")?.name)
+        assertEquals("My5", c.forChannel("5Star")?.name)
+        assertEquals("My5", c.forChannel("Channel 5 HD")?.name)
+        assertNull(c.forChannel("Sky Sports Main Event"))
+    }
 }

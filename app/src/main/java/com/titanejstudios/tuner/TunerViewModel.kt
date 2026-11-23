@@ -42,6 +42,7 @@ import com.titanejstudios.tuner.data.Repository
 import com.titanejstudios.tuner.data.ResumeEntry
 import com.titanejstudios.tuner.data.SeriesItem
 import com.titanejstudios.tuner.data.FilmName
+import com.titanejstudios.tuner.data.CatchupApps
 import com.titanejstudios.tuner.data.Source
 import com.titanejstudios.tuner.data.Store
 import com.titanejstudios.tuner.data.VodItem
@@ -1685,6 +1686,53 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     private fun openApp(tvApp: TvApp) {
         if (mode is PlayMode.Vod) saveResume(syncHome = true)
         if (!InstalledApps.launch(app, tvApp.packageName)) showNotice("Couldn't open ${tvApp.label}")
+    }
+
+    // ---------------- BBC iPlayer, ITVX, Channel 4, My5 ----------------
+
+    /** The broadcaster's app for this channel, if it's installed on this TV (package name). */
+    fun catchupAppFor(channel: Channel): Pair<CatchupApps.Provider, String>? {
+        val p = CatchupApps.forChannel(channel.name) ?: return null
+        // Asked for every row of a list, so the answer is kept for a minute.
+        val t = System.currentTimeMillis()
+        val cached = catchupAppCache[p.name]
+        val pkg = if (cached != null && t - cached.second < 60_000L) cached.first else {
+            val pm = app.packageManager
+            val found = p.packages.firstOrNull { pm.getLeanbackLaunchIntentForPackage(it) != null || pm.getLaunchIntentForPackage(it) != null }
+                ?: tvApps.orEmpty().firstOrNull { p.label.containsMatchIn(it.label.trim()) }?.packageName
+            catchupAppCache[p.name] = found to t
+            found
+        } ?: return null
+        return p to pkg
+    }
+
+    private val catchupAppCache = HashMap<String, Pair<String?, Long>>()
+
+    /** Opens the broadcaster's app on [title]: its own search when it has one, else just the app. */
+    fun openInCatchupApp(channel: Channel, title: String?) {
+        val (provider, pkg) = catchupAppFor(channel) ?: run {
+            showNotice("The broadcaster's app isn't installed on this TV")
+            return
+        }
+        if (activeProfile.kids && pin != null && !unlocked) {
+            requestPin { openInCatchupApp(channel, title) }
+            return
+        }
+        if (mode is PlayMode.Vod) saveResume(syncHome = true)
+        val clean = title?.replace(Regex("^(live|new)\\s*[:\\-–]\\s*", RegexOption.IGNORE_CASE), "")?.trim()
+        if (!clean.isNullOrBlank()) {
+            val search = android.content.Intent(android.content.Intent.ACTION_SEARCH)
+                .setPackage(pkg)
+                .putExtra(android.app.SearchManager.QUERY, clean)
+                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            if (runCatching { app.startActivity(search) }.isSuccess) {
+                showNotice("Searching ${provider.name} for \"$clean\"")
+                return
+            }
+        }
+        if (InstalledApps.launch(app, pkg)) {
+            if (!clean.isNullOrBlank()) showNotice("In ${provider.name}, search for \"$clean\"")
+        } else showNotice("Couldn't open ${provider.name}")
     }
 
     fun toggleHideApp(tvApp: TvApp) {

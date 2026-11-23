@@ -424,6 +424,10 @@ fun ChannelMenu(
                 vm.navigate(Screen.Guide)
             })
         }
+        vm.catchupAppFor(ch)?.let { (provider, _) ->
+            val earlier = vm.nowNext(ch.id, vm.now).first?.title
+            add(MenuItem("▶ ${provider.name}", "watch earlier programmes there") { vm.openInCatchupApp(ch, earlier) })
+        }
         if (!vm.activeProfile.kids) {
             add(MenuItem("● Record now for an hour") { vm.recordNow(ch, 60) })
             add(MenuItem("Fix TV guide match") { vm.openEpgMapping(ch) })
