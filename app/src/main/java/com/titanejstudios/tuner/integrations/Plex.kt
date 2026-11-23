@@ -168,6 +168,8 @@ class Plex(private val clientId: String) {
         val library: String? = null,
         /** The library's key on its server (for kids' libraries). */
         val sectionKey: String? = null,
+        /** Wide background picture (16:9), for Home's big top area and wide tiles. */
+        val art: String? = null,
     ) {
         val isShow: Boolean get() = type == "show"
 
@@ -330,6 +332,7 @@ class Plex(private val clientId: String) {
                     val copy = JSONObject(m.toString())
                     if (show != null) {
                         if (show.first.isBlank()) continue
+                        if (copy.optString("art").isBlank()) copy.put("art", m.optString("grandparentArt").ifBlank { m.optString("parentArt") })
                         copy.put("ratingKey", show.first).put("title", show.second).put("type", "show")
                             .put("thumb", show.third).put("year", "").put("summary", "")
                             .remove("Media")
@@ -413,6 +416,10 @@ class Plex(private val clientId: String) {
                 server = s,
                 library = m.optString("librarySectionTitle").takeIf { it.isNotBlank() },
                 sectionKey = m.optString("librarySectionID").takeIf { it.isNotBlank() && it != "0" },
+                art = m.optString("art").ifBlank { m.optString("grandparentArt") }.takeIf { it.isNotBlank() }?.let {
+                    "${s.uri}/photo/:/transcode?width=960&height=540&minSize=1&upscale=1&url=" +
+                        URLEncoder.encode(it, "UTF-8") + "&X-Plex-Token=" + s.token
+                },
             )
         }
         return out

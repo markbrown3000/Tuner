@@ -620,6 +620,21 @@ class Store(context: Context) {
         set(value) = prefs.edit().putLong("nas_backup_at", value).apply()
 
     /** Open Tuner by itself when the TV starts up. */
+    /** Home's rows in the order chosen (names of HomeRow); empty = the standard order. */
+    var homeRowOrder: List<String>
+        get() = prefs.getString("home_row_order", "")!!.split(',').filter { it.isNotBlank() }
+        set(value) = prefs.edit().putString("home_row_order", value.joinToString(",")).apply()
+
+    /** Home rows switched off. */
+    var homeRowsHidden: Set<String>
+        get() = prefs.getStringSet("home_rows_hidden", emptySet())?.toSet() ?: emptySet()
+        set(value) = prefs.edit().putStringSet("home_rows_hidden", value).apply()
+
+    /** Home moves sport up when it's on, and films/Plex up in the evening. */
+    var homeSmart: Boolean
+        get() = prefs.getBoolean("home_smart", true)
+        set(value) = prefs.edit().putBoolean("home_smart", value).apply()
+
     /** Plex libraries kids' profiles may see ("serverId/sectionKey"). */
     var plexKidsSections: Set<String>
         get() = prefs.getStringSet("plex_kids_sections", emptySet())?.toSet() ?: emptySet()

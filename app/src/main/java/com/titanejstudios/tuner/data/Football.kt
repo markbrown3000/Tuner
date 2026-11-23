@@ -98,4 +98,31 @@ object Football {
         }
         return best
     }
+
+    private val clubWords = Regex("\\b(fc|afc|cf|sc|ac)\\b|&", RegexOption.IGNORE_CASE)
+    private val nicknames = mapOf(
+        "manchester city" to "Man City", "manchester united" to "Man Utd", "tottenham hotspur" to "Spurs",
+        "wolverhampton wanderers" to "Wolves", "brighton hove albion" to "Brighton", "nottingham forest" to "Forest",
+        "newcastle united" to "Newcastle", "west ham united" to "West Ham", "leeds united" to "Leeds",
+        "sheffield united" to "Sheff Utd", "afc bournemouth" to "Bournemouth", "crystal palace" to "Palace",
+    )
+
+    /** "Newcastle United FC" → "Newcastle"; for scores on tiles. */
+    fun shortName(team: String): String {
+        val plain = clubWords.replace(team, " ").replace(Regex("\\s+"), " ").trim()
+        nicknames[plain.lowercase(Locale.ROOT)]?.let { return it }
+        return if (plain.length <= 12) plain else plain.substringBefore(' ')
+    }
+
+    /** True when a programme title names this team ("Newcastle v Arsenal" names "Newcastle United FC"). */
+    fun inTitle(title: String, team: String): Boolean {
+        val t = key(title)
+        val full = key(clubWords.replace(team, " "))
+        if (full.length >= 3 && t.contains(full)) return true
+        val nick = nicknames[clubWords.replace(team, " ").replace(Regex("\\s+"), " ").trim().lowercase(Locale.ROOT)]
+        if (nick != null && t.contains(key(nick))) return true
+        val first = key(clubWords.replace(team, " ").trim().substringBefore(' '))
+        // "Manchester" alone could be either Manchester club, so only distinctive first words count.
+        return first.length >= 5 && first !in setOf("manchester", "sheffield", "bristol", "west") && t.contains(first)
+    }
 }

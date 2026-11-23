@@ -148,6 +148,15 @@ fun SettingsScreen(vm: TunerViewModel) {
 
             item {
                 SettingRow(
+                    "Home rows",
+                    subtitle = "Show, hide and reorder Home's rows – and whether they change with the time of day",
+                    detail = if (vm.homeRowsHidden.isEmpty()) "All shown" else "${vm.homeRowsHidden.size} hidden",
+                    onClick = { vm.navigate(Screen.HomeRows) },
+                )
+            }
+
+            item {
+                SettingRow(
                     "Open Tuner when the TV turns on",
                     subtitle = if (vm.openOnBoot && !vm.canOpenOnBoot) "Needs \"Display over other apps\" allowed – press to set it"
                     else "After the TV fully restarts (not when it wakes from standby)",

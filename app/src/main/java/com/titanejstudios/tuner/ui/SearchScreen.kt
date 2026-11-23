@@ -75,19 +75,27 @@ fun SearchScreen(vm: TunerViewModel) {
         val voice = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
             r.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()?.let { vm.updateSearch(it) }
         }
+        fun startVoice() {
+            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+                .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                .putExtra(RecognizerIntent.EXTRA_PROMPT, "What would you like to watch?")
+            try {
+                voice.launch(intent)
+            } catch (e: ActivityNotFoundException) {
+                vm.showNotice("This TV has no voice typing – press the microphone button on the remote instead")
+            }
+        }
+        // Home's 🎤 button asked for voice straight away.
+        LaunchedEffect(Unit) {
+            if (vm.voiceSearchPending) {
+                vm.voiceSearchPending = false
+                startVoice()
+            }
+        }
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Search", fontSize = 30.sp, fontWeight = FontWeight.Bold, color = TunerColors.TextPrimary)
             Spacer(Modifier.weight(1f))
-            PillButton("🎤 Say it", {
-                val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
-                    .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                    .putExtra(RecognizerIntent.EXTRA_PROMPT, "What would you like to watch?")
-                try {
-                    voice.launch(intent)
-                } catch (e: ActivityNotFoundException) {
-                    vm.showNotice("This TV has no voice typing – press the microphone button on the remote instead")
-                }
-            }, compact = true)
+            PillButton("🎤 Say it", { startVoice() }, compact = true)
         }
         Spacer(Modifier.height(12.dp))
         OutlinedTextField(

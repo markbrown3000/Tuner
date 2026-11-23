@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -70,51 +71,85 @@ private class HeroInfo(
     val description: String?,
     val channel: Channel?,
     val image: String?,
+    /** A wide (16:9) picture fills the background; a poster is shown whole on the right instead. */
+    val wide: Boolean = true,
+    /** Small coloured line above the title ("NEW ON PLEX · FILM", "● LIVE · YOUR TEAM"). */
+    val label: String? = null,
+    val labelColor: Color = Color(0xFFFFB648),
+    val score: String? = null,
 )
 
-private enum class HomeRow(val title: String) {
-    Recent("Continue watching"),
-    Plex("Continue on Plex"),
+/** Home's rows. The order and which are shown can be changed in Settings › Home rows. */
+enum class HomeRow(val title: String) {
+    Continue("Carry on watching"),
+    Sport("Sport on now"),
     PlexNew("New on Plex"),
     TopPicks("Top picks for you"),
     Favourites("Favourites"),
-    Sport("Sport on now"),
-    Apps("Your apps"),
     Recordings("Recordings"),
-    Resume("Carry on watching"),
     NewEpisodes("New episodes"),
     MyList("My list"),
+    Apps("Your apps"),
     All("All channels"),
 }
 
-/** Sky-style home: menu bar, a big "now" area with the live picture, and rows of tiles. */
-@Composable
-fun HomeScreen(vm: TunerViewModel) {
-    BackHandler(enabled = vm.mode != null && !vm.canGoBack) { vm.stopPlayback() }
-    if (vm.activeProfile.kids) {
-        KidsHome(vm)
-        return
-    }
+/** One tile on Home – live TV, Plex, a film, a recording… all drawn the same way. */
+private class HomeCard(
+    val key: String,
+    val tag: String?,
+    val tagBg: Color,
+    val tagFg: Color,
+    val title: String,
+    val line1: String?,
+    val line2: String?,
+    val image: String?,
+    /** The picture is a tall poster: shown whole at the side, not cropped to fill. */
+    val poster: Boolean,
+    val channel: Channel?,
+    val progress: Float?,
+    val progressColor: Color,
+    val onClick: () -> Unit,
+    val onLongClick: (() -> Unit)?,
+    val hero: HeroInfo,
+)
 
-    val now = vm.now
-    val recent = remember(vm.recents, vm.channels, vm.unlocked) { vm.channelsFor(RECENT).take(15) }
-    val favourites = remember(vm.favourites, vm.channels, vm.unlocked) { vm.channelsFor(FAVOURITES).take(30) }
-    val allChannels = remember(vm.channels, vm.unlocked, vm.lockedGroups) { vm.channelsFor(ALL) }
-    // Worked out in the background by the view model (it looks at every channel's guide).
-    val sportNow = vm.sportNow
-    val topPicks = vm.topPicks
-    val apps = remember(vm.tvApps, vm.hiddenApps) { vm.visibleApps() }
-    val recordings = remember(vm.recordings) {
-        vm.recordings.filter { it.status == RecStatus.DONE || it.status == RecStatus.RECORDING }
-            .sortedByDescending { it.start }.take(15)
-    }
-    val resumeEntries = remember(vm.resume) { vm.resume.values.sortedByDescending { it.updatedAt }.take(15) }
-    val newEpisodes = remember(vm.followedSeries) { vm.newEpisodeSeries.map { it.series to "${it.newEpisodes} new" } }
-    val myList = remember(vm.watchlist) { vm.watchlist.take(30).map { it to (if (it.isSeries) "Series" else "Film") } }
+private val TILE_W = 226.dp
+private val TILE_H = 150.dp
+private val PlexGold = Color(0xFFE5A00D)
+private val LiveRed = Color(0xFFE5213B)
+private val DoneGreen = Color(0xFF2FBF71)
 
-    var hero by remember { mutableStateOf<HeroInfo?>(null) }
-    fun showChannel(c: Channel) {
-        val (cur, next) = vm.nowNext(c.id, System.currentTimeMillis())
+private fun timeLeft(ms: Long): String {
+    val m = (ms / 60_000).coerceAtLeast(1)
+    return if (m >= 60) "${m / 60}h ${m % 60}m left" else "$m min left"
+}
+
+private fun channelCard(vm: TunerViewModel, c: Channel, list: List<Channel>, now: Long, followed: Set<String>): HomeCard {
+    val (cur, next) = vm.nowNext(c.id, now)
+    val score = cur?.let { vm.liveScoreFor(it) }
+    val yourTeam = cur != null && followed.any { com.titanejstudios.tuner.data.SportFollow.mentions(cur.title, it) }
+    val sport = cur != null && com.titanejstudios.tuner.data.Sports.classify(cur) != null
+    val tag = when {
+        score != null -> "LIVE  $score"
+        sport && cur != null && com.titanejstudios.tuner.data.Sports.looksLive(cur) -> "LIVE"
+        cur != null -> "ON NOW"
+        else -> null
+    }
+    return HomeCard(
+        key = "ch" + c.id,
+        tag = tag,
+        tagBg = if (tag?.startsWith("LIVE") == true) LiveRed else Color(0xCC050816),
+        tagFg = if (tag?.startsWith("LIVE") == true) Color.White else TunerColors.NowLine,
+        title = cur?.title ?: c.name,
+        line1 = c.name + (cur?.let { " · until ${hhmm(it.stop)}" } ?: ""),
+        line2 = next?.let { "Next: ${it.title}" },
+        image = cur?.image,
+        poster = false,
+        channel = c,
+        progress = cur?.let { progressOf(it, now) },
+        progressColor = TunerColors.Accent,
+        onClick = { vm.play(c, list) },
+        onLongClick = null,
         hero = HeroInfo(
             title = cur?.title ?: c.name,
             subtitle = buildString {
@@ -125,86 +160,290 @@ fun HomeScreen(vm: TunerViewModel) {
             description = cur?.desc,
             channel = c,
             image = cur?.image,
-        )
-    }
-    fun showPick(p: HomeFeed.Pick) {
-        val pr = p.programme
+            label = when {
+                yourTeam -> "● LIVE · YOUR TEAM"
+                tag?.startsWith("LIVE") == true -> "● LIVE"
+                cur != null -> "ON NOW"
+                else -> null
+            },
+            labelColor = if (tag?.startsWith("LIVE") == true) Color(0xFFFF5A6E) else Color(0xFFFFB648),
+            score = score,
+        ),
+    )
+}
+
+private fun plexItemCard(vm: TunerViewModel, item: com.titanejstudios.tuner.integrations.Plex.Item, onMenu: () -> Unit): HomeCard {
+    val left = if (item.durationMs > 0) timeLeft(item.durationMs - item.viewOffsetMs) else null
+    return HomeCard(
+        key = "px" + item.server.machineId + item.ratingKey,
+        tag = "PLEX", tagBg = PlexGold, tagFg = Color.Black,
+        title = item.title,
+        line1 = item.subtitle,
+        line2 = left,
+        image = item.image,
+        poster = false,
+        channel = null,
+        progress = if (item.durationMs > 0) item.viewOffsetMs.toFloat() / item.durationMs else null,
+        progressColor = PlexGold,
+        onClick = { vm.playPlex(item) },
+        onLongClick = onMenu,
+        hero = HeroInfo(item.title, listOfNotNull(item.subtitle, left, "on Plex").joinToString("  ·  "), null, null, item.image,
+            label = "CONTINUE ON PLEX"),
+    )
+}
+
+private fun resumeCard(vm: TunerViewModel, e: ResumeEntry): HomeCard {
+    val left = if (e.durationMs > 0) timeLeft(e.durationMs - e.positionMs) else null
+    return HomeCard(
+        key = "rs" + e.contentId,
+        tag = if (e.seriesId != null) "SERIES" else "FILM", tagBg = TunerColors.Accent, tagFg = Color.White,
+        title = e.title,
+        line1 = e.subtitle ?: "Films & TV",
+        line2 = left,
+        image = e.poster,
+        poster = true,
+        channel = null,
+        progress = if (e.durationMs > 0) e.positionMs.toFloat() / e.durationMs else null,
+        progressColor = TunerColors.Accent,
+        onClick = { vm.playResume(e) },
+        onLongClick = null,
+        hero = HeroInfo(e.title, listOfNotNull(e.subtitle, left).joinToString("  ·  "), null, null, e.poster, wide = false,
+            label = "CARRY ON WATCHING"),
+    )
+}
+
+private fun plexEntryCard(vm: TunerViewModel, e: com.titanejstudios.tuner.integrations.Plex.Entry): HomeCard {
+    val what = if (e.isShow) "TV" else "Film"
+    return HomeCard(
+        key = "pn" + e.server.machineId + e.ratingKey,
+        tag = "NEW", tagBg = PlexGold, tagFg = Color.Black,
+        title = e.title,
+        line1 = listOfNotNull(e.year, what, e.rating).joinToString(" · "),
+        line2 = e.library,
+        image = e.art ?: e.image,
+        poster = e.art == null,
+        channel = null,
+        progress = null,
+        progressColor = PlexGold,
+        onClick = { if (e.isShow) vm.openPlexShow(e) else vm.playPlexEntry(e) },
+        onLongClick = null,
         hero = HeroInfo(
-            title = pr.title,
-            subtitle = "${p.channel.name}  ·  " +
-                (if (pr.start > System.currentTimeMillis()) "Starts ${hhmm(pr.start)}" else "On now, until ${hhmm(pr.stop)}"),
-            description = pr.desc,
-            channel = p.channel,
-            image = pr.image,
-        )
+            e.title,
+            listOfNotNull(e.year, what, e.rating, e.library).joinToString("  ·  "),
+            e.summary, null, e.art ?: e.image, wide = e.art != null,
+            label = "NEW ON PLEX · " + what.uppercase(),
+        ),
+    )
+}
+
+private fun recordingCard(vm: TunerViewModel, r: Recording): HomeCard {
+    val live = r.status == RecStatus.RECORDING
+    return HomeCard(
+        key = "rec" + r.id,
+        tag = if (live) "● RECORDING" else "RECORDED", tagBg = if (live) LiveRed else DoneGreen, tagFg = Color.White,
+        title = r.title,
+        line1 = "${dayLabel(r.start)} ${hhmm(r.start)} · ${r.channelName}",
+        line2 = null,
+        image = null,
+        poster = false,
+        channel = vm.allChannelsById(r.channelId),
+        progress = null,
+        progressColor = TunerColors.Accent,
+        onClick = { vm.playRecording(r) },
+        onLongClick = null,
+        hero = HeroInfo(r.title, "${r.channelName} · ${dayLabel(r.start)} ${hhmm(r.start)}", null, vm.allChannelsById(r.channelId), null,
+            label = if (live) "● RECORDING NOW" else "RECORDED"),
+    )
+}
+
+private fun watchCard(vm: TunerViewModel, w: WatchItem, badge: String, removable: Boolean): HomeCard = HomeCard(
+    key = "w" + w.id,
+    tag = badge, tagBg = TunerColors.Accent, tagFg = Color.White,
+    title = w.name,
+    line1 = (if (w.isSeries) "Series" else "Film") + " · " + w.category,
+    line2 = if (removable) "Hold OK to remove" else null,
+    image = w.image,
+    poster = true,
+    channel = null,
+    progress = null,
+    progressColor = TunerColors.Accent,
+    onClick = { vm.openWatchItem(w) },
+    onLongClick = if (removable) ({
+        if (w.isSeries) w.toSeries()?.let { vm.toggleWatchlist(it) } else w.toVod()?.let { vm.toggleWatchlist(it) }
+    }) else null,
+    hero = HeroInfo(w.name, (if (w.isSeries) "Series" else "Film") + "  ·  ${w.category}", w.plot, null, w.image, wide = false, label = badge.uppercase()),
+)
+
+private fun pickCard(vm: TunerViewModel, pick: HomeFeed.Pick, channels: List<Channel>, now: Long): HomeCard {
+    val p = pick.programme
+    val upcoming = p.start > now
+    return HomeCard(
+        key = "pk" + pick.channel.id + "|" + p.start,
+        tag = if (upcoming) "STARTS ${hhmm(p.start)}" else "ON NOW",
+        tagBg = if (upcoming) TunerColors.Accent else Color(0xCC050816),
+        tagFg = if (upcoming) Color.White else TunerColors.NowLine,
+        title = p.title,
+        line1 = pick.channel.name + (if (upcoming) "" else " · until ${hhmm(p.stop)}"),
+        line2 = if (upcoming) (if (vm.hasReminder(pick.channel, p)) "⏰ Reminder set" else "OK sets a reminder") else null,
+        image = p.image,
+        poster = false,
+        channel = pick.channel,
+        progress = if (upcoming) null else progressOf(p, now),
+        progressColor = TunerColors.Accent,
+        onClick = {
+            if (upcoming && p.start - vm.now > 2 * 60_000L) vm.toggleReminder(pick.channel, p) else vm.play(pick.channel, channels)
+        },
+        onLongClick = null,
+        hero = HeroInfo(
+            p.title,
+            "${pick.channel.name}  ·  " + (if (upcoming) "Starts ${hhmm(p.start)}" else "On now, until ${hhmm(p.stop)}"),
+            p.desc, pick.channel, p.image, label = "TOP PICK FOR YOU",
+        ),
+    )
+}
+
+/** Sky/Plex-style Home: the highlighted item's picture behind the menu, quick buttons, and rows of tiles. */
+@Composable
+fun HomeScreen(vm: TunerViewModel) {
+    BackHandler(enabled = vm.mode != null && !vm.canGoBack) { vm.stopPlayback() }
+    if (vm.activeProfile.kids) {
+        KidsHome(vm)
+        return
     }
 
+    val now = vm.now
+    val followed = vm.football.teams
+    val allChannels = remember(vm.channels, vm.unlocked, vm.lockedGroups) { vm.channelsFor(ALL) }
+    val recent = remember(vm.recents, vm.channels, vm.unlocked) { vm.channelsFor(RECENT).take(8) }
+    val favourites = remember(vm.favourites, vm.channels, vm.unlocked) { vm.channelsFor(FAVOURITES).take(30) }
+    val apps = remember(vm.tvApps, vm.hiddenApps) { vm.visibleApps() }
+    var plexMenu by remember { mutableStateOf<com.titanejstudios.tuner.integrations.Plex.Item?>(null) }
+
+    // Every row's tiles (minute by minute, as programmes change).
+    val minute = now / 60_000
+    val cards: Map<HomeRow, List<HomeCard>> = remember(
+        minute, recent, favourites, allChannels, vm.sportNow, vm.topPicks, vm.plexItems, vm.plexRecent,
+        vm.resume, vm.recordings, vm.followedSeries, vm.watchlist, vm.football.matches, vm.reminders,
+    ) {
+        buildMap {
+            put(HomeRow.Continue, buildList {
+                vm.plexItems.take(8).forEach { item -> add(plexItemCard(vm, item) { plexMenu = item }) }
+                if (vm.hasVod) vm.resume.values.sortedByDescending { it.updatedAt }.take(8).forEach { add(resumeCard(vm, it)) }
+                recent.forEach { add(channelCard(vm, it, recent, now, followed)) }
+            })
+            put(HomeRow.Sport, vm.sportNow.map { channelCard(vm, it, vm.sportNow, now, followed) })
+            put(HomeRow.PlexNew, vm.plexRecent.map { plexEntryCard(vm, it) })
+            put(HomeRow.TopPicks, vm.topPicks.let { picks -> val chans = picks.map { it.channel }; picks.map { pickCard(vm, it, chans, now) } })
+            put(HomeRow.Favourites, favourites.map { channelCard(vm, it, favourites, now, followed) })
+            put(HomeRow.Recordings, vm.recordings.filter { it.status == RecStatus.DONE || it.status == RecStatus.RECORDING }
+                .sortedByDescending { it.start }.take(15).map { recordingCard(vm, it) })
+            if (vm.hasVod) {
+                put(HomeRow.NewEpisodes, vm.newEpisodeSeries.map { watchCard(vm, it.series, "${it.newEpisodes} new", removable = false) })
+                put(HomeRow.MyList, vm.watchlist.take(30).map { watchCard(vm, it, if (it.isSeries) "Series" else "Film", removable = true) })
+            }
+            put(HomeRow.All, allChannels.take(40).map { channelCard(vm, it, allChannels, now, followed) })
+        }
+    }
+
+    // Row order: yours (Settings › Home rows), then – if switched on – sport first when your team
+    // or a big event is on, films and Plex first in the evening.
+    val hour = remember(minute) { java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY) }
+    val weekend = remember(minute) {
+        java.util.Calendar.getInstance().get(java.util.Calendar.DAY_OF_WEEK).let { it == java.util.Calendar.SATURDAY || it == java.util.Calendar.SUNDAY }
+    }
+    val rows: List<HomeRow> = run {
+        val saved = vm.homeRowOrder.mapNotNull { n -> HomeRow.entries.firstOrNull { it.name == n } }
+        val order = (saved + HomeRow.entries.filter { it !in saved }).toMutableList()
+        if (vm.homeSmart) {
+            val sportCards = cards[HomeRow.Sport].orEmpty()
+            val teamOn = sportCards.any { it.hero.label?.contains("YOUR TEAM") == true }
+            if (sportCards.isNotEmpty() && (teamOn || (weekend && hour in 12..19))) {
+                order.remove(HomeRow.Sport)
+                order.add(0, HomeRow.Sport)
+            } else if (hour >= 18 || hour < 2) {
+                val evening = listOf(HomeRow.PlexNew, HomeRow.MyList, HomeRow.NewEpisodes).filter { it in order }
+                order.removeAll(evening)
+                val at = order.indexOf(HomeRow.Continue) + 1
+                order.addAll(at, evening)
+            }
+        }
+        order.filter { it.name !in vm.homeRowsHidden }
+            .filter { if (it == HomeRow.Apps) apps.isNotEmpty() else cards[it].orEmpty().isNotEmpty() }
+    }
+
+    var hero by remember { mutableStateOf<HeroInfo?>(null) }
+    val firstCardHero = rows.firstOrNull()?.let { cards[it]?.firstOrNull()?.hero }
+    val h = hero ?: firstCardHero
+
     val firstTile = remember { FocusRequester() }
-    LaunchedEffect(recent.isNotEmpty() || favourites.isNotEmpty() || allChannels.isNotEmpty()) {
+    LaunchedEffect(rows.isNotEmpty()) {
         delay(80)
         runCatching { firstTile.requestFocus() }
     }
 
-    // Rows – only the non-empty ones are shown.
-    val rows = buildList {
-        if (recent.isNotEmpty()) add(HomeRow.Recent)
-        if (vm.plexItems.isNotEmpty()) add(HomeRow.Plex)
-        if (topPicks.isNotEmpty()) add(HomeRow.TopPicks)
-        if (vm.plexRecent.isNotEmpty()) add(HomeRow.PlexNew)
-        if (favourites.isNotEmpty()) add(HomeRow.Favourites)
-        if (sportNow.isNotEmpty()) add(HomeRow.Sport)
-        if (apps.isNotEmpty()) add(HomeRow.Apps)
-        if (recordings.isNotEmpty()) add(HomeRow.Recordings)
-        if (resumeEntries.isNotEmpty() && vm.hasVod) add(HomeRow.Resume)
-        if (newEpisodes.isNotEmpty() && vm.hasVod) add(HomeRow.NewEpisodes)
-        if (myList.isNotEmpty() && vm.hasVod) add(HomeRow.MyList)
-        if (allChannels.isNotEmpty()) add(HomeRow.All)
-    }
-
     Box(Modifier.fillMaxSize().skyBackground()) {
+        // The highlighted item's wide picture, behind the menu and fading into the background.
+        if (h?.image != null && h.wide) {
+            Box(Modifier.align(Alignment.TopEnd).fillMaxWidth(0.68f).height(440.dp)) {
+                AsyncImage(model = h.image, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(listOf(TunerColors.Background, TunerColors.Background.copy(alpha = 0.75f), Color.Transparent))))
+                Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0.45f to Color.Transparent, 1f to TunerColors.Background)))
+            }
+        }
         Column(Modifier.fillMaxSize().padding(horizontal = 44.dp, vertical = 22.dp)) {
             TopNav(vm, Screen.Home)
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(8.dp))
             if (vm.safeMode && !vm.safeModeBannerHidden) {
                 SafeModeBanner(vm)
-                Spacer(Modifier.height(10.dp))
+                Spacer(Modifier.height(8.dp))
             }
 
-            // Hero
-            Row(Modifier.fillMaxWidth().height(250.dp)) {
-                Column(Modifier.weight(1f).padding(top = 12.dp, end = 24.dp)) {
-                    val h = hero
+            // The big area: what's highlighted, plus the live picture if something's playing.
+            Box(Modifier.fillMaxWidth().height(232.dp)) {
+                Column(Modifier.fillMaxWidth(0.56f).fillMaxHeight()) {
+                    h?.label?.let {
+                        Text(it, color = h.labelColor, fontSize = 13.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp, maxLines = 1)
+                        Spacer(Modifier.height(4.dp))
+                    }
                     Text(
                         h?.title ?: vm.playing?.name ?: if (vm.status != null || !vm.initialLoadDone) "Getting things ready…" else "Welcome",
-                        color = Color.White,
-                        fontSize = 34.sp,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
+                        color = Color.White, fontSize = 36.sp, fontWeight = FontWeight.ExtraBold,
+                        maxLines = 2, overflow = TextOverflow.Ellipsis, lineHeight = 40.sp,
                     )
+                    h?.score?.let {
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            it, color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.ExtraBold,
+                            modifier = Modifier.clip(RoundedCornerShape(10.dp)).background(Color(0x66000000)).padding(horizontal = 14.dp, vertical = 3.dp),
+                        )
+                    }
                     Spacer(Modifier.height(6.dp))
                     Text(
                         vm.status?.let { "⟳ $it" } ?: h?.subtitle ?: "${allChannels.size} channels",
-                        color = TunerColors.TextSecondary,
-                        fontSize = 17.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
+                        color = Color(0xFFD4DDF5), fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     )
-                    Spacer(Modifier.height(10.dp))
-                    AutoScrollText(h?.description ?: "", Modifier.weight(1f).fillMaxWidth(), fontSize = 16.sp)
+                    Spacer(Modifier.height(8.dp))
+                    AutoScrollText(h?.description ?: "", Modifier.weight(1f).fillMaxWidth(), fontSize = 15.sp)
                 }
-                Box(
-                    Modifier.size(width = 420.dp, height = 236.dp).clip(RoundedCornerShape(14.dp)).background(TunerColors.Panel),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    val h = hero
-                    when {
-                        vm.mode != null -> MiniPreview(vm, Modifier.fillMaxSize())
-                        h?.image != null -> AsyncImage(model = h.image, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-                        h?.channel != null -> ChannelLogo(h.channel.logo, h.channel.name, Modifier.size(width = 220.dp, height = 130.dp))
-                        else -> Text("📺", fontSize = 64.sp)
-                    }
+                when {
+                    vm.mode != null -> MiniPreview(vm, Modifier.align(Alignment.TopEnd).size(width = 256.dp, height = 144.dp))
+                    h?.image != null && !h.wide -> AsyncImage(
+                        model = h.image, contentDescription = null, contentScale = ContentScale.Fit,
+                        modifier = Modifier.align(Alignment.TopEnd).size(width = 150.dp, height = 225.dp).clip(RoundedCornerShape(10.dp)),
+                    )
+                    h?.image == null && h?.channel != null -> ChannelLogo(
+                        h.channel.logo, h.channel.name, Modifier.align(Alignment.TopEnd).padding(top = 20.dp).size(width = 220.dp, height = 124.dp),
+                    )
                 }
+            }
+
+            // Quick buttons.
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                vm.lastChannel?.let { last -> PillButton("▶  ${last.name}", { vm.play(last, allChannels) }, compact = true) }
+                PillButton("TV Guide", { vm.navigate(Screen.Channels) }, compact = true)
+                PillButton("Sport", { vm.navigate(Screen.Sports) }, compact = true)
+                PillButton("Search", { vm.navigate(Screen.Search) }, compact = true)
+                PillButton("🎤  Say it", { vm.startVoiceSearch() }, compact = true)
             }
             Spacer(Modifier.height(10.dp))
 
@@ -222,56 +461,196 @@ fun HomeScreen(vm: TunerViewModel) {
             } else {
                 // Scrolling down the rows keeps each row's title in view above the highlighted tile.
                 val outerSpec = LocalBringIntoViewSpec.current
-                val headroom = with(LocalDensity.current) { 48.dp.toPx() }
+                val headroom = with(LocalDensity.current) { 40.dp.toPx() }
                 val rowsSpec = remember(outerSpec, headroom) { rowTitleSpec(outerSpec, headroom) }
                 CompositionLocalProvider(LocalBringIntoViewSpec provides rowsSpec) {
-                LazyColumn(
-                    verticalArrangement = Arrangement.spacedBy(14.dp),
-                    contentPadding = PaddingValues(bottom = 30.dp),
-                ) {
-                    rows.forEachIndexed { i, row ->
-                        item(key = row.name) {
-                            // Sideways scrolling inside a row keeps the normal behaviour.
-                            CompositionLocalProvider(LocalBringIntoViewSpec provides outerSpec) {
-                            Column {
-                                Text(row.title, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(bottom = 8.dp))
-                                val m = if (i == 0) Modifier.focusRequester(firstTile) else Modifier
-                                when (row) {
-                                    HomeRow.Recent -> ChannelRail(vm, recent, m, ::showChannel)
-                                    HomeRow.TopPicks -> PickRail(vm, topPicks, m, ::showPick)
-                                    HomeRow.Plex -> PlexRail(vm, vm.plexItems, m) { p ->
-                                        hero = HeroInfo(p.title, listOfNotNull(p.subtitle, "on Plex").joinToString("  ·  "), null, null, p.image)
+                    LazyColumn(
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                        contentPadding = PaddingValues(bottom = 40.dp),
+                    ) {
+                        rows.forEachIndexed { i, row ->
+                            item(key = row.name) {
+                                CompositionLocalProvider(LocalBringIntoViewSpec provides outerSpec) {
+                                    Column {
+                                        Text(row.title, color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 2.dp))
+                                        val m = if (i == 0) Modifier.focusRequester(firstTile) else Modifier
+                                        if (row == HomeRow.Apps) {
+                                            AppRail(vm, apps, m) { a ->
+                                                hero = HeroInfo(a.label, "Open ${a.label}  ·  hold OK to hide it from Home", null, null, null, label = "YOUR APPS")
+                                            }
+                                        } else {
+                                            HomeCardRail(cards[row].orEmpty(), m) { hero = it }
+                                        }
                                     }
-                                    HomeRow.PlexNew -> PlexEntryRail(vm, vm.plexRecent, m) { e ->
-                                        hero = HeroInfo(e.title, listOfNotNull(e.year, if (e.isShow) "TV" else "Film", e.library, "new on Plex").joinToString("  ·  "), e.summary, null, e.image)
-                                    }
-                                    HomeRow.Apps -> AppRail(vm, apps, m) { a ->
-                                        hero = HeroInfo(a.label, "Open ${a.label}  ·  hold OK to hide it from Home", null, null, null)
-                                    }
-                                    HomeRow.Favourites -> ChannelRail(vm, favourites, m, ::showChannel)
-                                    HomeRow.Sport -> ChannelRail(vm, sportNow, m, ::showChannel, badge = "LIVE")
-                                    HomeRow.Recordings -> RecordingRail(vm, recordings, m) { r ->
-                                        hero = HeroInfo(r.title, "${r.channelName} · ${dayLabel(r.start)} ${hhmm(r.start)}", null, null, null)
-                                    }
-                                    HomeRow.Resume -> ResumeRail(vm, resumeEntries, m) { e ->
-                                        hero = HeroInfo(e.title, e.subtitle ?: "", null, null, e.poster)
-                                    }
-                                    HomeRow.NewEpisodes -> WatchRail(vm, newEpisodes, m) { w ->
-                                        hero = HeroInfo(w.name, "New episodes to watch", w.plot, null, w.image)
-                                    }
-                                    HomeRow.MyList -> WatchRail(vm, myList, m) { w ->
-                                        hero = HeroInfo(w.name, (if (w.isSeries) "Series" else "Film") + "  ·  ${w.category}  ·  hold OK to remove", w.plot, null, w.image)
-                                    }
-                                    HomeRow.All -> ChannelRail(vm, allChannels.take(40), m, ::showChannel)
                                 }
-                            }
                             }
                         }
                     }
                 }
+            }
+        }
+    }
+
+    plexMenu?.let { item ->
+        MenuDialog(
+            title = item.title,
+            subtitle = item.subtitle,
+            items = listOf(
+                MenuItem("Resume") { vm.playPlex(item) },
+                MenuItem("Play from the start") { vm.playPlex(item, fromStart = true) },
+                MenuItem("Open the Plex app") { vm.openPlexApp() },
+            ),
+            onDismiss = { plexMenu = null },
+        )
+    }
+}
+
+@Composable
+private fun HomeCardRail(cards: List<HomeCard>, firstModifier: Modifier, onFocus: (HeroInfo) -> Unit) {
+    LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp), contentPadding = PaddingValues(horizontal = 6.dp, vertical = 8.dp)) {
+        items(cards.size, key = { cards[it].key }) { i ->
+            HomeTile(cards[i], if (i == 0) firstModifier else Modifier, onFocus)
+        }
+    }
+}
+
+@Composable
+private fun HomeTile(c: HomeCard, modifier: Modifier, onFocus: (HeroInfo) -> Unit) {
+    FocusSurface(
+        onClick = c.onClick,
+        onLongClick = c.onLongClick,
+        onFocused = { onFocus(c.hero) },
+        baseColor = TunerColors.Panel,
+        shape = RoundedCornerShape(12.dp),
+        zoom = true,
+        modifier = modifier.size(width = TILE_W, height = TILE_H),
+    ) { focused ->
+        val sub = if (focused) Color(0xEEFFFFFF) else Color(0xFFC3CDEA)
+        if (c.poster && c.image != null) {
+            // Posters are shown whole beside the text, never cropped to fill a wide tile.
+            Row(Modifier.fillMaxSize()) {
+                AsyncImage(
+                    model = c.image, contentDescription = null, contentScale = ContentScale.Crop,
+                    modifier = Modifier.width(100.dp).fillMaxHeight(),
+                )
+                Column(Modifier.weight(1f).fillMaxHeight().padding(10.dp)) {
+                    c.tag?.let { TileTag(it, c.tagBg, c.tagFg, Modifier) }
+                    Spacer(Modifier.weight(1f))
+                    Text(c.title, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis, lineHeight = 18.sp)
+                    c.line1?.let { Text(it, color = sub, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis, lineHeight = 15.sp) }
+                    c.line2?.let { Text(it, color = sub, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                    c.progress?.let { ProgressBar(it, Modifier.padding(top = 5.dp).fillMaxWidth(), color = if (focused) Color.White else c.progressColor) }
+                }
+            }
+            return@FocusSurface
+        }
+        if (c.image != null) {
+            AsyncImage(model = c.image, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+        } else if (c.channel != null) {
+            ChannelLogo(c.channel.logo, c.channel.name, Modifier.align(Alignment.TopCenter).padding(top = 26.dp).size(width = 96.dp, height = 46.dp))
+        }
+        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0.25f to Color.Transparent, 0.62f to Color(0xE6050A1E), 1f to Color(0xF2050A1E))))
+        if (c.image != null && c.channel != null) {
+            ChannelLogo(
+                c.channel.logo, c.channel.name,
+                Modifier.align(Alignment.TopEnd).padding(6.dp).background(Color(0x99050816), RoundedCornerShape(6.dp)).padding(3.dp).size(width = 52.dp, height = 28.dp),
+            )
+        }
+        c.tag?.let { TileTag(it, c.tagBg, c.tagFg, Modifier.align(Alignment.TopStart).padding(6.dp)) }
+        Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp)) {
+            Text(c.title, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            c.line1?.let { Text(it, color = sub, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+            c.line2?.let { Text(it, color = sub, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+            c.progress?.let { ProgressBar(it, Modifier.padding(top = 5.dp).fillMaxWidth(), color = if (focused) Color.White else c.progressColor) }
+        }
+    }
+}
+
+@Composable
+private fun TileTag(text: String, bg: Color, fg: Color, modifier: Modifier) {
+    Text(
+        text,
+        modifier = modifier.clip(RoundedCornerShape(6.dp)).background(bg).padding(horizontal = 7.dp, vertical = 2.dp),
+        color = fg, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis,
+    )
+}
+
+/** Settings › Home rows: show, hide and reorder Home's rows. */
+@Composable
+fun HomeRowsScreen(vm: TunerViewModel) {
+    val saved = vm.homeRowOrder.mapNotNull { n -> HomeRow.entries.firstOrNull { it.name == n } }
+    val order = saved + HomeRow.entries.filter { it !in saved }
+    val hidden = vm.homeRowsHidden
+    var moving by remember { mutableStateOf<HomeRow?>(null) }
+    val first = remember { FocusRequester() }
+    LaunchedEffect(Unit) {
+        delay(80)
+        runCatching { first.requestFocus() }
+    }
+    fun move(row: HomeRow, to: Int) {
+        val list = order.toMutableList()
+        list.remove(row)
+        list.add(to.coerceIn(0, list.size), row)
+        vm.saveHomeRows(list.map { it.name }, hidden)
+    }
+    Row(Modifier.fillMaxSize().skyBackground().padding(horizontal = 56.dp, vertical = 36.dp), horizontalArrangement = Arrangement.spacedBy(44.dp)) {
+        Column(Modifier.width(600.dp)) {
+            Text("Home rows", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.Bold)
+            Text("OK switches a row on or off. Hold OK to move it.", color = TunerColors.TextSecondary, fontSize = 15.sp)
+            Spacer(Modifier.height(14.dp))
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                items(order.size, key = { order[it].name }) { i ->
+                    val row = order[i]
+                    val shown = row.name !in hidden
+                    FocusSurface(
+                        onClick = { vm.saveHomeRows(order.map { it.name }, if (shown) hidden + row.name else hidden - row.name) },
+                        onLongClick = { moving = row },
+                        baseColor = if (shown) TunerColors.Panel else Color(0x66000000),
+                        modifier = Modifier.fillMaxWidth().height(48.dp).then(if (i == 0) Modifier.focusRequester(first) else Modifier),
+                    ) { focused ->
+                        Row(Modifier.fillMaxSize().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text("${i + 1}", color = TunerColors.TextSecondary, fontSize = 15.sp, modifier = Modifier.width(30.dp))
+                            Text(row.title, color = if (shown || focused) Color.White else TunerColors.TextSecondary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                            Text(if (shown) "Shown" else "Hidden", color = if (shown) Color(0xFF7EF0A8) else TunerColors.TextSecondary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
                 }
             }
         }
+        Column(Modifier.weight(1f).padding(top = 70.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            FocusSurface(
+                onClick = { vm.toggleHomeSmart() },
+                baseColor = TunerColors.Panel,
+                shape = RoundedCornerShape(14.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) { _ ->
+                Column(Modifier.padding(18.dp)) {
+                    Text("Change with the time of day", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "Sport moves to the top when your teams are playing (and on weekend afternoons); films and Plex come first in the evening. Rows you've hidden stay hidden.",
+                        color = TunerColors.TextSecondary, fontSize = 14.sp,
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    Text(if (vm.homeSmart) "On" else "Off", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold,
+                        modifier = Modifier.clip(RoundedCornerShape(14.dp)).background(if (vm.homeSmart) TunerColors.Accent else Color(0x33FFFFFF)).padding(horizontal = 14.dp, vertical = 5.dp))
+                }
+            }
+            PillButton("Back to the standard order", { vm.saveHomeRows(emptyList(), emptySet()) }, compact = true)
+        }
+    }
+    moving?.let { row ->
+        val i = order.indexOf(row)
+        MenuDialog(
+            title = "Move \"${row.title}\"",
+            items = buildList {
+                if (i > 0) add(MenuItem("▲ Up one") { move(row, i - 1) })
+                if (i < order.size - 1) add(MenuItem("▼ Down one") { move(row, i + 1) })
+                if (i > 0) add(MenuItem("⤒ To the top") { move(row, 0) })
+                if (i < order.size - 1) add(MenuItem("⤓ To the bottom") { move(row, order.size - 1) })
+            },
+            onDismiss = { moving = null },
+        )
     }
 }
 

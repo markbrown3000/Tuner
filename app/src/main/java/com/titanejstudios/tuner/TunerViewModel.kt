@@ -100,7 +100,7 @@ import java.util.Locale
 enum class Screen {
     Home, Channels, Guide, Player, Search, Movies, Series, SeriesDetail, Settings, SourceEdit, Manage,
     ProfilePicker, ProfileEdit, PhoneSetup, EpgMap, Recordings, MultiView, Sports, Apps, Log,
-    WhatsOn, Stats, ShareTv, Catchup, Categories, Plex, Football, Update, SelfTest, PlexLibrary, PlexShow,
+    WhatsOn, Stats, ShareTv, Catchup, Categories, Plex, Football, Update, SelfTest, PlexLibrary, PlexShow, HomeRows,
 }
 
 const val FAVOURITES = "★ Favourites"
@@ -325,6 +325,10 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     var plexCopyChoice by mutableStateOf<PlexCopyChoice?>(null); private set
     var preferPlexFilms by mutableStateOf(store.preferPlexFilms); private set
     private var searchJob: Job? = null
+    var homeRowOrder by mutableStateOf(store.homeRowOrder); private set
+    var homeRowsHidden by mutableStateOf(store.homeRowsHidden); private set
+    var homeSmart by mutableStateOf(store.homeSmart); private set
+    var voiceSearchPending by mutableStateOf(false)
 
     var movies by mutableStateOf<List<VodItem>?>(null); private set
     var series by mutableStateOf<List<SeriesItem>?>(null); private set
@@ -1790,6 +1794,43 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
             sendHa("reminder", ReminderAlarms.payload(due) + ("app_open" to true))
         }
     }
+
+    // ---------------- Home rows (5.5) ----------------
+
+    fun saveHomeRows(order: List<String>, hidden: Set<String>) {
+        homeRowOrder = order
+        homeRowsHidden = hidden
+        store.homeRowOrder = order
+        store.homeRowsHidden = hidden
+    }
+
+    fun toggleHomeSmart() {
+        homeSmart = !homeSmart
+        store.homeSmart = homeSmart
+    }
+
+    /** "Newcastle 1–0 Arsenal" when a followed league's match in this programme is on (football-data.org). */
+    fun liveScoreFor(p: Programme): String? {
+        val m = football.matches.firstOrNull { (it.live || (it.finished && now - it.kickoff < 3 * 3_600_000L)) && Football.inTitle(p.title, it.home) && Football.inTitle(p.title, it.away) }
+            ?: return null
+        val tail = when {
+            m.status == "PAUSED" -> "  HT"
+            m.finished -> "  FT"
+            else -> ""
+        }
+        return "${Football.shortName(m.home)} ${m.homeGoals ?: 0}–${m.awayGoals ?: 0} ${Football.shortName(m.away)}$tail"
+    }
+
+    fun allChannelsById(id: String): Channel? = allChannels.firstOrNull { it.id == id }
+
+    /** Home's 🎤 button: opens Search and starts voice typing straight away. */
+    fun startVoiceSearch() {
+        voiceSearchPending = true
+        navigate(Screen.Search)
+    }
+
+    /** The channel watched last (Home's ▶ button). */
+    val lastChannel: Channel? get() = recents.firstNotNullOfOrNull { id -> allChannels.firstOrNull { it.id == id } }
 
     // ---------------- Start from the beginning (joined late) ----------------
 
