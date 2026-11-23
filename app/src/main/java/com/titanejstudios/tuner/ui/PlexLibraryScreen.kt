@@ -58,9 +58,9 @@ fun PlexLibraryScreen(vm: TunerViewModel) {
             sections.forEach { add(it.id) }
         }
     }
-    var category by remember { mutableStateOf<String?>(null) }
+    val category = plex.libraryCategory
     LaunchedEffect(categories) {
-        if (category == null || category !in categories) category = categories.firstOrNull()
+        if (category == null || category !in categories) plex.libraryCategory = categories.firstOrNull()
     }
     val section = sections.firstOrNull { it.id == category }
     LaunchedEffect(section?.id, plex.sort, plex.query) { section?.let { plex.loadSection(it) } }
@@ -69,10 +69,14 @@ fun PlexLibraryScreen(vm: TunerViewModel) {
     var searching by remember { mutableStateOf(false) }
     val sortLabel = com.titanejstudios.tuner.features.PlexFeature.SORTS.firstOrNull { it.key == plex.sort }?.label ?: "Title A–Z"
 
-    val firstCategory = remember { FocusRequester() }
-    LaunchedEffect(categories.isNotEmpty()) {
-        delay(60)
-        runCatching { firstCategory.requestFocus() }
+    // One focus handle per library, so focus goes back to the one you were on (not the top one)
+    // after the Sort or Search box closes, or when you come back from a film or show.
+    val focusFor = remember(categories) { categories.associateWith { FocusRequester() } }
+    val dialogOpen = sortMenu || searching
+    LaunchedEffect(categories.isNotEmpty(), dialogOpen) {
+        if (dialogOpen || categories.isEmpty()) return@LaunchedEffect
+        delay(80)
+        runCatching { focusFor[category ?: categories.first()]?.requestFocus() }
     }
 
     Column(Modifier.fillMaxSize().skyBackground().padding(horizontal = 40.dp, vertical = 24.dp)) {
@@ -117,11 +121,11 @@ fun PlexLibraryScreen(vm: TunerViewModel) {
                     val selected = c == category
                     val s = sections.firstOrNull { it.id == c }
                     FocusSurface(
-                        onClick = { category = c },
-                        onFocused = { category = c },
+                        onClick = { plex.libraryCategory = c },
+                        onFocused = { plex.libraryCategory = c },
                         selected = selected,
                         modifier = Modifier.fillMaxWidth().height(46.dp)
-                            .then(if (i == 0) Modifier.focusRequester(firstCategory) else Modifier),
+                            .then(focusFor[c]?.let { Modifier.focusRequester(it) } ?: Modifier),
                     ) { focused ->
                         Text(
                             if (c == PLEX_CONTINUE) c else (if (s?.isShows == true) "📺 " else "🎬 ") + (labels[c] ?: c),
@@ -206,7 +210,7 @@ fun PlexLibraryScreen(vm: TunerViewModel) {
             onDone = { text ->
                 searching = false
                 // Search needs a library – from Continue watching, use the first one.
-                if (section == null) categories.firstOrNull { it != PLEX_CONTINUE }?.let { category = it }
+                if (section == null) categories.firstOrNull { it != PLEX_CONTINUE }?.let { plex.libraryCategory = it }
                 plex.changeQuery(text)
             },
         )
@@ -236,7 +240,7 @@ private fun plexCaption(e: Plex.Entry): String? = when {
         if (left > 0 && e.viewedLeafCount > 0) "$left unwatched" else "${e.leafCount} episodes"
     }
     e.watched -> listOfNotNull(e.year, "✓ watched").joinToString("  ·  ")
-    else -> listOfNotNull(e.year, e.rating?.let { "★ $it" }).joinToString("  ·  ").ifEmpty { null }
+    else -> listOfNotNull(e.year, e.rating).joinToString("  ·  ").ifEmpty { null }
 }
 
 /** A Plex show: seasons along the top, episodes below. Plays here, then carries on to the next episode. */
@@ -267,7 +271,7 @@ fun PlexShowScreen(vm: TunerViewModel) {
             }
             Text(show.title, color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
             Text(
-                listOfNotNull(show.year, show.rating?.let { "★ $it" }, "${show.leafCount} episodes").joinToString("  ·  "),
+                listOfNotNull(show.year, show.rating, "${show.leafCount} episodes").joinToString("  ·  "),
                 color = TunerColors.TextSecondary, fontSize = 15.sp,
             )
             show.summary?.let { AutoScrollText(it, Modifier.weight(1f).padding(top = 10.dp)) }

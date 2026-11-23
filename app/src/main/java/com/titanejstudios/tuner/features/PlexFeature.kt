@@ -131,6 +131,9 @@ class PlexFeature(private val store: Store, private val scope: CoroutineScope) {
         }
     }
 
+    /** The library picked on the left of the Plex screen – kept while you open shows and films. */
+    var libraryCategory by mutableStateOf<String?>(null)
+
     /** Library order: Title A–Z, Newly added, … */
     var sort by mutableStateOf(store.plexSort.takeIf { k -> SORTS.any { it.key == k } } ?: "title"); private set
     /** Search text for the library being shown ("" = everything). */

@@ -92,7 +92,7 @@ class Plex(private val clientId: String) {
 
     /** "Continue watching" from every server, newest first. */
     fun onDeck(servers: List<Server>): List<Item> {
-        val out = ArrayList<Pair<Long, Item>>()
+        val out = ArrayList<Triple<Long, String, Item>>()
         for (s in servers) {
             try {
                 val root = JSONObject(read(open("${s.uri}/library/onDeck", token = s.token)))
@@ -109,15 +109,20 @@ class Plex(private val clientId: String) {
                     }
                     val part = m.optJSONArray("Media")?.optJSONObject(0)?.optJSONArray("Part")?.optJSONObject(0)?.optString("key")
                     val playUrl = part?.takeIf { it.isNotBlank() }?.let { "${s.uri}$it?X-Plex-Token=${s.token}" }
-                    out += m.optLong("lastViewedAt") to Item(
+                    // The same film can be in several libraries (Films, Films 4K…) or on two servers:
+                    // Plex gives them the same guid, so keep just the one watched most recently.
+                    val same = m.optString("guid").takeIf { it.isNotBlank() && !it.startsWith("local://") }
+                        ?: if (episode) "$title|${m.optInt("parentIndex")}|${m.optInt("index")}".lowercase()
+                        else "$title|${m.optString("year")}".lowercase()
+                    out += Triple(m.optLong("lastViewedAt"), same, Item(
                         m.optString("ratingKey"), title, sub, image, playUrl, m.optLong("viewOffset"), m.optLong("duration"), s,
-                    )
+                    ))
                 }
             } catch (e: Exception) {
                 AppLog.warn("Plex: couldn't read Continue watching from ${s.name}", e)
             }
         }
-        return out.sortedByDescending { it.first }.map { it.second }
+        return out.sortedByDescending { it.first }.distinctBy { it.second }.map { it.third }
     }
 
     // ---------------- Library browsing ----------------
@@ -236,7 +241,9 @@ class Plex(private val clientId: String) {
             }
             val part = m.optJSONArray("Media")?.optJSONObject(0)?.optJSONArray("Part")?.optJSONObject(0)?.optString("key")
             val playUrl = part?.takeIf { it.isNotBlank() }?.let { "${s.uri}$it?X-Plex-Token=${s.token}" }
-            val rating = m.optDouble("audienceRating", m.optDouble("rating", 0.0)).takeIf { it > 0.0 }
+            val rating = imdbRating(m)?.let { "IMDb " + String.format(java.util.Locale.UK, "%.1f", it) }
+                ?: m.optDouble("audienceRating", m.optDouble("rating", 0.0)).takeIf { it > 0.0 }
+                    ?.let { "★ " + String.format(java.util.Locale.UK, "%.1f", it) }
             out += Entry(
                 ratingKey = m.optString("ratingKey"),
                 title = m.optString("title"),
@@ -248,7 +255,7 @@ class Plex(private val clientId: String) {
                 durationMs = m.optLong("duration"),
                 watched = m.optInt("viewCount") > 0,
                 summary = m.optString("summary").takeIf { it.isNotBlank() }?.take(600),
-                rating = rating?.let { String.format(java.util.Locale.UK, "%.1f", it) },
+                rating = rating,
                 season = m.optInt("parentIndex"),
                 episode = m.optInt("index"),
                 leafCount = m.optInt("leafCount"),
@@ -257,6 +264,22 @@ class Plex(private val clientId: String) {
             )
         }
         return out
+    }
+
+    /**
+     * The IMDb score, when Plex has one: either in its list of ratings, or as the main
+     * audience rating when the library's ratings source is IMDb.
+     */
+    private fun imdbRating(m: JSONObject): Double? {
+        m.optJSONArray("Rating")?.let { arr ->
+            for (i in 0 until arr.length()) {
+                val r = arr.optJSONObject(i) ?: continue
+                if (r.optString("image").startsWith("imdb://")) r.optDouble("value", 0.0).takeIf { it > 0.0 }?.let { return it }
+            }
+        }
+        if (m.optString("audienceRatingImage").startsWith("imdb://")) return m.optDouble("audienceRating", 0.0).takeIf { it > 0.0 }
+        if (m.optString("ratingImage").startsWith("imdb://")) return m.optDouble("rating", 0.0).takeIf { it > 0.0 }
+        return null
     }
 
     /** Tells Plex where you are, so Continue watching stays right in the Plex app too. */
