@@ -2,6 +2,7 @@ package com.titanejstudios.tuner.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -29,6 +30,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
@@ -47,7 +49,9 @@ private const val PLEX_RESULTS = "🔍 Search results"
 @Composable
 fun PlexLibraryScreen(vm: TunerViewModel) {
     val plex = vm.plexFeature
-    val sections = plex.sections
+    val kids = vm.activeProfile.kids
+    // Kids' profiles only see the libraries picked for them.
+    val sections = remember(plex.sections, kids, plex.kidsSections) { plex.sections.filter { vm.plexSectionAllowed(it) } }
     // "Films" on two servers would look the same – add the server's name then.
     val labels = remember(sections) {
         val dupes = sections.groupBy { it.title }.filter { it.value.size > 1 }.keys
@@ -56,7 +60,7 @@ fun PlexLibraryScreen(vm: TunerViewModel) {
     val categories = remember(sections, vm.plexItems.isNotEmpty(), plex.query.isNotEmpty()) {
         buildList {
             if (plex.query.isNotEmpty()) add(PLEX_RESULTS)
-            if (vm.plexItems.isNotEmpty()) add(PLEX_CONTINUE)
+            if (vm.plexItems.isNotEmpty() && !kids) add(PLEX_CONTINUE)
             sections.forEach { add(it.id) }
         }
     }
@@ -65,8 +69,11 @@ fun PlexLibraryScreen(vm: TunerViewModel) {
         if (category == null || category !in categories) plex.libraryCategory = categories.firstOrNull()
     }
     val section = sections.firstOrNull { it.id == category }
-    LaunchedEffect(section?.id, plex.sort) { section?.let { plex.loadSection(it) } }
+    val genre = section?.let { plex.genreFor[it.id] }
+    LaunchedEffect(section?.id, plex.sort, genre) { section?.let { plex.loadSection(it) } }
     var menuFor by remember { mutableStateOf<Plex.Entry?>(null) }
+    var genreMenu by remember { mutableStateOf(false) }
+    var libraryMenu by remember { mutableStateOf<Plex.Section?>(null) }
     var sortMenu by remember { mutableStateOf(false) }
     var searching by remember { mutableStateOf(false) }
     val sortLabel = com.titanejstudios.tuner.features.PlexFeature.SORTS.firstOrNull { it.key == plex.sort }?.label ?: "Title A–Z"
@@ -74,7 +81,7 @@ fun PlexLibraryScreen(vm: TunerViewModel) {
     // One focus handle per library, so focus goes back to the one you were on (not the top one)
     // after the Sort or Search box closes, or when you come back from a film or show.
     val focusFor = remember(categories) { categories.associateWith { FocusRequester() } }
-    val dialogOpen = sortMenu || searching
+    val dialogOpen = sortMenu || searching || genreMenu || libraryMenu != null
     LaunchedEffect(categories.isNotEmpty(), dialogOpen) {
         if (dialogOpen || categories.isEmpty()) return@LaunchedEffect
         delay(80)
@@ -88,6 +95,7 @@ fun PlexLibraryScreen(vm: TunerViewModel) {
             Text(
                 category?.let { if (it == PLEX_CONTINUE || it == PLEX_RESULTS) it else labels[it] } ?: "",
                 fontSize = 18.sp, color = TunerColors.TextSecondary,
+                maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false),
             )
             if (plex.query.isNotEmpty()) {
                 Spacer(Modifier.width(12.dp))
@@ -100,6 +108,13 @@ fun PlexLibraryScreen(vm: TunerViewModel) {
                 PillButton("✕ Clear", {
                     plex.changeQuery("")
                     if (category == PLEX_RESULTS) plex.libraryCategory = null
+                }, compact = true)
+                Spacer(Modifier.width(8.dp))
+            }
+            if (section != null) {
+                PillButton("Genre: " + (genre?.second ?: "All"), {
+                    plex.loadGenres(section)
+                    genreMenu = true
                 }, compact = true)
                 Spacer(Modifier.width(8.dp))
             }
@@ -128,12 +143,15 @@ fun PlexLibraryScreen(vm: TunerViewModel) {
                     FocusSurface(
                         onClick = { plex.libraryCategory = c },
                         onFocused = { plex.libraryCategory = c },
+                        // Grown-ups: hold OK on a library to let kids' profiles see it.
+                        onLongClick = if (s != null && !kids) ({ libraryMenu = s }) else null,
                         selected = selected,
                         modifier = Modifier.fillMaxWidth().height(46.dp)
                             .then(focusFor[c]?.let { Modifier.focusRequester(it) } ?: Modifier),
                     ) { focused ->
                         Text(
-                            if (c == PLEX_CONTINUE || c == PLEX_RESULTS) c else (if (s?.isShows == true) "📺 " else "🎬 ") + (labels[c] ?: c),
+                            if (c == PLEX_CONTINUE || c == PLEX_RESULTS) c
+                            else (if (s?.isShows == true) "📺 " else "🎬 ") + (labels[c] ?: c) + (if (!kids && c in plex.kidsSections) "  🧸" else ""),
                             modifier = Modifier.padding(horizontal = 14.dp),
                             color = if (focused || selected) Color.White else TunerColors.TextSecondary,
                             fontSize = 16.sp,
@@ -146,7 +164,7 @@ fun PlexLibraryScreen(vm: TunerViewModel) {
             Spacer(Modifier.width(20.dp))
             when {
                 category == PLEX_RESULTS -> {
-                    val results = plex.searchResults
+                    val results = plex.searchResults?.let { r -> if (kids) r.filter { plex.isKidsEntry(it) } else r }
                     if (results == null) {
                         CenterMessage("Searching all your Plex libraries for \"${plex.query}\"…")
                     } else if (results.isEmpty()) {
@@ -258,10 +276,58 @@ fun PlexLibraryScreen(vm: TunerViewModel) {
                     if (e.viewOffsetMs > 0) add(MenuItem("Carry on from ${clock(e.viewOffsetMs)}") { vm.playPlexEntry(e) })
                     add(MenuItem("Play from the beginning") { vm.playPlexEntry(e, fromStart = true) })
                 }
+                val watched = if (e.isShow) e.leafCount > 0 && e.viewedLeafCount >= e.leafCount else e.watched
+                add(MenuItem(if (watched) "Mark as unwatched" else "✓ Mark as watched") { vm.setPlexWatched(e, !watched) })
                 add(MenuItem("ℹ Info & trailer") { vm.openFilmInfo(e.title + (e.year?.let { " ($it)" } ?: ""), isSeries = e.isShow) })
             },
             onDismiss = { menuFor = null },
         )
+    }
+
+    if (genreMenu && section != null) {
+        val list = plex.genres
+        MenuDialog(
+            title = "Genre – " + (labels[section.id] ?: section.title),
+            subtitle = if (list == null) "Loading genres…" else if (list.isEmpty()) "Plex has no genres for this library" else null,
+            items = buildList {
+                add(MenuItem((if (genre == null) "✓ " else "") + "All") { plex.changeGenre(section, null) })
+                list.orEmpty().forEach { g ->
+                    add(MenuItem((if (genre?.first == g.first) "✓ " else "") + g.second) { plex.changeGenre(section, g) })
+                }
+            },
+            onDismiss = { genreMenu = false },
+        )
+    }
+
+    libraryMenu?.let { s ->
+        val allowed = s.id in plex.kidsSections
+        MenuDialog(
+            title = labels[s.id] ?: s.title,
+            subtitle = if (allowed) "Kids' profiles can see this library" else "Kids' profiles can't see this library",
+            items = listOf(
+                MenuItem(if (allowed) "🚫 Hide from kids' profiles" else "🧸 Allow for kids' profiles") { plex.toggleKids(s) },
+            ),
+            onDismiss = { libraryMenu = null },
+        )
+    }
+}
+
+/** A row of Plex posters (Home's "New on Plex"). */
+@Composable
+internal fun PlexEntryRail(vm: TunerViewModel, entries: List<Plex.Entry>, firstModifier: Modifier, onFocus: (Plex.Entry) -> Unit = {}) {
+    LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(horizontal = 6.dp, vertical = 8.dp)) {
+        items(entries.size, key = { "plexnew" + entries[it].server.machineId + entries[it].ratingKey }) { i ->
+            val e = entries[i]
+            PosterCard(
+                title = e.title,
+                image = e.image,
+                caption = listOfNotNull(e.year, if (e.isShow) "TV" else null).joinToString("  ·  ").ifEmpty { null },
+                progress = null,
+                onClick = { if (e.isShow) vm.openPlexShow(e) else vm.playPlexEntry(e) },
+                modifier = (if (i == 0) firstModifier else Modifier).width(118.dp)
+                    .onFocusChanged { if (it.hasFocus) onFocus(e) },
+            )
+        }
     }
 }
 
@@ -334,6 +400,7 @@ fun PlexShowScreen(vm: TunerViewModel) {
                     val e = shown[i]
                     FocusSurface(
                         onClick = { vm.playPlexEntry(e, fromStart = e.watched) },
+                        onLongClick = { vm.setPlexWatched(e, !e.watched) },
                         baseColor = TunerColors.Panel,
                         modifier = Modifier.fillMaxWidth().height(96.dp)
                             .then(if (i == 0) Modifier.focusRequester(first) else Modifier),

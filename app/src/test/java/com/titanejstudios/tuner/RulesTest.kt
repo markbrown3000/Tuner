@@ -159,4 +159,14 @@ class ChannelMergeTest {
         assertEquals("Football", sport("Newcastle v Tottenham"))
         assertEquals("Football", sport("AFC Asian Cup: Japan v Iraq"))
     }
+
+    @Test
+    fun filmNamesAreTidiedForPlex() {
+        val f = com.titanejstudios.tuner.data.FilmName
+        assertEquals("Home Alone" to "1990", f.parse("EN - Home Alone (1990) 4K"))
+        assertEquals("Home Alone" to "1990", f.parse("|UK| Home Alone 1990"))
+        assertEquals("Blade Runner 2049" to "2017", f.parse("Blade Runner 2049 (2017)"))
+        assertEquals("1917" to null, f.parse("1917"))
+        assertEquals("Trolls" to null, f.parse("[EN] Trolls HD"))
+    }
 }

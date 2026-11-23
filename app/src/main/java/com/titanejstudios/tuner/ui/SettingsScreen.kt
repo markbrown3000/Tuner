@@ -281,7 +281,7 @@ fun SettingsScreen(vm: TunerViewModel) {
             item {
                 SettingRow(
                     "Your teams' matches",
-                    subtitle = "Follow teams on the Football screen – Tuner finds their matches in the guide (sport recordings run 30 min over)",
+                    subtitle = "Follow teams on the Football screen – Tuner finds their matches in the guide, pops up 5 minutes before kick-off (sport recordings run 30 min over)",
                     detail = vm.sportFollowLabel,
                     onClick = { vm.cycleSportFollow() },
                 )
@@ -293,6 +293,16 @@ fun SettingsScreen(vm: TunerViewModel) {
                     detail = if (vm.plexLinked) "Linked" else "Link",
                     onClick = { if (vm.plexLinked) vm.navigate(Screen.Plex) else vm.linkPlex() },
                 )
+            }
+            if (vm.plexLinked) {
+                item {
+                    SettingRow(
+                        "Play films from Plex when you have them",
+                        subtitle = "A film in Films & TV that's also on your Plex plays from Plex (usually a better copy). Hold OK on a film for the IPTV copy.",
+                        detail = if (vm.preferPlexFilms) "On" else "Off",
+                        onClick = { vm.togglePreferPlexFilms() },
+                    )
+                }
             }
             item {
                 SettingRow(

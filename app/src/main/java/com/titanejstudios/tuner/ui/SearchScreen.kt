@@ -11,7 +11,14 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import android.content.ActivityNotFoundException
+import android.content.Intent
+import android.speech.RecognizerIntent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -64,12 +71,29 @@ fun SearchScreen(vm: TunerViewModel) {
             .skyBackground()
             .padding(horizontal = 48.dp, vertical = 28.dp)
     ) {
-        Text("Search", fontSize = 30.sp, fontWeight = FontWeight.Bold, color = TunerColors.TextPrimary)
+        // The remote's microphone: say what you're looking for.
+        val voice = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
+            r.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()?.let { vm.updateSearch(it) }
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Search", fontSize = 30.sp, fontWeight = FontWeight.Bold, color = TunerColors.TextPrimary)
+            Spacer(Modifier.weight(1f))
+            PillButton("🎤 Say it", {
+                val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+                    .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                    .putExtra(RecognizerIntent.EXTRA_PROMPT, "What would you like to watch?")
+                try {
+                    voice.launch(intent)
+                } catch (e: ActivityNotFoundException) {
+                    vm.showNotice("This TV has no voice typing – press the microphone button on the remote instead")
+                }
+            }, compact = true)
+        }
         Spacer(Modifier.height(12.dp))
         OutlinedTextField(
             value = vm.searchQuery,
             onValueChange = { vm.updateSearch(it) },
-            label = { Text("Channel or programme name") },
+            label = { Text("Channel, programme, film, series or Plex") },
             singleLine = true,
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
             keyboardActions = KeyboardActions(onSearch = {
@@ -80,11 +104,62 @@ fun SearchScreen(vm: TunerViewModel) {
         )
         Spacer(Modifier.height(16.dp))
 
-        if (vm.searchQuery.trim().length >= 2 && results.channels.isEmpty() && results.programmes.isEmpty()) {
+        val plexFound = vm.searchPlex
+        if (vm.searchQuery.trim().length >= 2 && results.channels.isEmpty() && results.programmes.isEmpty() &&
+            results.films.isEmpty() && results.seriesFound.isEmpty() && plexFound.isEmpty()
+        ) {
             Text("Nothing found", color = TunerColors.TextSecondary, fontSize = 18.sp)
         }
 
         LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            if (plexFound.isNotEmpty()) {
+                item { SectionTitle("On Plex") }
+                item(key = "plexrow") {
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(4.dp)) {
+                        items(plexFound.size, key = { "px" + plexFound[it].server.machineId + plexFound[it].ratingKey }) { i ->
+                            val e = plexFound[i]
+                            PosterCard(
+                                title = e.title,
+                                image = e.image,
+                                caption = listOfNotNull(e.year, e.library).joinToString("  ·  ").ifEmpty { null },
+                                progress = null,
+                                onClick = { if (e.isShow) vm.openPlexShow(e) else vm.playPlexEntry(e) },
+                                modifier = Modifier.width(118.dp),
+                            )
+                        }
+                    }
+                }
+            }
+            if (results.films.isNotEmpty()) {
+                item { SectionTitle("Films") }
+                item(key = "filmrow") {
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(4.dp)) {
+                        items(results.films.size, key = { "f" + results.films[it].id }) { i ->
+                            val m = results.films[i]
+                            PosterCard(
+                                title = m.name, image = m.poster, caption = m.category, progress = null,
+                                onClick = { vm.playMovie(m, fromStart = false) },
+                                modifier = Modifier.width(118.dp),
+                            )
+                        }
+                    }
+                }
+            }
+            if (results.seriesFound.isNotEmpty()) {
+                item { SectionTitle("Series") }
+                item(key = "seriesrow") {
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(4.dp)) {
+                        items(results.seriesFound.size, key = { "s" + results.seriesFound[it].id }) { i ->
+                            val s = results.seriesFound[i]
+                            PosterCard(
+                                title = s.name, image = s.cover, caption = s.category, progress = null,
+                                onClick = { vm.openSeriesDetail(s) },
+                                modifier = Modifier.width(118.dp),
+                            )
+                        }
+                    }
+                }
+            }
             if (results.channels.isNotEmpty()) {
                 item { SectionTitle("Channels") }
                 items(results.channels, key = { "c" + it.id }) { ch ->

@@ -785,7 +785,7 @@ fun TopNav(vm: TunerViewModel, current: Screen, modifier: Modifier = Modifier) {
         add("Sports" to Screen.Sports)
         if (!vm.activeProfile.kids) add("Recordings" to Screen.Recordings)
         if (vm.hasVod) add("Films & TV" to Screen.Movies)
-        else if (vm.plexLinked && !vm.activeProfile.kids) add("Plex" to Screen.PlexLibrary)
+        else if (vm.plexLinked && (!vm.activeProfile.kids || vm.kidsHavePlex)) add("Plex" to Screen.PlexLibrary)
         if (!vm.activeProfile.kids) add("Apps" to Screen.Apps)
         add("Search" to Screen.Search)
         add("Settings" to Screen.Settings)

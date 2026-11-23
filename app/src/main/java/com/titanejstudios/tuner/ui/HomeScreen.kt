@@ -75,6 +75,7 @@ private class HeroInfo(
 private enum class HomeRow(val title: String) {
     Recent("Continue watching"),
     Plex("Continue on Plex"),
+    PlexNew("New on Plex"),
     TopPicks("Top picks for you"),
     Favourites("Favourites"),
     Sport("Sport on now"),
@@ -149,6 +150,7 @@ fun HomeScreen(vm: TunerViewModel) {
         if (recent.isNotEmpty()) add(HomeRow.Recent)
         if (vm.plexItems.isNotEmpty()) add(HomeRow.Plex)
         if (topPicks.isNotEmpty()) add(HomeRow.TopPicks)
+        if (vm.plexRecent.isNotEmpty()) add(HomeRow.PlexNew)
         if (favourites.isNotEmpty()) add(HomeRow.Favourites)
         if (sportNow.isNotEmpty()) add(HomeRow.Sport)
         if (apps.isNotEmpty()) add(HomeRow.Apps)
@@ -239,6 +241,9 @@ fun HomeScreen(vm: TunerViewModel) {
                                     HomeRow.TopPicks -> PickRail(vm, topPicks, m, ::showPick)
                                     HomeRow.Plex -> PlexRail(vm, vm.plexItems, m) { p ->
                                         hero = HeroInfo(p.title, listOfNotNull(p.subtitle, "on Plex").joinToString("  ·  "), null, null, p.image)
+                                    }
+                                    HomeRow.PlexNew -> PlexEntryRail(vm, vm.plexRecent, m) { e ->
+                                        hero = HeroInfo(e.title, listOfNotNull(e.year, if (e.isShow) "TV" else "Film", e.library, "new on Plex").joinToString("  ·  "), e.summary, null, e.image)
                                     }
                                     HomeRow.Apps -> AppRail(vm, apps, m) { a ->
                                         hero = HeroInfo(a.label, "Open ${a.label}  ·  hold OK to hide it from Home", null, null, null)

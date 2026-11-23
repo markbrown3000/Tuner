@@ -309,9 +309,31 @@ class SelfTest(private val context: Context, private val store: Store) {
 
     private fun plex(): Result {
         val token = store.plexToken ?: return Result("Plex", State.Info, "Not linked")
-        val servers = Plex(store.plexClientId).servers(token)
-        return if (servers.isEmpty()) Result("Plex", State.Warn, "Linked, but no Plex server answered on this network")
-        else Result("Plex", State.Pass, "Found " + servers.joinToString { it.name })
+        val plex = Plex(store.plexClientId)
+        val servers = plex.servers(token)
+        if (servers.isEmpty()) return Result("Plex", State.Warn, "Linked, but no Plex server answered – is it switched on and signed in?")
+        var worst = State.Pass
+        val lines = servers.map { s ->
+            try {
+                val ms = plex.ping(s)
+                val libs = plex.sections(listOf(s)).size
+                val how = when {
+                    s.relay -> { worst = State.Warn; "through Plex's relay (slow – limited to about 2 Mbps; check Remote Access on the server)" }
+                    s.local -> "on your home network"
+                    else -> "over the internet"
+                }
+                val speed = when {
+                    ms < 150 -> "answers in $ms ms"
+                    ms < 800 -> "answers in $ms ms (a bit slow)"
+                    else -> { if (worst == State.Pass) worst = State.Warn; "answers in $ms ms – slow; films may take a while to start" }
+                }
+                "${s.name}: $how, $speed, $libs film/TV libraries"
+            } catch (e: Exception) {
+                worst = State.Fail
+                "${s.name}: FAILED – ${e.message ?: e.javaClass.simpleName}"
+            }
+        }
+        return Result("Plex", worst, lines.joinToString("\n"))
     }
 
     private fun football(): Result {

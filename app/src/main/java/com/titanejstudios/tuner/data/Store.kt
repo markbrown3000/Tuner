@@ -620,6 +620,16 @@ class Store(context: Context) {
         set(value) = prefs.edit().putLong("nas_backup_at", value).apply()
 
     /** Open Tuner by itself when the TV starts up. */
+    /** Plex libraries kids' profiles may see ("serverId/sectionKey"). */
+    var plexKidsSections: Set<String>
+        get() = prefs.getStringSet("plex_kids_sections", emptySet())?.toSet() ?: emptySet()
+        set(value) = prefs.edit().putStringSet("plex_kids_sections", value).apply()
+
+    /** Play an IPTV film from Plex instead when Plex has it. */
+    var preferPlexFilms: Boolean
+        get() = prefs.getBoolean("prefer_plex_films", true)
+        set(value) = prefs.edit().putBoolean("prefer_plex_films", value).apply()
+
     /** Plex library order, e.g. "added" – see PlexFeature.SORTS. */
     var plexSort: String
         get() = prefs.getString("plex_sort", "title") ?: "title"

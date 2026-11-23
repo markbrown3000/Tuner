@@ -266,7 +266,10 @@ fun PlayerScreen(vm: TunerViewModel) {
                 playback.togglePause()
                 pokeInfo()
             }
-            AndroidKey.KEYCODE_MEDIA_REWIND -> if (down) seek(-30_000, first)
+            AndroidKey.KEYCODE_MEDIA_REWIND -> if (down) {
+                // Live TV that joined late: ⏪ starts the programme from the beginning (catch-up).
+                if (!(first && isLive && !playback.timeshiftActive && vm.startOverCurrent())) seek(-30_000, first)
+            }
             AndroidKey.KEYCODE_MEDIA_FAST_FORWARD -> if (down) seek(30_000, first)
             AndroidKey.KEYCODE_LAST_CHANNEL -> if (first) vm.playPrevious()
             AndroidKey.KEYCODE_GUIDE -> if (first) vm.openGuide()

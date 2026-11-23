@@ -23,7 +23,9 @@ class PlexFeature(private val store: Store, private val scope: CoroutineScope) {
     var code by mutableStateOf<String?>(null); private set
     var status by mutableStateOf<String?>(null); private set
     var items by mutableStateOf<List<Plex.Item>>(emptyList()); private set
-    private var servers: List<Plex.Server> = emptyList()
+    /** Newest films and shows on Plex (Home's "New on Plex" row). */
+    var recent by mutableStateOf<List<Plex.Entry>>(emptyList()); private set
+    var servers: List<Plex.Server> = emptyList(); private set
     private var job: Job? = null
 
     private fun client() = Plex(store.plexClientId)
@@ -78,11 +80,13 @@ class PlexFeature(private val store: Store, private val scope: CoroutineScope) {
             val result = withContext(Dispatchers.IO) {
                 runCatching {
                     if (servers.isEmpty() || force) servers = plex.servers(token)
-                    plex.onDeck(servers)
+                    val deck = plex.onDeck(servers)
+                    deck to runCatching { plex.recentlyAdded(servers) }.getOrNull()
                 }.onFailure { AppLog.warn("Plex: couldn't load Continue watching", it) }.getOrNull()
             }
             if (result != null) {
-                items = result
+                items = result.first
+                result.second?.let { recent = it }
                 if (force) {
                     status = if (servers.isEmpty()) "Linked, but no Plex server answered on this network"
                     else "Linked ✓ · ${servers.joinToString { it.name }}"
@@ -96,6 +100,7 @@ class PlexFeature(private val store: Store, private val scope: CoroutineScope) {
         linked = store.plexToken != null
         servers = emptyList()
         items = emptyList()
+        recent = emptyList()
         if (linked) refresh(force = true)
     }
 
@@ -165,7 +170,64 @@ class PlexFeature(private val store: Store, private val scope: CoroutineScope) {
         }
     }
 
-    private fun cacheKey(section: Plex.Section) = "${section.id}|$sort"
+    // ---------------- Genres ----------------
+
+    /** The genre picked for each library (Plex's genre id and name); none = everything. */
+    var genreFor by mutableStateOf<Map<String, Pair<String, String>>>(emptyMap()); private set
+    /** Genres of the library the genre menu was opened for, or null while loading. */
+    var genres by mutableStateOf<List<Pair<String, String>>?>(null); private set
+
+    fun loadGenres(section: Plex.Section) {
+        genres = null
+        scope.launch {
+            genres = withContext(Dispatchers.IO) { runCatching { client().genres(section) }.getOrDefault(emptyList()) }
+        }
+    }
+
+    fun changeGenre(section: Plex.Section, genre: Pair<String, String>?) {
+        genreFor = if (genre == null) genreFor - section.id else genreFor + (section.id to genre)
+    }
+
+    // ---------------- Watched / unwatched ----------------
+
+    /** Marks something watched or unwatched on Plex, then runs [then] (to reload what's on screen). */
+    fun setWatched(entry: Plex.Entry, watched: Boolean, onNotice: (String) -> Unit, then: () -> Unit) {
+        scope.launch {
+            val ok = withContext(Dispatchers.IO) { runCatching { client().setWatched(entry, watched) }.isSuccess }
+            if (ok) {
+                onNotice((if (watched) "Marked watched: " else "Marked unwatched: ") + entry.title)
+                // Lists that show it are now out of date.
+                sectionItems = emptyMap()
+                then()
+                refresh()
+            } else onNotice("Plex didn't accept that – try again")
+        }
+    }
+
+    // ---------------- Copies (Films / Films 4K) ----------------
+
+    /** Every copy of a film on your Plex servers, 4K first. Empty if none (or Plex isn't answering). */
+    suspend fun copiesOf(title: String, year: String?): List<Plex.Entry> = withContext(Dispatchers.IO) {
+        runCatching {
+            if (servers.isEmpty()) store.plexToken?.let { servers = client().servers(it) }
+            client().copiesOf(servers, title, year)
+        }.getOrDefault(emptyList())
+    }
+
+    // ---------------- Kids ----------------
+
+    /** Libraries (section ids) kids' profiles may see. */
+    var kidsSections by mutableStateOf(store.plexKidsSections); private set
+
+    fun toggleKids(section: Plex.Section) {
+        kidsSections = if (section.id in kidsSections) kidsSections - section.id else kidsSections + section.id
+        store.plexKidsSections = kidsSections
+    }
+
+    /** For search results and recently added: is this from a kids' library? */
+    fun isKidsEntry(e: Plex.Entry): Boolean = e.sectionKey != null && (e.server.machineId + "/" + e.sectionKey) in kidsSections
+
+    private fun cacheKey(section: Plex.Section) = "${section.id}|$sort|${genreFor[section.id]?.first ?: ""}"
 
     /** What's loaded for [section] with the current order and search, or null while loading. */
     fun itemsFor(section: Plex.Section): List<Plex.Entry>? = sectionItems[cacheKey(section)]
@@ -175,13 +237,13 @@ class PlexFeature(private val store: Store, private val scope: CoroutineScope) {
         val key = cacheKey(section)
         if (sectionItems.containsKey(key) && !force) return
         libraryJob?.cancel()
-        libraryStatus = "Loading ${section.title}…"
+        libraryStatus = "Loading ${section.title}" + (genreFor[section.id]?.let { " · ${it.second}" } ?: "") + "…"
         val plexSort = SORTS.firstOrNull { it.key == sort }?.let { if (section.isShows) it.shows else it.films }
         val title: String? = null
         libraryJob = scope.launch {
             val result = withContext(Dispatchers.IO) {
                 runCatching {
-                    client().sectionItems(section, plexSort, title) { soFar ->
+                    client().sectionItems(section, plexSort, title, genreFor[section.id]?.first) { soFar ->
                         // Show posters as each page arrives instead of waiting for the whole library.
                         scope.launch { if (libraryJob?.isActive == true) sectionItems = keepRecent(sectionItems, key, soFar) }
                     }

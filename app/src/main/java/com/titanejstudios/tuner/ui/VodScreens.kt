@@ -268,11 +268,12 @@ fun MoviesScreen(vm: TunerViewModel) {
     menuFor?.let { m ->
         MenuDialog(
             title = m.name,
-            items = listOf(
-                MenuItem("ℹ Film info & trailer") { vm.openFilmInfo(m.name, isSeries = false) },
-                MenuItem(if (vm.inWatchlist(m.id)) "Remove from My list" else "＋ Add to My list") { vm.toggleWatchlist(m) },
-                MenuItem("Play from the beginning") { vm.playMovie(m, fromStart = true) },
-            ),
+            items = buildList {
+                add(MenuItem("ℹ Film info & trailer") { vm.openFilmInfo(m.name, isSeries = false) })
+                add(MenuItem(if (vm.inWatchlist(m.id)) "Remove from My list" else "＋ Add to My list") { vm.toggleWatchlist(m) })
+                add(MenuItem("Play from the beginning") { vm.playMovie(m, fromStart = true) })
+                if (vm.plexLinked && vm.preferPlexFilms) add(MenuItem("Play the IPTV copy", "not Plex's") { vm.playMovie(m, fromStart = false, viaPlex = false) })
+            },
             onDismiss = { menuFor = null },
         )
     }

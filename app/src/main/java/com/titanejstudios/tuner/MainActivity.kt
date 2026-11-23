@@ -19,6 +19,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import com.titanejstudios.tuner.ui.AppsScreen
 import com.titanejstudios.tuner.ui.CatchupScreen
+import com.titanejstudios.tuner.ui.MenuDialog
+import com.titanejstudios.tuner.ui.MenuItem
 import com.titanejstudios.tuner.ui.CategoriesScreen
 import com.titanejstudios.tuner.ui.CategoryPicker
 import com.titanejstudios.tuner.ui.ChannelsScreen
@@ -178,6 +180,20 @@ private fun TunerApp(vm: TunerViewModel) {
             if (vm.filmInfoOpen) FilmInfoDialog(vm)
             if (vm.stillWatchingAsk) StillWatchingDialog(vm)
             vm.updateOffer?.let { UpdateDialog(vm, it) }
+            vm.plexCopyChoice?.let { c ->
+                MenuDialog(
+                    title = "Which copy of ${c.title}?",
+                    subtitle = "It's in more than one place",
+                    items = buildList {
+                        c.copies.forEach { e ->
+                            val where = listOfNotNull(e.library, e.year).joinToString(" · ").ifEmpty { "Plex" }
+                            add(MenuItem("Plex – $where", if (vm.plexServerCount > 1) e.server.name else null) { vm.choosePlexCopy(e) })
+                        }
+                        if (c.iptv != null) add(MenuItem("Your IPTV provider") { vm.choosePlexCopy(null) })
+                    },
+                    onDismiss = { vm.cancelPlexCopyChoice() },
+                )
+            }
             vm.pinPrompt?.let { p -> PinDialog(p, onCancel = { vm.cancelPin() }) }
             vm.notice?.let { NoticeToast(it, Modifier.align(Alignment.BottomCenter)) }
         }

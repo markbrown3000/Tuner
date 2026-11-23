@@ -14,7 +14,15 @@ import java.net.URLEncoder
  */
 class Plex(private val clientId: String) {
     class Pin(val id: Long, val code: String)
-    class Server(val name: String, val machineId: String, val uri: String, val token: String)
+    class Server(
+        val name: String,
+        val machineId: String,
+        val uri: String,
+        val token: String,
+        /** On this network (fast), or through Plex's relay (slow, limited to 2 Mbps). */
+        val local: Boolean = false,
+        val relay: Boolean = false,
+    )
     class Item(
         val ratingKey: String,
         val title: String,
@@ -82,7 +90,10 @@ class Plex(private val clientId: String) {
                     try { conn.responseCode in 200..299 } finally { conn.disconnect() }
                 }.getOrDefault(false)
                 if (ok) {
-                    out += Server(r.optString("name", "Plex"), r.optString("clientIdentifier"), uri, serverToken)
+                    out += Server(
+                        r.optString("name", "Plex"), r.optString("clientIdentifier"), uri, serverToken,
+                        local = c.optBoolean("local"), relay = c.optBoolean("relay"),
+                    )
                     break
                 }
             }
@@ -155,6 +166,8 @@ class Plex(private val clientId: String) {
         val server: Server,
         /** Which library it's in ("Movies (4K)") – shown in search results. */
         val library: String? = null,
+        /** The library's key on its server (for kids' libraries). */
+        val sectionKey: String? = null,
     ) {
         val isShow: Boolean get() = type == "show"
 
@@ -191,10 +204,17 @@ class Plex(private val clientId: String) {
      * Everything in a library, in Plex's own A–Z order. Fetched [PAGE] at a time: a big library
      * in one go is hundreds of MB of JSON, more than a TV app is allowed. [onPage] gets the list so far.
      */
-    fun sectionItems(section: Section, sort: String? = null, title: String? = null, onPage: (List<Entry>) -> Unit = {}): List<Entry> {
+    fun sectionItems(
+        section: Section,
+        sort: String? = null,
+        title: String? = null,
+        genre: String? = null,
+        onPage: (List<Entry>) -> Unit = {},
+    ): List<Entry> {
         val s = section.server
         val q = listOfNotNull(
             sort?.let { "sort=" + URLEncoder.encode(it, "UTF-8") },
+            genre?.let { "genre=" + URLEncoder.encode(it, "UTF-8") },
             title?.takeIf { it.isNotBlank() }?.let { "title=" + URLEncoder.encode(it.trim(), "UTF-8") },
         ).joinToString("&")
         val url = "${s.uri}/library/sections/${section.key}/all" + (if (q.isEmpty()) "" else "?$q")
@@ -240,7 +260,7 @@ class Plex(private val clientId: String) {
      * missing words, typos and "the", and finds films by actor or director too.
      * Films and shows only; the same title in two libraries (Films and Films 4K) appears once.
      */
-    fun search(servers: List<Server>, query: String): List<Entry> {
+    fun search(servers: List<Server>, query: String, dedupe: Boolean = true): List<Entry> {
         val q = query.trim()
         if (q.isEmpty()) return emptyList()
         val found = ArrayList<Entry>()
@@ -276,7 +296,81 @@ class Plex(private val clientId: String) {
             .withIndex()
             .sortedWith(compareBy({ score(it.value) }, { it.index }))
             .map { it.value }
+            .let { list -> if (dedupe) list.distinctBy { "${it.type}|${norm(it.title)}|${it.year}" } else list }
+    }
+
+    /**
+     * Every copy of a film across your libraries and servers (Films, Films 4K…), best first:
+     * 4K, then the rest. Matches the title exactly (ignoring "The", punctuation) and the year if known.
+     */
+    fun copiesOf(servers: List<Server>, title: String, year: String?): List<Entry> {
+        val want = norm(title)
+        if (want.isEmpty()) return emptyList()
+        return search(servers, title, dedupe = false)
+            .filter { it.type == "movie" && norm(it.title) == want && (year == null || it.year == null || it.year == year) }
+            .distinctBy { it.server.machineId + "/" + it.ratingKey }
+            .sortedBy { if (it.library?.contains("4k", ignoreCase = true) == true || it.library?.contains("uhd", ignoreCase = true) == true) 0 else 1 }
+    }
+
+    /** Newest films and shows from every server, newest first (shows once, however many episodes arrived). */
+    fun recentlyAdded(servers: List<Server>, limit: Int = 30): List<Entry> {
+        val out = ArrayList<Pair<Long, Entry>>()
+        for (s in servers) {
+            try {
+                val root = JSONObject(read(open("${s.uri}/library/recentlyAdded?X-Plex-Container-Start=0&X-Plex-Container-Size=60", token = s.token, timeoutMs = 20_000)))
+                val md = root.optJSONObject("MediaContainer")?.optJSONArray("Metadata") ?: continue
+                for (i in 0 until md.length()) {
+                    val m = md.getJSONObject(i)
+                    // Seasons and episodes stand for their show.
+                    val show = when (m.optString("type")) {
+                        "season" -> Triple(m.optString("parentRatingKey"), m.optString("parentTitle"), m.optString("parentThumb"))
+                        "episode" -> Triple(m.optString("grandparentRatingKey"), m.optString("grandparentTitle"), m.optString("grandparentThumb"))
+                        else -> null
+                    }
+                    val copy = JSONObject(m.toString())
+                    if (show != null) {
+                        if (show.first.isBlank()) continue
+                        copy.put("ratingKey", show.first).put("title", show.second).put("type", "show")
+                            .put("thumb", show.third).put("year", "").put("summary", "")
+                            .remove("Media")
+                    } else if (m.optString("type") != "movie") continue
+                    val arr = org.json.JSONArray().put(copy)
+                    entries(arr, s, poster = true).firstOrNull()?.let { out += m.optLong("addedAt") to it }
+                }
+            } catch (e: Exception) {
+                AppLog.warn("Plex: couldn't read recently added from ${s.name}", e)
+            }
+        }
+        return out.sortedByDescending { it.first }.map { it.second }
             .distinctBy { "${it.type}|${norm(it.title)}|${it.year}" }
+            .take(limit)
+    }
+
+    /** A library's genres: (Plex's id, name). */
+    fun genres(section: Section): List<Pair<String, String>> {
+        val s = section.server
+        val root = JSONObject(read(open("${s.uri}/library/sections/${section.key}/genre", token = s.token, timeoutMs = 15_000)))
+        val dirs = root.optJSONObject("MediaContainer")?.optJSONArray("Directory") ?: return emptyList()
+        return (0 until dirs.length()).mapNotNull { i ->
+            val d = dirs.optJSONObject(i) ?: return@mapNotNull null
+            val key = d.optString("key").substringAfterLast('/').substringAfterLast('=')
+            val title = d.optString("title")
+            if (key.isBlank() || title.isBlank()) null else key to title
+        }
+    }
+
+    /** Marks a film, episode or whole show watched or unwatched on the Plex server. */
+    fun setWatched(entry: Entry, watched: Boolean) {
+        val s = entry.server
+        val action = if (watched) "scrobble" else "unscrobble"
+        read(open("${s.uri}/:/$action?identifier=com.plexapp.plugins.library&key=${entry.ratingKey}", token = s.token))
+    }
+
+    /** How long the server takes to answer, in milliseconds (for Check everything). */
+    fun ping(s: Server): Long {
+        val t = System.currentTimeMillis()
+        read(open("${s.uri}/identity", token = s.token, timeoutMs = 8_000))
+        return System.currentTimeMillis() - t
     }
 
     private fun norm(s: String) = s.lowercase()
@@ -318,6 +412,7 @@ class Plex(private val clientId: String) {
                 viewedLeafCount = m.optInt("viewedLeafCount"),
                 server = s,
                 library = m.optString("librarySectionTitle").takeIf { it.isNotBlank() },
+                sectionKey = m.optString("librarySectionID").takeIf { it.isNotBlank() && it != "0" },
             )
         }
         return out

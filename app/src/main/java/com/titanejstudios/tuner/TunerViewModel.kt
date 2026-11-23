@@ -41,6 +41,7 @@ import com.titanejstudios.tuner.data.Reminder
 import com.titanejstudios.tuner.data.Repository
 import com.titanejstudios.tuner.data.ResumeEntry
 import com.titanejstudios.tuner.data.SeriesItem
+import com.titanejstudios.tuner.data.FilmName
 import com.titanejstudios.tuner.data.Source
 import com.titanejstudios.tuner.data.Store
 import com.titanejstudios.tuner.data.VodItem
@@ -90,6 +91,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -128,7 +130,21 @@ sealed class PlayMode {
 
 class PinPrompt(val title: String, val onEntered: (String) -> Unit)
 
-class SearchResults(val channels: List<Channel>, val programmes: List<Pair<Channel, Programme>>)
+class SearchResults(
+    val channels: List<Channel>,
+    val programmes: List<Pair<Channel, Programme>>,
+    val films: List<VodItem> = emptyList(),
+    val seriesFound: List<SeriesItem> = emptyList(),
+)
+
+/** A film that's in more than one place (Plex Films and Films 4K, or IPTV too): which to play. */
+class PlexCopyChoice(
+    val title: String,
+    val copies: List<com.titanejstudios.tuner.integrations.Plex.Entry>,
+    val fromStart: Boolean,
+    /** The IPTV copy, when the choice came from Films & TV. */
+    val iptv: VodItem?,
+)
 
 /** A place recordings can be saved (internal storage or a USB drive). */
 class StorageOption(val path: String, val label: String, val freeBytes: Long)
@@ -300,6 +316,14 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
 
     var searchQuery by mutableStateOf(""); private set
     var searchResults by mutableStateOf(SearchResults(emptyList(), emptyList())); private set
+    /** Plex films and shows matching the search. */
+    var searchPlex by mutableStateOf<List<Plex.Entry>>(emptyList()); private set
+    private var searchPlexJob: Job? = null
+    private val startOverOffered = HashSet<String>()
+    private var liveSinceId: String? = null
+    private var liveSince = 0L
+    var plexCopyChoice by mutableStateOf<PlexCopyChoice?>(null); private set
+    var preferPlexFilms by mutableStateOf(store.preferPlexFilms); private set
     private var searchJob: Job? = null
 
     var movies by mutableStateOf<List<VodItem>?>(null); private set
@@ -367,6 +391,8 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     val plexCode: String? get() = plexFeature.code
     val plexStatus: String? get() = plexFeature.status
     val plexItems: List<Plex.Item> get() = plexFeature.items
+    val plexRecent: List<Plex.Entry>
+        get() = if (activeProfile.kids) plexFeature.recent.filter { plexFeature.isKidsEntry(it) } else plexFeature.recent
     private var plexPlaying: Plex.Item? = null
 
     val football = FootballFeature(store, viewModelScope, { inForeground }, { showNotice(it) }, { e, d -> sendHa(e, d) })
@@ -574,6 +600,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
             while (true) {
                 now = System.currentTimeMillis()
                 checkReminders()
+                offerStartOver()
                 trackUsage()
                 announceProgrammeChange()
                 trackCleanPlay()
@@ -1747,7 +1774,12 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         if (dueReminder != null) return
         val t = System.currentTimeMillis()
         val live = reminders.filter { it.stop > t }
-        val due = live.firstOrNull { t >= it.start - 60_000 }
+        // Followed teams' matches pop up 5 minutes early, so there's time to get settled.
+        val teams = football.teams
+        val due = live.firstOrNull { r ->
+            val lead = if (teams.any { SportFollow.mentions(r.title, it) }) 5 * 60_000L else 60_000L
+            t >= r.start - lead
+        }
         val remaining = if (due != null) live - due else live
         if (remaining.size != reminders.size) {
             reminders = remaining
@@ -1757,6 +1789,39 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
             dueReminder = due
             sendHa("reminder", ReminderAlarms.payload(due) + ("app_open" to true))
         }
+    }
+
+    // ---------------- Start from the beginning (joined late) ----------------
+
+
+    /** After a few seconds on a programme that started a while ago, mentions it can be watched from the start. */
+    private fun offerStartOver() {
+        val m = mode as? PlayMode.Live
+        if (m == null || screen != Screen.Player || inPip) {
+            liveSinceId = null
+            return
+        }
+        val t = System.currentTimeMillis()
+        if (liveSinceId != m.channel.id) {
+            liveSinceId = m.channel.id
+            liveSince = t
+            return
+        }
+        if (t - liveSince < 10_000) return
+        val cur = nowNext(m.channel.id, t).first ?: return
+        if (t - cur.start < 5 * 60_000L || cur.stop - t < 10 * 60_000L) return
+        if (!startOverOffered.add(m.channel.id + "@" + cur.start)) return
+        if (!canCatchup(m.channel, cur)) return
+        showNotice("Joined \"${cur.title}\" late? Press ⏪ (or OK › Watch from the start) to see it from the beginning")
+    }
+
+    /** ⏪ on live TV: start the current programme from the beginning, if it has catch-up. */
+    fun startOverCurrent(): Boolean {
+        val m = mode as? PlayMode.Live ?: return false
+        val cur = nowNext(m.channel.id, System.currentTimeMillis()).first ?: return false
+        if (!canCatchup(m.channel, cur)) return false
+        playCatchup(m.channel, cur, zapChannels)
+        return true
     }
 
     fun acceptReminder() {
@@ -1784,8 +1849,22 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
             val q = query.trim()
             if (q.length < 2) {
                 searchResults = SearchResults(emptyList(), emptyList())
+                searchPlex = emptyList()
                 return@launch
             }
+            // Plex is searched alongside (it's on the network, so its results can arrive a moment later).
+            searchPlexJob?.cancel()
+            searchPlex = emptyList()
+            if (plexLinked && (!activeProfile.kids || kidsHavePlex)) {
+                searchPlexJob = viewModelScope.launch {
+                    val found = withContext(Dispatchers.IO) {
+                        runCatching { Plex(store.plexClientId).search(plexFeature.servers, q) }.getOrDefault(emptyList())
+                    }
+                    searchPlex = if (activeProfile.kids) found.filter { plexFeature.isKidsEntry(it) } else found.take(40)
+                }
+            }
+            val filmPool = if (hasVod) movies.orEmpty() else emptyList()
+            val seriesPool = if (hasVod) series.orEmpty() else emptyList()
             val pool = channels.filter { isAllowed(it) }
             val ids = activeSources().map { it.id }
             searchResults = withContext(Dispatchers.IO) {
@@ -1798,7 +1877,11 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
                     .filter { (c, p) -> p.stop > t || Catchup.isAvailable(c, p, t) }
                     .distinctBy { (c, p) -> c.id + "@" + p.start }
                     .take(200)
-                SearchResults(matchedChannels, progs)
+                val words = needle.split(Regex("\\s+")).filter { it.isNotBlank() }
+                fun hit(name: String) = name.lowercase().let { n -> words.all { it in n } }
+                val films = filmPool.filter { hit(it.name) }.take(40)
+                val shows = seriesPool.filter { hit(it.name) }.take(40)
+                SearchResults(matchedChannels, progs, films, shows)
             }
         }
     }
@@ -1973,7 +2056,24 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         }
     }
 
-    fun playMovie(m: VodItem, fromStart: Boolean) {
+    fun playMovie(m: VodItem, fromStart: Boolean, viaPlex: Boolean = true) {
+        // Also on Plex? Plex's copy is usually better (and its progress is shared with the Plex app).
+        if (viaPlex && plexLinked && preferPlexFilms) {
+            viewModelScope.launch {
+                val (title, year) = FilmName.parse(m.name)
+                val copies = withTimeoutOrNull(5_000) { plexFeature.copiesOf(title, year) }.orEmpty()
+                    .filter { !activeProfile.kids || plexFeature.isKidsEntry(it) }
+                when {
+                    copies.isEmpty() -> playMovie(m, fromStart, viaPlex = false)
+                    copies.size == 1 -> {
+                        showNotice("Playing from Plex" + (copies[0].library?.let { " ($it)" } ?: "") + " – hold OK on the film for the IPTV copy")
+                        playPlexEntry(copies[0], fromStart, chosen = true)
+                    }
+                    else -> plexCopyChoice = PlexCopyChoice(m.name, copies, fromStart, m)
+                }
+            }
+            return
+        }
         episodeQueue = emptyList()
         startVod(PlayMode.Vod(m.id, m.name, m.category, m.poster, m.url, null), fromStart)
     }
@@ -2710,17 +2810,65 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
             linkPlex()
             return
         }
+        if (activeProfile.kids && !kidsHavePlex) {
+            showNotice("No Plex libraries are set for kids yet – a grown-up can hold OK on one in Plex to allow it")
+            return
+        }
         navigate(Screen.PlexLibrary)
         plexFeature.loadSections()
     }
 
     /** Plays a Plex film or episode. Episodes queue up the rest of the show after them. */
-    fun playPlexEntry(entry: com.titanejstudios.tuner.integrations.Plex.Entry, fromStart: Boolean = false) {
+    fun playPlexEntry(entry: com.titanejstudios.tuner.integrations.Plex.Entry, fromStart: Boolean = false, chosen: Boolean = false) {
+        if (entry.type == "movie" && !chosen) {
+            // In Films and Films 4K? Ask which copy to play.
+            viewModelScope.launch {
+                val copies = withTimeoutOrNull(5_000) { plexFeature.copiesOf(entry.title, entry.year) }.orEmpty()
+                    .filter { !activeProfile.kids || plexFeature.isKidsEntry(it) }
+                if (copies.size > 1) plexCopyChoice = PlexCopyChoice(entry.title, copies, fromStart, null)
+                else playPlexEntry(entry, fromStart, chosen = true)
+            }
+            return
+        }
         val show = plexFeature.show
         val item = entry.toItem(if (entry.type == "episode") show?.title else null)
         playPlex(item, fromStart)
         if (entry.type == "episode") {
             plexEpisodeQueue = plexFeature.showEpisodes.orEmpty().dropWhile { it.ratingKey != entry.ratingKey }.drop(1)
+        }
+    }
+
+
+    /** Plays the copy picked ([copy] null = the IPTV copy). */
+    fun choosePlexCopy(copy: com.titanejstudios.tuner.integrations.Plex.Entry?) {
+        val c = plexCopyChoice ?: return
+        plexCopyChoice = null
+        if (copy != null) playPlexEntry(copy, c.fromStart, chosen = true)
+        else c.iptv?.let { playMovie(it, c.fromStart, viaPlex = false) }
+    }
+
+    fun cancelPlexCopyChoice() {
+        plexCopyChoice = null
+    }
+
+
+    fun togglePreferPlexFilms() {
+        preferPlexFilms = !preferPlexFilms
+        store.preferPlexFilms = preferPlexFilms
+        showNotice(if (preferPlexFilms) "Films you also have on Plex will play from Plex" else "Films play from your IPTV provider")
+    }
+
+    val plexServerCount: Int get() = plexFeature.servers.size
+
+    /** Kids' profiles only see the Plex libraries picked for them (hold OK on a library). */
+    val kidsHavePlex: Boolean get() = plexLinked && plexFeature.kidsSections.isNotEmpty()
+
+    fun plexSectionAllowed(s: Plex.Section): Boolean = !activeProfile.kids || s.id in plexFeature.kidsSections
+
+    /** Marks a Plex film, show or episode watched/unwatched, then reloads what's on screen. */
+    fun setPlexWatched(entry: Plex.Entry, watched: Boolean) {
+        plexFeature.setWatched(entry, watched, { showNotice(it) }) {
+            if (screen == Screen.PlexShow) plexFeature.show?.let { plexFeature.openShow(it) }
         }
     }
 
