@@ -137,15 +137,31 @@ class PlexFeature(private val store: Store, private val scope: CoroutineScope) {
         libraryJob?.cancel()
         libraryStatus = "Loading ${section.title}…"
         libraryJob = scope.launch {
-            val result = withContext(Dispatchers.IO) { runCatching { client().sectionItems(section) } }
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    client().sectionItems(section) { soFar ->
+                        // Show posters as each page arrives instead of waiting for the whole library.
+                        scope.launch { if (libraryJob?.isActive == true) sectionItems = keepRecent(sectionItems, section.id, soFar) }
+                    }
+                }
+            }
             result.onSuccess { list ->
-                sectionItems = sectionItems + (section.id to list)
+                sectionItems = keepRecent(sectionItems, section.id, list)
                 libraryStatus = null
             }.onFailure {
                 AppLog.warn("Plex: couldn't load ${section.title}", it)
                 libraryStatus = "Couldn't load ${section.title}: ${it.message}"
             }
         }
+    }
+
+    /** Keeps the last few libraries in memory – they can be thousands of titles each. */
+    private fun keepRecent(map: Map<String, List<Plex.Entry>>, id: String, list: List<Plex.Entry>): Map<String, List<Plex.Entry>> {
+        val m = LinkedHashMap(map)
+        m.remove(id)
+        m[id] = list
+        while (m.size > 3) m.remove(m.keys.first())
+        return m
     }
 
     /** Opens a show: loads all its episodes. */

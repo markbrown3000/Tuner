@@ -26,6 +26,8 @@ class Plex(private val clientId: String) {
         val server: Server,
     )
 
+    private val PAGE = 200
+
     private fun open(url: String, method: String = "GET", token: String? = null, timeoutMs: Int = 10_000): HttpURLConnection =
         (URL(url).openConnection() as HttpURLConnection).apply {
             requestMethod = method
@@ -178,18 +180,42 @@ class Plex(private val clientId: String) {
         return out
     }
 
-    /** Everything in a library, in Plex's own A–Z order. */
-    fun sectionItems(section: Section): List<Entry> {
+    /**
+     * Everything in a library, in Plex's own A–Z order. Fetched [PAGE] at a time: a big library
+     * in one go is hundreds of MB of JSON, more than a TV app is allowed. [onPage] gets the list so far.
+     */
+    fun sectionItems(section: Section, onPage: (List<Entry>) -> Unit = {}): List<Entry> {
         val s = section.server
-        val root = JSONObject(read(open("${s.uri}/library/sections/${section.key}/all", token = s.token, timeoutMs = 30_000)))
-        return entries(root, s, poster = true)
+        return paged("${s.uri}/library/sections/${section.key}/all", s, poster = true, onPage = onPage)
     }
 
     /** Every episode of a show, season by season. */
     fun episodes(show: Entry): List<Entry> {
         val s = show.server
-        val root = JSONObject(read(open("${s.uri}/library/metadata/${show.ratingKey}/allLeaves", token = s.token, timeoutMs = 20_000)))
-        return entries(root, s, poster = false).sortedWith(compareBy({ it.season }, { it.episode }))
+        return paged("${s.uri}/library/metadata/${show.ratingKey}/allLeaves", s, poster = false)
+            .sortedWith(compareBy({ it.season }, { it.episode }))
+    }
+
+    private fun paged(base: String, s: Server, poster: Boolean, onPage: (List<Entry>) -> Unit = {}): List<Entry> {
+        val out = ArrayList<Entry>()
+        var start = 0
+        while (true) {
+            val sep = if ('?' in base) '&' else '?'
+            val url = "$base${sep}X-Plex-Container-Start=$start&X-Plex-Container-Size=$PAGE"
+            val conn = open(url, token = s.token, timeoutMs = 30_000).apply {
+                setRequestProperty("X-Plex-Container-Start", start.toString())
+                setRequestProperty("X-Plex-Container-Size", PAGE.toString())
+            }
+            val root = JSONObject(read(conn))
+            val page = entries(root, s, poster)
+            out += page
+            onPage(out.toList())
+            val total = root.optJSONObject("MediaContainer")?.optInt("totalSize", -1) ?: -1
+            start += PAGE
+            if (page.isEmpty() || page.size < PAGE && total < 0 || total in 0..start) break
+            if (Thread.currentThread().isInterrupted) break
+        }
+        return out
     }
 
     private fun entries(root: JSONObject, s: Server, poster: Boolean): List<Entry> {
@@ -216,7 +242,7 @@ class Plex(private val clientId: String) {
                 viewOffsetMs = m.optLong("viewOffset"),
                 durationMs = m.optLong("duration"),
                 watched = m.optInt("viewCount") > 0,
-                summary = m.optString("summary").takeIf { it.isNotBlank() },
+                summary = m.optString("summary").takeIf { it.isNotBlank() }?.take(600),
                 rating = rating?.let { String.format(java.util.Locale.UK, "%.1f", it) },
                 season = m.optInt("parentIndex"),
                 episode = m.optInt("index"),

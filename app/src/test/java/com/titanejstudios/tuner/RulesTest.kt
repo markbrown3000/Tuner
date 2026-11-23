@@ -147,4 +147,16 @@ class ChannelMergeTest {
         assertEquals(513, r2.channels[0].number)
         assertEquals("FHD 1080p", com.titanejstudios.tuner.data.ChannelMerge.versionLabel(list[0]))
     }
+
+    @Test
+    fun cricketIsNotFootball() {
+        fun sport(title: String) = Sports.classify(Programme(0, 3_600_000, title, null, "Sport"))
+        assertEquals("Cricket", sport("Live 2nd Test Day 1: SA v BAN"))
+        assertEquals("Cricket", sport("Men's Asiacup Risingstars SI V Ban Live"))
+        assertEquals("Cricket", sport("Live: 2026 ACC Men's Asia Cup Rising Stars"))
+        assertEquals("Cricket", sport("ICC T20 World Cup: England v India"))
+        assertEquals("Rugby", sport("Rugby World Cup: Wales v Fiji"))
+        assertEquals("Football", sport("Newcastle v Tottenham"))
+        assertEquals("Football", sport("AFC Asian Cup: Japan v Iraq"))
+    }
 }

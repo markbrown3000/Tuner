@@ -9,13 +9,17 @@ object Sports {
 
     private val patterns: List<Pair<String, Regex>> = listOf(
         "Darts & Snooker" to Regex("\\b(darts|snooker|pdc|world matchplay|grand slam of darts)\\b"),
+        "Cricket" to Regex(
+            "\\b(cricket|test match|the hundred|ipl|t20i?|odis?|ashes|\\d(st|nd|rd|th) test|test day|asia ?cup|" +
+                "big bash|bbl|wbbl|county championship|sheffield shield|ranji trophy|sa20|ilt20|psl|cpl|" +
+                "vitality blast|one-day cup|rising stars)\\b"
+        ),
+        "Rugby" to Regex("\\b(rugby|six nations|premiership rugby|super league|challenge cup|urc)\\b"),
         "Football" to Regex(
             "\\b(football|soccer|premier league|champions league|europa league|conference league|fa cup|" +
                 "efl|carabao cup|la liga|serie a|bundesliga|ligue 1|spfl|scottish premiership|mls|world cup|" +
                 "euro 20\\d\\d|super sunday|monday night football|match of the day|super 6)\\b"
         ),
-        "Rugby" to Regex("\\b(rugby|six nations|premiership rugby|super league|challenge cup|urc)\\b"),
-        "Cricket" to Regex("\\b(cricket|test match|the hundred|ipl|t20|odi|ashes)\\b"),
         "Motorsport" to Regex("(\\bformula ?1\\b|\\bf1\\b|grand prix|motogp|moto gp|nascar|indycar|\\bwrc\\b|btcc|formula e|superbikes)"),
         "Tennis" to Regex("\\b(tennis|wimbledon|atp|wta|roland garros|davis cup)\\b"),
         "Golf" to Regex("\\b(golf|pga|ryder cup|dp world tour|lpga)\\b"),
@@ -26,6 +30,9 @@ object Sports {
 
     /** "Liverpool v Arsenal", "Leeds vs Hull" */
     private val versus = Regex("\\p{L}[\\p{L}.']*\\s+(v|vs\\.?)\\s+\\p{Lu}")
+
+    private const val CODES = "eng|aus|ind|sa|rsa|nz|pak|sl|si|ban|afg|wi|zim|ire|sco|ned|uae|nep|oma|usa|can"
+    private val cricketCodes = Regex("\\b($CODES)\\s+(v|vs\\.?)\\s+($CODES)\\b", RegexOption.IGNORE_CASE)
 
     /** @return the sport type, or null if this isn't sport */
     fun classify(p: Programme): String? {
@@ -38,6 +45,8 @@ object Sports {
         if (versus.containsMatchIn(p.title)) {
             // Match-ups: look at the description for a clue, otherwise football (the usual UK case).
             for ((name, re) in patterns) if (re.containsMatchIn(text)) return name
+            // "SA v BAN", "IND vs AUS" – short country codes are how cricket is listed.
+            if (cricketCodes.containsMatchIn(p.title)) return "Cricket"
             return "Football"
         }
         if (sportCategory) {
