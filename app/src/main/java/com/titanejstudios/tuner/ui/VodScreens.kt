@@ -346,13 +346,29 @@ fun SeriesDetailScreen(vm: TunerViewModel) {
     val lastWatched = remember(eps, vm.resume) {
         eps.orEmpty().filter { vm.resume.containsKey(it.id) }.maxByOrNull { vm.resume[it.id]?.updatedAt ?: 0L }
     }
-    var season by remember(seasons) { mutableStateOf(lastWatched?.season ?: seasons.firstOrNull() ?: 1) }
+    // The episode you're up to: the last one watched, or the next one if you'd nearly finished it.
+    val upTo = remember(eps, lastWatched) {
+        val list = eps.orEmpty()
+        val r = lastWatched?.let { vm.resume[it.id] }
+        if (lastWatched == null || r == null) null
+        else if (r.durationMs > 0 && r.positionMs >= r.durationMs * 0.9) list.getOrNull(list.indexOf(lastWatched) + 1) ?: lastWatched
+        else lastWatched
+    }
+    var season by remember(seasons) { mutableStateOf(upTo?.season ?: seasons.firstOrNull() ?: 1) }
     val shown = remember(eps, season) { eps.orEmpty().filter { it.season == season } }
     var resumeAsk by remember { mutableStateOf<Episode?>(null) }
     val firstFocus = remember { FocusRequester() }
+    val episodeFocus = remember { FocusRequester() }
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+    val target = remember(shown, upTo) { shown.indexOfFirst { it.id == upTo?.id } }
     LaunchedEffect(eps != null) {
         delay(60)
-        runCatching { firstFocus.requestFocus() }
+        if (target >= 0) {
+            // Straight to the episode you're up to.
+            runCatching { listState.scrollToItem(target) }
+            delay(40)
+            runCatching { episodeFocus.requestFocus() }
+        } else runCatching { firstFocus.requestFocus() }
     }
 
     Row(
@@ -396,13 +412,14 @@ fun SeriesDetailScreen(vm: TunerViewModel) {
                 }
             }
             Spacer(Modifier.height(16.dp))
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            LazyColumn(state = listState, verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 items(shown, key = { it.id }) { e ->
                     val r = vm.resume[e.id]
                     FocusSurface(
                         onClick = { if (r != null) resumeAsk = e else vm.playEpisode(e, eps, fromStart = true) },
                         baseColor = TunerColors.Panel,
-                        modifier = Modifier.fillMaxWidth().height(96.dp),
+                        modifier = Modifier.fillMaxWidth().height(96.dp)
+                            .then(if (e.id == upTo?.id) Modifier.focusRequester(episodeFocus) else Modifier),
                     ) { focused ->
                         Row(Modifier.fillMaxSize().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
                             Box(Modifier.size(width = 136.dp, height = 76.dp).clip(RoundedCornerShape(6.dp)).background(Color(0xFF0B0E12))) {

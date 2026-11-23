@@ -347,13 +347,25 @@ fun PlexShowScreen(vm: TunerViewModel) {
     val show = plex.show ?: return
     val episodes = plex.showEpisodes
     val seasons = remember(episodes) { episodes.orEmpty().map { it.season }.distinct().sorted() }
-    // Start on the season with the first unwatched episode.
+    // The episode you're up to: one you're part-way through, else the first unwatched after the
+    // last one you watched, else the first unwatched.
+    val upTo = remember(episodes) {
+        val list = episodes.orEmpty()
+        list.firstOrNull { it.viewOffsetMs > 0 && !it.watched }
+            ?: list.indexOfLast { it.watched }.takeIf { it >= 0 }?.let { i -> list.drop(i + 1).firstOrNull { !it.watched } }
+            ?: list.firstOrNull { !it.watched }
+    }
     var season by remember(episodes) {
-        mutableStateOf(episodes?.firstOrNull { !it.watched }?.season ?: seasons.firstOrNull() ?: 1)
+        mutableStateOf(upTo?.season ?: seasons.firstOrNull() ?: 1)
     }
     val shown = remember(episodes, season) { episodes.orEmpty().filter { it.season == season } }
     val first = remember { FocusRequester() }
-    LaunchedEffect(episodes != null) {
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+    // Index of the highlighted episode in this season (the one you're up to, or the first).
+    val target = remember(shown, upTo) { shown.indexOfFirst { it.ratingKey == upTo?.ratingKey }.coerceAtLeast(0) }
+    LaunchedEffect(episodes != null, season) {
+        if (shown.isEmpty()) return@LaunchedEffect
+        runCatching { listState.scrollToItem(target) }
         delay(80)
         runCatching { first.requestFocus() }
     }
@@ -395,7 +407,7 @@ fun PlexShowScreen(vm: TunerViewModel) {
                 }
             }
             Spacer(Modifier.height(14.dp))
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            LazyColumn(state = listState, verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 items(shown.size, key = { shown[it].ratingKey }) { i ->
                     val e = shown[i]
                     FocusSurface(
@@ -403,7 +415,7 @@ fun PlexShowScreen(vm: TunerViewModel) {
                         onLongClick = { vm.setPlexWatched(e, !e.watched) },
                         baseColor = TunerColors.Panel,
                         modifier = Modifier.fillMaxWidth().height(96.dp)
-                            .then(if (i == 0) Modifier.focusRequester(first) else Modifier),
+                            .then(if (i == target) Modifier.focusRequester(first) else Modifier),
                     ) { focused ->
                         Row(Modifier.fillMaxSize().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
                             if (e.image != null) {
@@ -423,6 +435,7 @@ fun PlexShowScreen(vm: TunerViewModel) {
                                     listOfNotNull(
                                         if (e.durationMs > 0) "${e.durationMs / 60_000} min" else null,
                                         when {
+                                            e.ratingKey == upTo?.ratingKey && e.viewOffsetMs <= 0 -> "▶ up next"
                                             e.watched -> "✓ watched"
                                             e.viewOffsetMs > 0 -> "carry on from ${clock(e.viewOffsetMs)}"
                                             else -> null
