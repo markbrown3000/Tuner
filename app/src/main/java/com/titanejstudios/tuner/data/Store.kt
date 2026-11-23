@@ -1,0 +1,704 @@
+package com.titanejstudios.tuner.data
+
+import android.content.Context
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.File
+
+/** Settings, playlists, favourites, reminders, resume points and the cached playlists + guides. */
+class Store(context: Context) {
+    private val appContext = context.applicationContext
+    private val prefs = appContext.getSharedPreferences("tuner", Context.MODE_PRIVATE)
+    private val dir = appContext.filesDir
+
+    init {
+        migrateFromV1()
+        migrateToV3()
+        migrateToV4()
+    }
+
+    // ---------------- Playlists ----------------
+
+    var sources: List<Source>
+        get() = try {
+            val arr = JSONArray(prefs.getString("sources", "[]"))
+            (0 until arr.length()).mapNotNull { sourceFromJson(arr.getJSONObject(it)) }
+        } catch (e: Exception) {
+            emptyList()
+        }
+        set(value) {
+            val arr = JSONArray()
+            value.forEach { arr.put(sourceToJson(it)) }
+            prefs.edit().putString("sources", arr.toString()).apply()
+        }
+
+    /** A playlist id, or "all" to combine every playlist. */
+    var activeSourceId: String
+        get() = prefs.getString("active_source", "all") ?: "all"
+        set(value) = prefs.edit().putString("active_source", value).apply()
+
+    fun lastRefresh(sourceId: String): Long = prefs.getLong("last_refresh_$sourceId", 0L)
+    fun setLastRefresh(sourceId: String, t: Long) = prefs.edit().putLong("last_refresh_$sourceId", t).apply()
+
+    private fun sourceToJson(s: Source): JSONObject = when (s) {
+        is Source.M3u -> JSONObject().put("type", "m3u").put("id", s.id).put("name", s.name)
+            .put("url", s.playlistUrl).put("epg", s.epgUrl)
+        is Source.Xtream -> JSONObject().put("type", "xtream").put("id", s.id).put("name", s.name)
+            .put("server", s.server).put("user", s.username).put("pass", s.password)
+            .put("hls", s.useHls).put("epg", s.epgUrl)
+    }
+
+    private fun sourceFromJson(o: JSONObject): Source? {
+        val epg = o.optString("epg").takeIf { it.isNotBlank() }
+        return when (o.optString("type")) {
+            "m3u" -> Source.M3u(o.getString("id"), o.optString("name"), o.optString("url"), epg)
+            "xtream" -> Source.Xtream(
+                o.getString("id"), o.optString("name"), o.optString("server"),
+                o.optString("user"), o.optString("pass"), o.optBoolean("hls"), epg,
+            )
+            else -> null
+        }
+    }
+
+    /** Version 1 stored a single playlist in flat keys. */
+    private fun migrateFromV1() {
+        val type = prefs.getString("type", null) ?: return
+        val epg = prefs.getString("epg_url", null)
+        val src: Source? = when (type) {
+            "m3u" -> Source.M3u("s1", "My playlist", prefs.getString("m3u_url", "") ?: "", epg)
+            "xtream" -> Source.Xtream(
+                "s1", "My provider",
+                prefs.getString("server", "") ?: "", prefs.getString("user", "") ?: "",
+                prefs.getString("pass", "") ?: "", prefs.getBoolean("hls", false), epg,
+            )
+            else -> null
+        }
+        prefs.edit()
+            .remove("type").remove("m3u_url").remove("epg_url").remove("server").remove("user")
+            .remove("pass").remove("hls").remove("last_refresh").remove("favourites").remove("recents")
+            .apply()
+        File(dir, "channels.json").delete()
+        File(dir, "epg.json").delete()
+        if (src != null) {
+            sources = listOf(src)
+            activeSourceId = src.id
+        }
+    }
+
+    // ---------------- Simple lists & sets ----------------
+
+    private fun getList(key: String): List<String> = try {
+        val arr = JSONArray(prefs.getString(key, "[]"))
+        List(arr.length()) { arr.getString(it) }
+    } catch (e: Exception) {
+        emptyList()
+    }
+
+    private fun putList(key: String, value: Collection<String>) =
+        prefs.edit().putString(key, JSONArray(value.toList()).toString()).apply()
+
+    // Favourites and recents belong to a profile ("main" keeps the 2.0 keys).
+    private fun profileKey(base: String, profileId: String) = if (profileId == MAIN_PROFILE) base else "${base}_$profileId"
+
+    fun favourites(profileId: String): List<String> = getList(profileKey("favs_v2", profileId))
+    fun setFavourites(profileId: String, value: List<String>) = putList(profileKey("favs_v2", profileId), value)
+
+    fun recents(profileId: String): List<String> = getList(profileKey("recents_v2", profileId))
+    fun setRecents(profileId: String, value: List<String>) = putList(profileKey("recents_v2", profileId), value)
+
+    fun lastChannel(profileId: String): String? = prefs.getString(profileKey("last_channel", profileId), null)
+    fun setLastChannel(profileId: String, channelId: String) =
+        prefs.edit().putString(profileKey("last_channel", profileId), channelId).apply()
+
+    var hiddenGroups: Set<String>
+        get() = getList("hidden_groups").toSet()
+        set(value) = putList("hidden_groups", value)
+
+    var hiddenChannels: Set<String>
+        get() = getList("hidden_channels").toSet()
+        set(value) = putList("hidden_channels", value)
+
+    var lockedGroups: Set<String>
+        get() = getList("locked_groups").toSet()
+        set(value) = putList("locked_groups", value)
+
+    var groupOrder: List<String>
+        get() = getList("group_order")
+        set(value) = putList("group_order", value)
+
+    var pin: String?
+        get() = prefs.getString("pin", null)
+        set(value) = prefs.edit().putString("pin", value).apply()
+
+    // ---------------- Reminders ----------------
+
+    var reminders: List<Reminder>
+        get() = try {
+            val arr = JSONArray(prefs.getString("reminders", "[]"))
+            List(arr.length()) { i ->
+                val o = arr.getJSONObject(i)
+                Reminder(o.getString("c"), o.optString("n"), o.optString("t"), o.getLong("s"), o.getLong("e"))
+            }
+        } catch (e: Exception) {
+            emptyList()
+        }
+        set(value) {
+            val arr = JSONArray()
+            value.forEach {
+                arr.put(JSONObject().put("c", it.channelId).put("n", it.channelName).put("t", it.title).put("s", it.start).put("e", it.stop))
+            }
+            prefs.edit().putString("reminders", arr.toString()).apply()
+        }
+
+    // ---------------- Resume points ----------------
+
+    var resume: Map<String, ResumeEntry>
+        get() = try {
+            val arr = JSONArray(prefs.getString("resume", "[]"))
+            (0 until arr.length()).associate { i ->
+                val o = arr.getJSONObject(i)
+                val e = ResumeEntry(
+                    contentId = o.getString("id"),
+                    title = o.optString("title"),
+                    subtitle = o.optString("sub").takeIf { it.isNotEmpty() },
+                    poster = o.optString("poster").takeIf { it.isNotEmpty() },
+                    url = o.getString("url"),
+                    positionMs = o.optLong("pos"),
+                    durationMs = o.optLong("dur"),
+                    updatedAt = o.optLong("at"),
+                    seriesId = o.optString("series").takeIf { it.isNotEmpty() },
+                )
+                e.contentId to e
+            }
+        } catch (e: Exception) {
+            emptyMap()
+        }
+        set(value) {
+            val arr = JSONArray()
+            value.values.sortedByDescending { it.updatedAt }.take(50).forEach {
+                arr.put(
+                    JSONObject().put("id", it.contentId).put("title", it.title).put("sub", it.subtitle)
+                        .put("poster", it.poster).put("url", it.url).put("pos", it.positionMs)
+                        .put("dur", it.durationMs).put("at", it.updatedAt).put("series", it.seriesId)
+                )
+            }
+            prefs.edit().putString("resume", arr.toString()).apply()
+        }
+
+    // ---------------- Home screen bookkeeping ----------------
+
+    var previewChannelId: Long
+        get() = prefs.getLong("preview_channel_id", -1L)
+        set(value) = prefs.edit().putLong("preview_channel_id", value).apply()
+
+    var watchNextIds: Map<String, Long>
+        get() = try {
+            val o = JSONObject(prefs.getString("watch_next_ids", "{}") ?: "{}")
+            o.keys().asSequence().associateWith { o.getLong(it) }
+        } catch (e: Exception) {
+            emptyMap()
+        }
+        set(value) = prefs.edit().putString("watch_next_ids", JSONObject(value as Map<*, *>).toString()).apply()
+
+    // ---------------- Cached playlists & guides (now in SQLite) ----------------
+
+    fun deleteCaches(sourceId: String) {
+        Database.get(appContext).deleteSource(sourceId)
+        prefs.edit().remove("last_refresh_$sourceId").apply()
+    }
+
+    // ---------------- Profiles ----------------
+
+    var profiles: List<Profile>
+        get() = try {
+            val arr = JSONArray(prefs.getString("profiles", "[]"))
+            val list = (0 until arr.length()).map { i ->
+                val o = arr.getJSONObject(i)
+                val groups = o.optJSONArray("groups")
+                Profile(
+                    id = o.getString("id"),
+                    name = o.optString("name"),
+                    kids = o.optBoolean("kids"),
+                    allowedGroups = if (groups == null) emptySet() else (0 until groups.length()).map { groups.getString(it) }.toSet(),
+                    dailyLimitMinutes = o.optInt("limit"),
+                    bedtimeMinutes = o.optInt("bedtime", -1),
+                )
+            }
+            list.ifEmpty { listOf(Profile(MAIN_PROFILE, "Everyone")) }
+        } catch (e: Exception) {
+            listOf(Profile(MAIN_PROFILE, "Everyone"))
+        }
+        set(value) {
+            val arr = JSONArray()
+            value.forEach {
+                arr.put(
+                    JSONObject().put("id", it.id).put("name", it.name).put("kids", it.kids)
+                        .put("groups", JSONArray(it.allowedGroups.toList())).put("limit", it.dailyLimitMinutes)
+                        .put("bedtime", it.bedtimeMinutes)
+                )
+            }
+            prefs.edit().putString("profiles", arr.toString()).apply()
+        }
+
+    var activeProfileId: String
+        get() = prefs.getString("active_profile", MAIN_PROFILE) ?: MAIN_PROFILE
+        set(value) = prefs.edit().putString("active_profile", value).apply()
+
+    /** Seconds watched today by a profile (for kids' daily limits), plus any extra time granted with the PIN. */
+    fun usageSeconds(profileId: String, day: String): Long = prefs.getLong("usage_${profileId}_$day", 0L)
+    fun addUsage(profileId: String, day: String, seconds: Long) =
+        prefs.edit().putLong("usage_${profileId}_$day", usageSeconds(profileId, day) + seconds).apply()
+    fun bonusMinutes(profileId: String, day: String): Int = prefs.getInt("bonus_${profileId}_$day", 0)
+    fun addBonus(profileId: String, day: String, minutes: Int) =
+        prefs.edit().putInt("bonus_${profileId}_$day", bonusMinutes(profileId, day) + minutes).apply()
+
+    // ---------------- Other settings ----------------
+
+    var openLastChannel: Boolean
+        get() = prefs.getBoolean("open_last_channel", false)
+        set(value) = prefs.edit().putBoolean("open_last_channel", value).apply()
+
+    /** What Tuner opens on: "home", "guide" (TV Guide where you left it) or "channel" (last channel playing). */
+    var startScreen: String
+        get() = prefs.getString("start_screen", null) ?: if (openLastChannel) "channel" else "home"
+        set(value) = prefs.edit().putString("start_screen", value).apply()
+
+    /** Update playlists on start-up when the saved copy is over 12 hours old (otherwise overnight only). */
+    var refreshOnStart: Boolean
+        get() = prefs.getBoolean("refresh_on_start", true)
+        set(value) = prefs.edit().putBoolean("refresh_on_start", value).apply()
+
+    fun lastGroup(profileId: String): String? = prefs.getString(profileKey("last_group", profileId), null)
+    fun setLastGroup(profileId: String, group: String) = prefs.edit().putString(profileKey("last_group", profileId), group).apply()
+
+    var hiddenApps: Set<String>
+        get() = getList("hidden_apps").toSet()
+        set(value) = putList("hidden_apps", value)
+
+    var seriesLinks: List<SeriesLink>
+        get() = try {
+            val arr = JSONArray(prefs.getString("series_links", "[]"))
+            (0 until arr.length()).map { i ->
+                val o = arr.getJSONObject(i)
+                SeriesLink(o.getString("c"), o.optString("n"), o.getString("t"), o.optLong("at"))
+            }
+        } catch (e: Exception) {
+            emptyList()
+        }
+        set(value) {
+            val arr = JSONArray()
+            value.forEach { arr.put(JSONObject().put("c", it.channelId).put("n", it.channelName).put("t", it.title).put("at", it.created)) }
+            prefs.edit().putString("series_links", arr.toString()).apply()
+        }
+
+    var webhookUrl: String?
+        get() = prefs.getString("webhook_url", null)?.takeIf { it.isNotBlank() }
+        set(value) = prefs.edit().putString("webhook_url", value).apply()
+
+    /** Manual guide matches: playlist channel id -> XMLTV channel id. */
+    var epgOverrides: Map<String, String>
+        get() = try {
+            val o = JSONObject(prefs.getString("epg_overrides", "{}") ?: "{}")
+            o.keys().asSequence().associateWith { o.getString(it) }
+        } catch (e: Exception) {
+            emptyMap()
+        }
+        set(value) = prefs.edit().putString("epg_overrides", JSONObject(value as Map<*, *>).toString()).apply()
+
+    var recordingDir: String?
+        get() = prefs.getString("recording_dir", null)
+        set(value) = prefs.edit().putString("recording_dir", value).apply()
+
+    // ---------------- Recordings ----------------
+
+    var recordings: List<Recording>
+        get() = synchronized(RECORDING_LOCK) { readRecordings() }
+        set(value) = synchronized(RECORDING_LOCK) { writeRecordings(value) }
+
+    /** Atomic read-modify-write (the recording service and the app both change this list). */
+    fun updateRecordings(change: (List<Recording>) -> List<Recording>) = synchronized(RECORDING_LOCK) {
+        writeRecordings(change(readRecordings()))
+    }
+
+    private fun readRecordings(): List<Recording> = try {
+        val arr = JSONArray(prefs.getString("recordings", "[]"))
+        (0 until arr.length()).map { i ->
+            val o = arr.getJSONObject(i)
+            Recording(
+                id = o.getString("id"),
+                channelId = o.optString("ch"),
+                channelName = o.optString("chName"),
+                title = o.optString("title"),
+                start = o.getLong("start"),
+                stop = o.getLong("stop"),
+                url = o.optString("url"),
+                path = o.optString("path"),
+                status = o.optString("status", RecStatus.SCHEDULED),
+                error = o.optString("error").takeIf { it.isNotEmpty() },
+                category = o.optString("cat").takeIf { it.isNotEmpty() },
+            )
+        }
+    } catch (e: Exception) {
+        emptyList()
+    }
+
+    private fun writeRecordings(list: List<Recording>) {
+        val arr = JSONArray()
+        list.forEach {
+            arr.put(
+                JSONObject().put("id", it.id).put("ch", it.channelId).put("chName", it.channelName)
+                    .put("title", it.title).put("start", it.start).put("stop", it.stop).put("url", it.url)
+                    .put("path", it.path).put("status", it.status).put("error", it.error).put("cat", it.category)
+            )
+        }
+        // commit() so the service and app always see each other's changes straight away
+        prefs.edit().putString("recordings", arr.toString()).commit()
+    }
+
+    // ---------------- Channel health, fast switching, phone remote ----------------
+
+    var deadChannels: Set<String>
+        get() = getList("dead_channels").toSet()
+        set(value) = putList("dead_channels", value)
+
+    var healthCheckedAt: Long
+        get() = prefs.getLong("health_checked_at", 0L)
+        set(value) = prefs.edit().putLong("health_checked_at", value).apply()
+
+    var hideDead: Boolean
+        get() = prefs.getBoolean("hide_dead", false)
+        set(value) = prefs.edit().putBoolean("hide_dead", value).apply()
+
+    var healthNightly: Boolean
+        get() = prefs.getBoolean("health_nightly", false)
+        set(value) = prefs.edit().putBoolean("health_nightly", value).apply()
+
+    /** "favourites" or "all" */
+    var healthScope: String
+        get() = prefs.getString("health_scope", "favourites") ?: "favourites"
+        set(value) = prefs.edit().putString("health_scope", value).apply()
+
+    var fastSwitch: Boolean
+        get() = prefs.getBoolean("fast_switch", false)
+        set(value) = prefs.edit().putBoolean("fast_switch", value).apply()
+
+    var timeshiftEnabled: Boolean
+        get() = prefs.getBoolean("timeshift", true)
+        set(value) = prefs.edit().putBoolean("timeshift", value).apply()
+
+    /** Send Dolby/DTS untouched to the TV/soundbar. Off = decode to PCM (avoids frozen video on some setups). */
+    // ---- 5.2 ----
+    private fun stringMap(key: String): Map<String, String> = try {
+        val o = JSONObject(prefs.getString(key, "{}") ?: "{}")
+        o.keys().asSequence().associateWith { o.getString(it) }
+    } catch (e: Exception) {
+        emptyMap()
+    }
+
+    private fun setStringMap(key: String, value: Map<String, String>) {
+        val o = JSONObject()
+        for ((k, v) in value) o.put(k, v)
+        prefs.edit().putString(key, o.toString()).apply()
+    }
+
+    /** Per channel: AspectRatioFrameLayout resize mode (0 fit, 4 zoom, 3 stretch). */
+    var pictureModes: Map<String, String>
+        get() = stringMap("picture_modes")
+        set(value) = setStringMap("picture_modes", value)
+    /** Per channel: sound offset in ms (+ later, − earlier). Key "*" = every channel. */
+    var lipSync: Map<String, String>
+        get() = stringMap("lip_sync")
+        set(value) = setStringMap("lip_sync", value)
+    var audioLanguage: String?
+        get() = prefs.getString("audio_lang", null)
+        set(value) = prefs.edit().putString("audio_lang", value).apply()
+    var subtitleLanguage: String?
+        get() = prefs.getString("sub_lang", null)
+        set(value) = prefs.edit().putString("sub_lang", value).apply()
+
+    /** Category editor: original name → new name (two renamed to the same name are merged). */
+    var groupRenames: Map<String, String>
+        get() = stringMap("group_renames")
+        set(value) = setStringMap("group_renames", value)
+    /** Your own categories: name → channel ids. */
+    var customGroups: Map<String, List<String>>
+        get() = stringMap("custom_groups").mapValues { (_, v) -> v.split('\n').filter { it.isNotEmpty() } }
+        set(value) = setStringMap("custom_groups", value.mapValues { it.value.joinToString("\n") })
+
+    /** Per playlist: shift the guide by this many minutes (for guides that are an hour out). */
+    var epgShift: Map<String, String>
+        get() = stringMap("epg_shift")
+        set(value) = setStringMap("epg_shift", value)
+
+    /** Delete finished recordings after this many days (0 = keep). Kept ones are never deleted. */
+    var recordingAutoDelete: Int
+        get() = prefs.getInt("rec_auto_delete", 0)
+        set(value) = prefs.edit().putInt("rec_auto_delete", value).apply()
+    var keptRecordings: Set<String>
+        get() = getList("rec_kept").toSet()
+        set(value) = putList("rec_kept", value)
+    /** Network drive for finished recordings, e.g. smb://192.168.1.20/media/TV */
+    var nasUrl: String?
+        get() = prefs.getString("nas_url", null)
+        set(value) = prefs.edit().putString("nas_url", value).apply()
+    var nasUser: String?
+        get() = prefs.getString("nas_user", null)
+        set(value) = prefs.edit().putString("nas_user", value).apply()
+    var nasPassword: String?
+        get() = prefs.getString("nas_pass", null)
+        set(value) = prefs.edit().putString("nas_pass", value).apply()
+    var nasKeepLocal: Boolean
+        get() = prefs.getBoolean("nas_keep_local", true)
+        set(value) = prefs.edit().putBoolean("nas_keep_local", value).apply()
+
+    // Plex
+    val plexClientId: String
+        get() = prefs.getString("plex_client_id", null) ?: java.util.UUID.randomUUID().toString().also {
+            prefs.edit().putString("plex_client_id", it).apply()
+        }
+    var plexToken: String?
+        get() = prefs.getString("plex_token", null)
+        set(value) = prefs.edit().putString("plex_token", value).apply()
+
+    // Football scores (football-data.org)
+    var footballKey: String?
+        get() = prefs.getString("football_key", null)
+        set(value) = prefs.edit().putString("football_key", value).apply()
+    var footballTeams: Set<String>
+        get() = getList("football_teams").toSet()
+        set(value) = putList("football_teams", value)
+
+    /** App updates from a GitHub repo's releases ("owner/repo"). */
+    var updateRepo: String?
+        get() = prefs.getString("update_repo", null)
+        set(value) = prefs.edit().putString("update_repo", value).apply()
+
+    // ---- Look & sound (5.1) ----
+    var themeAccent: String
+        get() = prefs.getString("theme_accent", "blue") ?: "blue"
+        set(value) = prefs.edit().putString("theme_accent", value).apply()
+    var themeBackground: String
+        get() = prefs.getString("theme_bg", "navy") ?: "navy"
+        set(value) = prefs.edit().putString("theme_bg", value).apply()
+    var subtitleScale: Float
+        get() = prefs.getFloat("subtitle_scale", 1f)
+        set(value) = prefs.edit().putFloat("subtitle_scale", value).apply()
+    var subtitleBox: Boolean
+        get() = prefs.getBoolean("subtitle_box", false)
+        set(value) = prefs.edit().putBoolean("subtitle_box", value).apply()
+    var nightMode: Boolean
+        get() = prefs.getBoolean("night_mode", false)
+        set(value) = prefs.edit().putBoolean("night_mode", value).apply()
+    var frameRateMatch: Boolean
+        get() = prefs.getBoolean("frame_rate_match", false)
+        set(value) = prefs.edit().putBoolean("frame_rate_match", value).apply()
+
+    // ---- Google TV integration ----
+    /** Put channels into the TV's own Live tab / channel list: "off", "favourites" or "all". */
+    var liveTabScope: String
+        get() = prefs.getString("live_tab_scope", "off") ?: "off"
+        set(value) = prefs.edit().putString("live_tab_scope", value).apply()
+
+    /** Live tab bookkeeping: channel id → logo URL already copied to the TV. */
+    var liveTabRows: String
+        get() = prefs.getString("live_tab_rows", null) ?: "{}"
+        set(value) = prefs.edit().putString("live_tab_rows", value).apply()
+
+    // ---- Watch-time stats (per profile, JSON – see WatchStats) ----
+    fun stats(profileId: String): String = prefs.getString(profileKey("watch_stats", profileId), null) ?: "{}"
+    fun setStats(profileId: String, json: String) = prefs.edit().putString(profileKey("watch_stats", profileId), json).apply()
+
+    var audioPassthrough: Boolean
+        get() = prefs.getBoolean("audio_passthrough", false)
+        set(value) = prefs.edit().putBoolean("audio_passthrough", value).apply()
+
+    /** Looser MPEG-TS parsing for streams that won't start. */
+    var streamCompatibility: Boolean
+        get() = prefs.getBoolean("stream_compat", false)
+        set(value) = prefs.edit().putBoolean("stream_compat", value).apply()
+
+    var remoteEnabled: Boolean
+        get() = prefs.getBoolean("remote_enabled", false)
+        set(value) = prefs.edit().putBoolean("remote_enabled", value).apply()
+
+    /** Permanent token for the phone remote link, so it can be bookmarked. */
+    val remoteToken: String
+        get() = prefs.getString("remote_token", null) ?: run {
+            val chars = "abcdefghjkmnpqrstuvwxyz23456789"
+            val rnd = java.security.SecureRandom()
+            val t = (1..10).map { chars[rnd.nextInt(chars.length)] }.joinToString("")
+            prefs.edit().putString("remote_token", t).apply()
+            t
+        }
+
+    // ---- 5.3 ----
+    /** Films and series saved to "My list" (JSON – see [Watchlist]). */
+    var watchlistJson: String
+        get() = prefs.getString("watchlist", null) ?: "[]"
+        set(value) = prefs.edit().putString("watchlist", value).apply()
+    /** Series you've watched, with how many episodes they had (to spot new ones). */
+    var followedSeriesJson: String
+        get() = prefs.getString("followed_series", null) ?: "[]"
+        set(value) = prefs.edit().putString("followed_series", value).apply()
+    var newEpisodesCheckedAt: Long
+        get() = prefs.getLong("new_eps_checked_at", 0L)
+        set(value) = prefs.edit().putLong("new_eps_checked_at", value).apply()
+    /** Home Assistant "lights" events: "off", "films", "films_series" or "everything". */
+    var cinemaLights: String
+        get() = prefs.getString("cinema_lights", "off") ?: "off"
+        set(value) = prefs.edit().putString("cinema_lights", value).apply()
+    /** Per channel: how often its stream has stalled lately (for a bigger start-up cushion). */
+    var flakyStreams: Map<String, String>
+        get() = stringMap("flaky_streams")
+        set(value) = setStringMap("flaky_streams", value)
+    /** When old guide data was last cleared out of the database. */
+    var dbTidyAt: Long
+        get() = prefs.getLong("db_tidy_at", 0L)
+        set(value) = prefs.edit().putLong("db_tidy_at", value).apply()
+
+    // ---- 5.4 ----
+    /** Last crash already sent to Home Assistant (time it happened). */
+    var crashReportedAt: Long
+        get() = prefs.getLong("crash_reported_at", 0L)
+        set(value) = prefs.edit().putLong("crash_reported_at", value).apply()
+    /** "Are you still watching?" after this many hours without a button press (0 = never). */
+    var stillWatchingHours: Int
+        get() = prefs.getInt("still_watching_hours", 4)
+        set(value) = prefs.edit().putInt("still_watching_hours", value).apply()
+    /** Per channel: volume level in dB (−9 … +9). */
+    var volumeLevels: Map<String, String>
+        get() = stringMap("volume_levels")
+        set(value) = setStringMap("volume_levels", value)
+    /** Per channel: "auto", "best" or "sd". */
+    var qualityModes: Map<String, String>
+        get() = stringMap("quality_modes")
+        set(value) = setStringMap("quality_modes", value)
+    /** Followed teams' matches: "off", "remind" or "record". */
+    var sportFollowMode: String
+        get() = prefs.getString("sport_follow_mode", "remind") ?: "remind"
+        set(value) = prefs.edit().putString("sport_follow_mode", value).apply()
+    /** Matches already handled automatically (so a cancelled one isn't set again). */
+    var sportAutoDone: List<String>
+        get() = getList("sport_auto_done")
+        set(value) = putList("sport_auto_done", value.takeLast(200))
+    /** Your own free keys for film info and subtitles. */
+    /** Your own key from Settings, or else the one built in (keys.properties). */
+    var tmdbKey: String?
+        get() = prefs.getString("tmdb_key", null)?.takeIf { it.isNotBlank() }
+            ?: com.titanejstudios.tuner.BuildConfig.TMDB_KEY.takeIf { it.isNotBlank() }
+        set(value) = prefs.edit().putString("tmdb_key", value).apply()
+    var openSubtitlesKey: String?
+        get() = prefs.getString("opensubtitles_key", null)
+        set(value) = prefs.edit().putString("opensubtitles_key", value).apply()
+    /** Per series: where its intro ends (ms), learned from you skipping it. */
+    var introEnds: Map<String, String>
+        get() = stringMap("intro_ends")
+        set(value) = setStringMap("intro_ends", value)
+    /** Keep favourites, My list and resume points in step with other TVs via the network drive. */
+    var syncEnabled: Boolean
+        get() = prefs.getBoolean("sync_enabled", false)
+        set(value) = prefs.edit().putBoolean("sync_enabled", value).apply()
+    fun syncStamp(section: String): Long = prefs.getLong("sync_stamp_$section", 0L)
+    fun setSyncStamp(section: String, t: Long) = prefs.edit().putLong("sync_stamp_$section", t).apply()
+    var syncedAt: Long
+        get() = prefs.getLong("synced_at", 0L)
+        set(value) = prefs.edit().putLong("synced_at", value).apply()
+    /** Nightly copy of the settings to the network drive. */
+    var nasBackup: Boolean
+        get() = prefs.getBoolean("nas_backup", true)
+        set(value) = prefs.edit().putBoolean("nas_backup", value).apply()
+    var nasBackupAt: Long
+        get() = prefs.getLong("nas_backup_at", 0L)
+        set(value) = prefs.edit().putLong("nas_backup_at", value).apply()
+
+    /** Show one entry for HD/SD copies of the same channel. */
+    var mergeVersions: Boolean
+        get() = prefs.getBoolean("merge_versions", true)
+        set(value) = prefs.edit().putBoolean("merge_versions", value).apply()
+    /** Merged channel (ChannelMerge.key) → the version you chose to watch. */
+    var preferredVersions: Map<String, String>
+        get() = stringMap("preferred_versions")
+        set(value) = setStringMap("preferred_versions", value)
+
+    /** Every favourite from every profile (for the nightly health check). */
+    fun allFavourites(): Set<String> = profiles.flatMap { favourites(it.id) }.toSet()
+
+    // ---------------- Backup & restore ----------------
+
+    private val notBackedUp = listOf("preview_channel_id", "watch_next_ids", "last_refresh_", "usage_", "bonus_", "schema", "dead_channels", "health_checked_at", "recordings", "watch_stats", "live_tab_rows", "plex_client_id", "flaky_streams", "db_tidy_at", "new_eps_checked_at", "crash_reported_at", "sport_auto_done", "sync_stamp_", "synced_at", "nas_backup_at")
+
+    /** Every setting as JSON (playlists, profiles, favourites, PIN, reminders, guide fixes…). */
+    fun exportBackup(): String {
+        val root = JSONObject().put("app", "Tuner").put("version", 3)
+        val values = JSONObject()
+        for ((key, value) in prefs.all) {
+            if (notBackedUp.any { key.startsWith(it) }) continue
+            val entry = when (value) {
+                is String -> JSONObject().put("t", "s").put("v", value)
+                is Boolean -> JSONObject().put("t", "b").put("v", value)
+                is Int -> JSONObject().put("t", "i").put("v", value)
+                is Long -> JSONObject().put("t", "l").put("v", value)
+                is Float -> JSONObject().put("t", "f").put("v", value.toDouble())
+                is Set<*> -> JSONObject().put("t", "set").put("v", JSONArray(value.map { it.toString() }))
+                else -> null
+            } ?: continue
+            values.put(key, entry)
+        }
+        root.put("settings", values)
+        return root.toString(2)
+    }
+
+    /** Restores a backup made by [exportBackup]. Throws if it isn't one. */
+    fun importBackup(json: String) {
+        val root = JSONObject(json)
+        if (root.optString("app") != "Tuner") throw IllegalArgumentException("That isn't a Tuner backup")
+        val values = root.getJSONObject("settings")
+        val e = prefs.edit()
+        val keys = values.keys()
+        while (keys.hasNext()) {
+            val key = keys.next()
+            val entry = values.getJSONObject(key)
+            when (entry.optString("t")) {
+                "s" -> e.putString(key, entry.getString("v"))
+                "b" -> e.putBoolean(key, entry.getBoolean("v"))
+                "i" -> e.putInt(key, entry.getInt("v"))
+                "l" -> e.putLong(key, entry.getLong("v"))
+                "f" -> e.putFloat(key, entry.getDouble("v").toFloat())
+                "set" -> {
+                    val arr = entry.getJSONArray("v")
+                    e.putStringSet(key, (0 until arr.length()).map { arr.getString(it) }.toSet())
+                }
+            }
+        }
+        e.commit()
+        // Force a fresh download of every playlist and guide
+        sources.forEach { prefs.edit().putLong("last_refresh_${it.id}", 0L).apply() }
+    }
+
+    // ---------------- Migration 2.0 -> 3.0 ----------------
+
+    /** 2.0 cached playlists as JSON files; 3.0 uses SQLite, so drop them and re-download. */
+    private fun migrateToV3() {
+        if (prefs.getInt("schema", 2) >= 3) return
+        dir.listFiles()?.forEach { f ->
+            if ((f.name.startsWith("channels_") || f.name.startsWith("epg_")) && f.name.endsWith(".json")) f.delete()
+        }
+        val e = prefs.edit()
+        for (k in prefs.all.keys) if (k.startsWith("last_refresh_")) e.putLong(k, 0L)
+        e.putInt("schema", 3).apply()
+    }
+
+    /** 4.2 stores provider channel numbers and category order – re-download playlists once. */
+    private fun migrateToV4() {
+        if (prefs.getInt("schema", 3) >= 4) return
+        val e = prefs.edit()
+        for (k in prefs.all.keys) if (k.startsWith("last_refresh_")) e.putLong(k, 0L)
+        e.putInt("schema", 4).apply()
+    }
+
+    companion object {
+        const val MAIN_PROFILE = "main"
+        private val RECORDING_LOCK = Any()
+    }
+
+}
