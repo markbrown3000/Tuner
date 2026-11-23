@@ -189,13 +189,7 @@ fun HomeScreen(vm: TunerViewModel) {
                         overflow = TextOverflow.Ellipsis,
                     )
                     Spacer(Modifier.height(10.dp))
-                    Text(
-                        h?.description ?: "",
-                        color = Color(0xFFD5DCF2),
-                        fontSize = 16.sp,
-                        maxLines = 4,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                    AutoScrollText(h?.description ?: "", Modifier.weight(1f).fillMaxWidth(), fontSize = 16.sp)
                 }
                 Box(
                     Modifier.size(width = 420.dp, height = 236.dp).clip(RoundedCornerShape(14.dp)).background(TunerColors.Panel),

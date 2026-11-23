@@ -745,7 +745,17 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         val t = System.currentTimeMillis()
         val guide = withContext(Dispatchers.IO) {
             val catchupFrom = HashMap<String, Long>()
-            for (c in chs) if (c.hasCatchup) catchupFrom[c.id] = t - c.catchupDays.coerceAtMost(7) * 86_400_000L
+            // A copy without catch-up (e.g. the 1080p one) still gets the history if another copy
+            // of the same channel has catch-up, so the guide can offer it.
+            val familyDays = HashMap<String, Int>()
+            for (c in chs) if (c.hasCatchup) {
+                val k = c.group + "|" + ChannelMerge.key(c.name)
+                familyDays[k] = maxOf(familyDays[k] ?: 0, c.catchupDays)
+            }
+            for (c in chs) {
+                val days = if (c.hasCatchup) c.catchupDays else familyDays[c.group + "|" + ChannelMerge.key(c.name)] ?: 0
+                if (days > 0) catchupFrom[c.id] = t - days.coerceAtMost(7) * 86_400_000L
+            }
             shiftGuide(chs, db.loadEpg(ids, t - 3 * 3600_000L, t + 36 * 3600_000L, catchupFrom))
         }
         epg = guide
@@ -1206,9 +1216,20 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     fun channelNumber(channel: Channel): Int =
         if (channel.number > 0) channel.number else zapList.indexOfFirst { it.id == channel.id } + 1
 
-    fun canCatchup(channel: Channel, p: Programme): Boolean = Catchup.isAvailable(channel, p, now)
+    /**
+     * The copy of [channel] that has catch-up. With HD/SD copies combined, the best-quality copy
+     * shown in the list often has no catch-up while the 720p one does – use that one for catch-up.
+     */
+    fun catchupVersion(channel: Channel): Channel? =
+        if (channel.hasCatchup) channel else versionsFor(channel).firstOrNull { it.hasCatchup }
 
-    fun playCatchup(channel: Channel, p: Programme, list: List<Channel>) {
+    fun hasAnyCatchup(channel: Channel): Boolean = catchupVersion(channel) != null
+
+    fun canCatchup(channel: Channel, p: Programme): Boolean =
+        catchupVersion(channel)?.let { Catchup.isAvailable(it, p, now) } == true
+
+    fun playCatchup(requested: Channel, p: Programme, list: List<Channel>) {
+        val channel = catchupVersion(requested) ?: requested
         if (!isAllowed(channel)) {
             requestUnlock { playCatchup(channel, p, list) }
             return
@@ -2512,8 +2533,15 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
 
     // ---------------- Catch-up page ----------------
 
+    /**
+     * Channels with catch-up. Looks at every copy (the 720p copy often has catch-up when the 1080p
+     * one doesn't), then combines copies as the TV Guide does.
+     */
     val catchupChannels: List<Channel>
-        get() = channelsFor(ALL).filter { it.hasCatchup }
+        get() {
+            val withCatchup = channels.filter { it.hasCatchup && isAllowed(it) }
+            return if (mergeVersions) ChannelMerge.merge(withCatchup, preferredVersions).channels else withCatchup
+        }
 
     /** Programmes on [channel] that can be watched again, newest first, grouped by day label. */
     fun catchupProgrammes(channel: Channel): List<Programme> {

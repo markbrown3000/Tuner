@@ -70,6 +70,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.ui.unit.TextUnit
@@ -907,5 +909,39 @@ fun ChannelTile(
                 Text(channel.name, color = TunerColors.TextSecondary, fontSize = 12.sp, maxLines = 1)
             }
         }
+    }
+}
+
+/**
+ * Text that slowly scrolls itself up when it's too long for its space, so you can read all of it
+ * without pressing anything: waits a few seconds, scrolls to the end, pauses, then starts again.
+ */
+@Composable
+fun AutoScrollText(
+    text: String,
+    modifier: Modifier = Modifier,
+    color: Color = Color(0xFFD5DCF2),
+    fontSize: androidx.compose.ui.unit.TextUnit = 15.sp,
+) {
+    val scroll = androidx.compose.foundation.rememberScrollState()
+    LaunchedEffect(text) {
+        scroll.scrollTo(0)
+        delay(3_000)
+        while (true) {
+            val max = scroll.maxValue
+            if (max <= 0) {
+                delay(1_000)
+                continue
+            }
+            // About a line every two seconds – comfortable reading speed from the sofa.
+            val duration = (max * 55).coerceIn(2_000, 60_000)
+            scroll.animateScrollTo(max, androidx.compose.animation.core.tween(durationMillis = duration, easing = LinearEasing))
+            delay(4_000)
+            scroll.animateScrollTo(0, androidx.compose.animation.core.tween(durationMillis = 700))
+            delay(3_000)
+        }
+    }
+    Box(modifier.clipToBounds().verticalScroll(scroll, enabled = false)) {
+        Text(text, color = color, fontSize = fontSize)
     }
 }

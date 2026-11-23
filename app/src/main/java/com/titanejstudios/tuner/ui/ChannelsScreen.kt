@@ -354,16 +354,6 @@ fun ChannelsScreen(vm: TunerViewModel) {
                             Spacer(Modifier.width(10.dp))
                             GenreChip(cur.category)
                         }
-                        cur.desc?.let {
-                            Text(
-                                it,
-                                color = Color(0xFFD5DCF2),
-                                fontSize = 15.sp,
-                                maxLines = 5,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.padding(top = 8.dp),
-                            )
-                        }
                     }
                     if (next != null) {
                         Text(
@@ -375,8 +365,12 @@ fun ChannelsScreen(vm: TunerViewModel) {
                             modifier = Modifier.padding(top = 8.dp),
                         )
                     }
+                    // The full description, slowly scrolling if it's longer than the space.
+                    cur?.desc?.let {
+                        AutoScrollText(it, Modifier.weight(1f).fillMaxWidth().padding(top = 8.dp, bottom = 8.dp))
+                    }
                 }
-                Spacer(Modifier.weight(1f))
+                if (ch == null || ch.let { vm.nowNext(it.id, vm.now).first?.desc } == null) Spacer(Modifier.weight(1f))
                 Row {
                     PillButton("Grid guide", { vm.navigate(Screen.Guide) }, compact = true)
                     Spacer(Modifier.width(8.dp))
@@ -424,8 +418,8 @@ fun ChannelMenu(
             add(MenuItem("Move up in favourites") { vm.moveFavourite(ch.id, -1) })
             add(MenuItem("Move down in favourites") { vm.moveFavourite(ch.id, 1) })
         }
-        if (ch.hasCatchup) {
-            add(MenuItem("Catch-up", "${ch.catchupDays} days") {
+        vm.catchupVersion(ch)?.let { cv ->
+            add(MenuItem("Catch-up", "${cv.catchupDays} days") {
                 vm.selectedGroup = if (group == ALL || group == FAVOURITES || group == RECENT) group else ch.group
                 vm.navigate(Screen.Guide)
             })
@@ -494,7 +488,7 @@ fun ChannelRow(
                         overflow = TextOverflow.Ellipsis,
                     )
                     if (isFavourite) Text("  ★", color = TunerColors.Gold, fontSize = 16.sp)
-                    if (channel.hasCatchup) Text("  ↺", color = if (focused) Color.White else TunerColors.Catchup, fontSize = 16.sp)
+                    if (vm.hasAnyCatchup(channel)) Text("  ↺", color = if (focused) Color.White else TunerColors.Catchup, fontSize = 16.sp)
                     val versions = vm.versionsFor(channel).size
                     if (versions > 1) Text("  ⧉ $versions", color = if (focused) Color.White else TunerColors.TextSecondary, fontSize = 14.sp)
                     if (channel.id in vm.deadChannels) Text("  ⚠ offline", color = if (focused) Color.White else TunerColors.Error, fontSize = 14.sp)

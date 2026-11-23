@@ -707,7 +707,7 @@ private fun InfoBanner(vm: TunerViewModel, channel: Channel, modifier: Modifier)
                     if (isFavourite) Text("  ★", color = TunerColors.Gold, fontSize = 26.sp)
                 }
                 Text(
-                    channel.group + (if (channel.hasCatchup) "   ·   ↺ catch-up ${channel.catchupDays} days" else ""),
+                    channel.group + (vm.catchupVersion(channel)?.let { "   ·   ↺ catch-up ${it.catchupDays} days" } ?: ""),
                     color = TunerColors.TextSecondary,
                     fontSize = 16.sp,
                     maxLines = 1,
