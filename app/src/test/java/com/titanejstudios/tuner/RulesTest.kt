@@ -196,4 +196,19 @@ class ChannelMergeTest {
         assertNull(l.tagOf("BBC One HD"))
         assertNull(l.tagOf("4K | Movies"))
     }
+
+    @Test
+    fun tasteLearnsWhatYouWatch() {
+        val t = com.titanejstudios.tuner.data.Taste()
+        val now = 1_700_000_000_000L
+        t.record("Live: Match of the Day", "Sport", 3600, now)
+        t.record("Pointless", "Entertainment", 30, now)
+        assertTrue(t.isYourShow("Match of the Day"))
+        assertFalse(t.isYourShow("Pointless"))
+        assertTrue(t.score("Match of the Day 2", "Sport", now).first > t.score("Bake Off", "Entertainment", now).first)
+        t.dislike("Bake Off", null)
+        assertTrue(t.score("Bake Off", "Entertainment", now).first < 0)
+        val back = com.titanejstudios.tuner.data.Taste.fromJson(t.toJson())
+        assertTrue(back.isYourShow("match of the day"))
+    }
 }

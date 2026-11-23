@@ -85,9 +85,12 @@ private class HeroInfo(
 /** Home's rows. The order and which are shown can be changed in Settings › Home rows. */
 enum class HomeRow(val title: String) {
     Continue("Carry on watching"),
+    YourShows("Your shows tonight"),
     Sport("Sport on now"),
+    Trending("Trending this week"),
     PlexNew("New on Plex"),
     TopPicks("Top picks for you"),
+    Because("Because you watched"),
     Favourites("Favourites"),
     Recordings("Recordings"),
     NewEpisodes("New episodes"),
@@ -215,11 +218,11 @@ private fun resumeCard(vm: TunerViewModel, e: ResumeEntry): HomeCard {
     )
 }
 
-private fun plexEntryCard(vm: TunerViewModel, e: com.titanejstudios.tuner.integrations.Plex.Entry): HomeCard {
+private fun plexEntryCard(vm: TunerViewModel, e: com.titanejstudios.tuner.integrations.Plex.Entry, tag: String = "NEW"): HomeCard {
     val what = if (e.isShow) "TV" else "Film"
     return HomeCard(
-        key = "pn" + e.server.machineId + e.ratingKey,
-        tag = "NEW", tagBg = PlexGold, tagFg = Color.Black,
+        key = (if (tag == "NEW") "pn" else "pl") + e.server.machineId + e.ratingKey,
+        tag = tag, tagBg = PlexGold, tagFg = Color.Black,
         title = e.title,
         line1 = listOfNotNull(e.year, what, e.rating).joinToString(" · "),
         line2 = e.library,
@@ -234,10 +237,59 @@ private fun plexEntryCard(vm: TunerViewModel, e: com.titanejstudios.tuner.integr
             e.title,
             listOfNotNull(e.year, what, e.rating, e.library).joinToString("  ·  "),
             e.summary, null, e.art ?: e.image, wide = e.art != null,
-            label = "NEW ON PLEX · " + what.uppercase(),
+            label = (if (tag == "NEW") "NEW ON PLEX · " else "ON PLEX · ") + what.uppercase(),
         ),
     )
 }
+
+private fun trendingCard(vm: TunerViewModel, item: com.titanejstudios.tuner.TrendingItem): HomeCard {
+    val t = item.trend
+    val where = when {
+        item.plex != null -> "On your Plex" + (item.plex.library?.let { " · $it" } ?: "")
+        item.film != null -> "In Films & TV"
+        item.series != null -> "In Series"
+        else -> "Not in your library · OK for info and trailer"
+    }
+    val what = if (t.isTv) "TV" else "Film"
+    return HomeCard(
+        key = "tr" + t.rank + t.title,
+        tag = "#${t.rank} TRENDING",
+        tagBg = if (item.available) Color(0xFFFFB648) else Color(0xCC050816),
+        tagFg = if (item.available) Color.Black else Color.White,
+        title = t.title,
+        line1 = listOfNotNull(t.year, what, t.rating?.let { String.format(java.util.Locale.UK, "★ %.1f", it) }).joinToString(" · "),
+        line2 = where,
+        image = t.backdrop ?: t.poster,
+        poster = t.backdrop == null,
+        channel = null,
+        progress = null,
+        progressColor = TunerColors.Accent,
+        onClick = { vm.openTrending(item) },
+        onLongClick = null,
+        hero = HeroInfo(
+            t.title,
+            listOfNotNull(t.year, what, t.rating?.let { String.format(java.util.Locale.UK, "★ %.1f", it) }, where).joinToString("  ·  "),
+            t.overview, null, t.backdrop ?: t.poster, wide = t.backdrop != null,
+            label = "#${t.rank} TRENDING THIS WEEK",
+        ),
+    )
+}
+
+private fun filmCard(vm: TunerViewModel, m: com.titanejstudios.tuner.data.VodItem): HomeCard = HomeCard(
+    key = "fm" + m.id,
+    tag = "FILM", tagBg = TunerColors.Accent, tagFg = Color.White,
+    title = m.name,
+    line1 = listOfNotNull(m.category, m.rating?.takeIf { it.isNotBlank() && it != "0" }?.let { "★ $it" }).joinToString(" · "),
+    line2 = null,
+    image = m.poster,
+    poster = true,
+    channel = null,
+    progress = null,
+    progressColor = TunerColors.Accent,
+    onClick = { vm.playMovie(m, fromStart = false) },
+    onLongClick = null,
+    hero = HeroInfo(m.name, m.category, null, null, m.poster, wide = false, label = "LIKE THE LAST FILM YOU WATCHED"),
+)
 
 private fun recordingCard(vm: TunerViewModel, r: Recording): HomeCard {
     val live = r.status == RecStatus.RECORDING
@@ -277,7 +329,7 @@ private fun watchCard(vm: TunerViewModel, w: WatchItem, badge: String, removable
     hero = HeroInfo(w.name, (if (w.isSeries) "Series" else "Film") + "  ·  ${w.category}", w.plot, null, w.image, wide = false, label = badge.uppercase()),
 )
 
-private fun pickCard(vm: TunerViewModel, pick: HomeFeed.Pick, channels: List<Channel>, now: Long): HomeCard {
+private fun pickCard(vm: TunerViewModel, pick: HomeFeed.Pick, channels: List<Channel>, now: Long, onMenu: (() -> Unit)? = null): HomeCard {
     val p = pick.programme
     val upcoming = p.start > now
     return HomeCard(
@@ -287,7 +339,7 @@ private fun pickCard(vm: TunerViewModel, pick: HomeFeed.Pick, channels: List<Cha
         tagFg = if (upcoming) Color.White else TunerColors.NowLine,
         title = p.title,
         line1 = pick.channel.name + (if (upcoming) "" else " · until ${hhmm(p.stop)}"),
-        line2 = if (upcoming) (if (vm.hasReminder(pick.channel, p)) "⏰ Reminder set" else "OK sets a reminder") else null,
+        line2 = if (upcoming) (if (vm.hasReminder(pick.channel, p)) "⏰ Reminder set" else "OK sets a reminder") else pick.reason,
         image = p.image,
         poster = false,
         channel = pick.channel,
@@ -296,11 +348,11 @@ private fun pickCard(vm: TunerViewModel, pick: HomeFeed.Pick, channels: List<Cha
         onClick = {
             if (upcoming && p.start - vm.now > 2 * 60_000L) vm.toggleReminder(pick.channel, p) else vm.play(pick.channel, channels)
         },
-        onLongClick = null,
+        onLongClick = onMenu,
         hero = HeroInfo(
             p.title,
             "${pick.channel.name}  ·  " + (if (upcoming) "Starts ${hhmm(p.start)}" else "On now, until ${hhmm(p.stop)}"),
-            p.desc, pick.channel, p.image, label = "TOP PICK FOR YOU",
+            p.desc, pick.channel, p.image, label = pick.reason?.uppercase() ?: "TOP PICK FOR YOU",
         ),
     )
 }
@@ -324,11 +376,17 @@ fun HomeScreen(vm: TunerViewModel) {
         vm.visibleApps().sortedBy { a -> if (com.titanejstudios.tuner.data.CatchupApps.all.any { it.label.containsMatchIn(a.label.trim()) || a.packageName in it.packages }) 0 else 1 }
     }
     var plexMenu by remember { mutableStateOf<com.titanejstudios.tuner.integrations.Plex.Item?>(null) }
+    var pickMenu by remember { mutableStateOf<HomeFeed.Pick?>(null) }
+    LaunchedEffect(vm.movies != null, vm.activeProfile.id) {
+        vm.loadBecause()
+        vm.loadTrending(force = vm.movies != null && vm.trending.none { it.film != null })
+    }
 
     // Every row's tiles (minute by minute, as programmes change).
     val minute = now / 60_000
     val cards: Map<HomeRow, List<HomeCard>> = remember(
         minute, recent, favourites, allChannels, vm.sportNow, vm.topPicks, vm.plexItems, vm.plexRecent,
+        vm.yourShows, vm.plexFeature.similar, vm.becauseFilms, vm.trending,
         vm.resume, vm.recordings, vm.followedSeries, vm.watchlist, vm.football.matches, vm.reminders,
     ) {
         buildMap {
@@ -339,7 +397,13 @@ fun HomeScreen(vm: TunerViewModel) {
             })
             put(HomeRow.Sport, vm.sportNow.map { channelCard(vm, it, vm.sportNow, now, followed) })
             put(HomeRow.PlexNew, vm.plexRecent.map { plexEntryCard(vm, it) })
-            put(HomeRow.TopPicks, vm.topPicks.let { picks -> val chans = picks.map { it.channel }; picks.map { pickCard(vm, it, chans, now) } })
+            put(HomeRow.Trending, vm.trending.map { trendingCard(vm, it) })
+            put(HomeRow.TopPicks, vm.topPicks.let { picks -> val chans = picks.map { it.channel }; picks.map { pk -> pickCard(vm, pk, chans, now) { pickMenu = pk } } })
+            put(HomeRow.YourShows, vm.yourShows.let { picks -> val chans = picks.map { it.channel }; picks.map { pk -> pickCard(vm, pk, chans, now) { pickMenu = pk } } })
+            put(HomeRow.Because, buildList {
+                vm.plexFeature.similar.take(20).forEach { add(plexEntryCard(vm, it, "LIKE THIS")) }
+                if (vm.hasVod) vm.becauseFilms.forEach { m -> add(filmCard(vm, m)) }
+            })
             put(HomeRow.Favourites, favourites.map { channelCard(vm, it, favourites, now, followed) })
             put(HomeRow.Recordings, vm.recordings.filter { it.status == RecStatus.DONE || it.status == RecStatus.RECORDING }
                 .sortedByDescending { it.start }.take(15).map { recordingCard(vm, it) })
@@ -367,7 +431,7 @@ fun HomeScreen(vm: TunerViewModel) {
                 order.remove(HomeRow.Sport)
                 order.add(0, HomeRow.Sport)
             } else if (hour >= 18 || hour < 2) {
-                val evening = listOf(HomeRow.PlexNew, HomeRow.MyList, HomeRow.NewEpisodes).filter { it in order }
+                val evening = listOf(HomeRow.Trending, HomeRow.PlexNew, HomeRow.MyList, HomeRow.NewEpisodes).filter { it in order }
                 order.removeAll(evening)
                 val at = order.indexOf(HomeRow.Continue) + 1
                 order.addAll(at, evening)
@@ -490,7 +554,8 @@ fun HomeScreen(vm: TunerViewModel) {
                             item(key = row.name) {
                                 CompositionLocalProvider(LocalBringIntoViewSpec provides outerSpec) {
                                     Column {
-                                        Text(row.title, color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 2.dp))
+                                        val because = vm.plexFeature.similarTo ?: vm.becauseFilmOf
+                                        Text(if (row == HomeRow.Because && because != null) "Because you watched $because" else row.title, color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 2.dp))
                                         val m = if (i == 0) Modifier.focusRequester(firstTile) else Modifier
                                         if (row == HomeRow.Apps) {
                                             AppRail(vm, apps, m) { a ->
@@ -507,6 +572,23 @@ fun HomeScreen(vm: TunerViewModel) {
                 }
             }
         }
+    }
+
+    pickMenu?.let { pk ->
+        val p = pk.programme
+        val upcoming = p.start > System.currentTimeMillis()
+        MenuDialog(
+            title = p.title,
+            subtitle = listOfNotNull(pk.channel.name + " · " + hhmm(p.start), pk.reason).joinToString("  ·  "),
+            items = buildList {
+                add(MenuItem(if (upcoming) "Watch the channel now" else "Watch") { vm.play(pk.channel, vm.channelsFor(ALL)) })
+                if (upcoming) add(MenuItem(if (vm.hasReminder(pk.channel, p)) "Cancel reminder" else "⏰ Remind me") { vm.toggleReminder(pk.channel, p) })
+                if (!vm.activeProfile.kids && p.stop > System.currentTimeMillis() && vm.recordingFor(pk.channel, p) == null) add(MenuItem("● Record") { vm.recordProgramme(pk.channel, p) })
+                add(MenuItem("👍 More like this") { vm.rateProgramme(pk.channel, p, like = true) })
+                add(MenuItem("👎 Not for me") { vm.rateProgramme(pk.channel, p, like = false) })
+            },
+            onDismiss = { pickMenu = null },
+        )
     }
 
     plexMenu?.let { item ->

@@ -248,6 +248,8 @@ fun SearchScreen(vm: TunerViewModel) {
         val items = buildList {
             add(MenuItem("Watch ${ch.name} live") { vm.play(ch, all) })
             if (p.start <= t && vm.canCatchup(ch, p)) add(MenuItem("Watch this programme (catch-up)") { vm.playCatchup(ch, p, all) })
+            add(MenuItem("👍 More like this") { vm.rateProgramme(ch, p, like = true) })
+            add(MenuItem("👎 Not for me") { vm.rateProgramme(ch, p, like = false) })
             if (p.start <= t) vm.catchupAppFor(ch)?.let { (provider, _) -> add(MenuItem("▶ Watch on ${provider.name}") { vm.openInCatchupApp(ch, p.title) }) }
             if (p.start > t) add(MenuItem(if (vm.hasReminder(ch, p)) "Cancel reminder" else "Remind me") { vm.toggleReminder(ch, p) })
             if (p.stop > t && !vm.activeProfile.kids) {

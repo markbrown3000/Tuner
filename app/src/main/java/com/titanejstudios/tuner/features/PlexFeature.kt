@@ -170,6 +170,28 @@ class PlexFeature(private val store: Store, private val scope: CoroutineScope) {
         }
     }
 
+    // ---------------- Because you watched ----------------
+
+    /** Plex films/shows like the last one you watched, and its title. */
+    var similar by mutableStateOf<List<Plex.Entry>>(emptyList()); private set
+    var similarTo by mutableStateOf<String?>(null); private set
+
+    fun loadSimilar(serverId: String, ratingKey: String, title: String) {
+        scope.launch {
+            val found = withContext(Dispatchers.IO) {
+                runCatching {
+                    if (servers.isEmpty()) store.plexToken?.let { servers = client().servers(it) }
+                    val s = servers.firstOrNull { it.machineId == serverId } ?: return@runCatching emptyList()
+                    client().similar(s, ratingKey)
+                }.getOrDefault(emptyList())
+            }
+            if (found.isNotEmpty()) {
+                similar = found
+                similarTo = title
+            }
+        }
+    }
+
     // ---------------- Genres ----------------
 
     /** The genre picked for each library (Plex's genre id and name); none = everything. */
@@ -212,6 +234,13 @@ class PlexFeature(private val store: Store, private val scope: CoroutineScope) {
             if (servers.isEmpty()) store.plexToken?.let { servers = client().servers(it) }
             client().copiesOf(servers, title, year)
         }.getOrDefault(emptyList())
+    }
+
+    suspend fun showNamed(title: String): Plex.Entry? = withContext(Dispatchers.IO) {
+        runCatching {
+            if (servers.isEmpty()) store.plexToken?.let { servers = client().servers(it) }
+            client().showNamed(servers, title)
+        }.getOrNull()
     }
 
     // ---------------- Kids ----------------

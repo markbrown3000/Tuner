@@ -314,6 +314,12 @@ class Plex(private val clientId: String) {
             .sortedBy { if (it.library?.contains("4k", ignoreCase = true) == true || it.library?.contains("uhd", ignoreCase = true) == true) 0 else 1 }
     }
 
+    /** A show in your Plex libraries with exactly this title (ignoring "The" and punctuation). */
+    fun showNamed(servers: List<Server>, title: String): Entry? {
+        val want = norm(title)
+        return search(servers, title).firstOrNull { it.type == "show" && norm(it.title) == want }
+    }
+
     /** Newest films and shows from every server, newest first (shows once, however many episodes arrived). */
     fun recentlyAdded(servers: List<Server>, limit: Int = 30): List<Entry> {
         val out = ArrayList<Pair<Long, Entry>>()
@@ -347,6 +353,23 @@ class Plex(private val clientId: String) {
         return out.sortedByDescending { it.first }.map { it.second }
             .distinctBy { "${it.type}|${norm(it.title)}|${it.year}" }
             .take(limit)
+    }
+
+    /** Films and shows like this one, from your own library (Plex's "More like this"). */
+    fun similar(server: Server, ratingKey: String): List<Entry> {
+        // Newer servers: related hubs; older ones: /similar.
+        runCatching {
+            val root = JSONObject(read(open("${server.uri}/hubs/metadata/$ratingKey/related?count=20", token = server.token, timeoutMs = 15_000)))
+            val hubs = root.optJSONObject("MediaContainer")?.optJSONArray("Hub")
+            val out = ArrayList<Entry>()
+            if (hubs != null) for (i in 0 until hubs.length()) {
+                val md = hubs.optJSONObject(i)?.optJSONArray("Metadata") ?: continue
+                out += entries(md, server, poster = true).filter { it.type == "movie" || it.type == "show" }
+            }
+            if (out.isNotEmpty()) return out.distinctBy { it.ratingKey }.filter { it.ratingKey != ratingKey }
+        }
+        val root = JSONObject(read(open("${server.uri}/library/metadata/$ratingKey/similar?count=20", token = server.token, timeoutMs = 15_000)))
+        return entries(root, server, poster = true).filter { it.ratingKey != ratingKey }
     }
 
     /** A library's genres: (Plex's id, name). */

@@ -140,4 +140,43 @@ object Tmdb {
     }
 
     fun ratingText(r: Double?): String? = r?.let { String.format(Locale.UK, "★ %.1f", it) }
+
+    /** One film or show in this week's trending list. */
+    class Trend(
+        val rank: Int,
+        val title: String,
+        val year: String?,
+        val isTv: Boolean,
+        val overview: String?,
+        val rating: Double?,
+        val backdrop: String?,
+        val poster: String?,
+    )
+
+    /** What's trending this week in films and TV (TMDB, UK region where it matters), most popular first. */
+    fun trending(apiKey: String): List<Trend> {
+        val o = get(apiKey, "$API/trending/all/week?language=en-GB")
+        val arr = o.optJSONArray("results") ?: return emptyList()
+        val out = ArrayList<Trend>()
+        for (i in 0 until arr.length()) {
+            val r = arr.getJSONObject(i)
+            val type = r.optString("media_type")
+            if (type != "movie" && type != "tv") continue
+            val tv = type == "tv"
+            val title = if (tv) r.optString("name") else r.optString("title")
+            if (title.isBlank()) continue
+            val date = if (tv) r.optString("first_air_date") else r.optString("release_date")
+            out += Trend(
+                rank = out.size + 1,
+                title = title,
+                year = date.take(4).takeIf { it.length == 4 },
+                isTv = tv,
+                overview = r.optString("overview").takeIf { it.isNotBlank() },
+                rating = r.optDouble("vote_average", 0.0).takeIf { it > 0.0 },
+                backdrop = r.optString("backdrop_path").takeIf { it.isNotBlank() && it != "null" }?.let { IMAGES + "w780" + it },
+                poster = r.optString("poster_path").takeIf { it.isNotBlank() && it != "null" }?.let { IMAGES + "w342" + it },
+            )
+        }
+        return out
+    }
 }

@@ -629,7 +629,8 @@ class Store(context: Context) {
 
     /** Home rows switched off. */
     var homeRowsHidden: Set<String>
-        get() = prefs.getStringSet("home_rows_hidden", emptySet())?.toSet() ?: emptySet()
+        // "New on Plex" is replaced by "Trending this week" unless you switch it back on.
+        get() = prefs.getStringSet("home_rows_hidden", setOf("PlexNew"))?.toSet() ?: emptySet()
         set(value) = prefs.edit().putStringSet("home_rows_hidden", value).apply()
 
     /** Home moves sport up when it's on, and films/Plex up in the evening. */
@@ -641,6 +642,19 @@ class Store(context: Context) {
     var hiddenLanguages: Set<String>
         get() = prefs.getStringSet("hidden_languages", emptySet())?.toSet() ?: emptySet()
         set(value) = prefs.edit().putStringSet("hidden_languages", value).apply()
+
+    /** What a profile likes (see Taste). */
+    fun taste(profileId: String): String? = prefs.getString(profileKey("taste", profileId), null)
+    fun setTaste(profileId: String, json: String) = prefs.edit().putString(profileKey("taste", profileId), json).apply()
+
+    /** Learn from what's watched (Settings › Recommendations). */
+    var learnTaste: Boolean
+        get() = prefs.getBoolean("learn_taste", true)
+        set(value) = prefs.edit().putBoolean("learn_taste", value).apply()
+
+    /** The last Plex film/show and the last film watched, for "Because you watched…" (JSON). */
+    fun lastWatchedFor(profileId: String): String? = prefs.getString(profileKey("last_watched_for", profileId), null)
+    fun setLastWatchedFor(profileId: String, json: String) = prefs.edit().putString(profileKey("last_watched_for", profileId), json).apply()
 
     /** Home's background tint follows the highlighted picture's colours. */
     var tintFromPicture: Boolean

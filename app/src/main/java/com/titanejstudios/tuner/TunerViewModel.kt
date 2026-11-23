@@ -42,6 +42,8 @@ import com.titanejstudios.tuner.data.Repository
 import com.titanejstudios.tuner.data.ResumeEntry
 import com.titanejstudios.tuner.data.SeriesItem
 import com.titanejstudios.tuner.data.FilmName
+import com.titanejstudios.tuner.data.Taste
+import com.titanejstudios.tuner.data.Recommend
 import com.titanejstudios.tuner.data.Languages
 import com.titanejstudios.tuner.data.CatchupApps
 import com.titanejstudios.tuner.data.Source
@@ -102,7 +104,7 @@ import java.util.Locale
 enum class Screen {
     Home, Channels, Guide, Player, Search, Movies, Series, SeriesDetail, Settings, SourceEdit, Manage,
     ProfilePicker, ProfileEdit, PhoneSetup, EpgMap, Recordings, MultiView, Sports, Apps, Log,
-    WhatsOn, Stats, ShareTv, Catchup, Categories, Plex, Football, Update, SelfTest, PlexLibrary, PlexShow, HomeRows, Languages,
+    WhatsOn, Stats, ShareTv, Catchup, Categories, Plex, Football, Update, SelfTest, PlexLibrary, PlexShow, HomeRows, Languages, Recommendations,
 }
 
 const val FAVOURITES = "★ Favourites"
@@ -138,6 +140,16 @@ class SearchResults(
     val films: List<VodItem> = emptyList(),
     val seriesFound: List<SeriesItem> = emptyList(),
 )
+
+/** A trending film or show, and where you have it. */
+class TrendingItem(
+    val trend: com.titanejstudios.tuner.integrations.Tmdb.Trend,
+    val plex: com.titanejstudios.tuner.integrations.Plex.Entry?,
+    val film: VodItem?,
+    val series: SeriesItem?,
+) {
+    val available: Boolean get() = plex != null || film != null || series != null
+}
 
 /** A film that's in more than one place (Plex Films and Films 4K, or IPTV too): which to play. */
 class PlexCopyChoice(
@@ -332,6 +344,20 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     var homeSmart by mutableStateOf(store.homeSmart); private set
     var voiceSearchPending by mutableStateOf(false)
     var tintFromPicture by mutableStateOf(store.tintFromPicture); private set
+    /** What this profile likes, learned from what it watches. */
+    private var taste: Taste = Taste.fromJson(store.taste(store.activeProfileId))
+    private val pendingTaste = HashMap<Pair<String, String?>, Long>()
+    var learnTaste by mutableStateOf(store.learnTaste); private set
+    /** "Your shows tonight" on Home. */
+    var yourShows by mutableStateOf<List<HomeFeed.Pick>>(emptyList()); private set
+    /** Films like the last one you watched from your provider, and its name. */
+    var becauseFilms by mutableStateOf<List<VodItem>>(emptyList()); private set
+    var becauseFilmOf by mutableStateOf<String?>(null); private set
+    /** This week's trending films and TV, with where you can watch each (Plex, your provider) if you have it. */
+    var trending by mutableStateOf<List<TrendingItem>>(emptyList()); private set
+    private var trendingAt = 0L
+    /** Bumped when tastes change, so Settings › Recommendations redraws. */
+    var tasteVersion by mutableStateOf(0); private set
     /** Countries/languages hidden (Settings › Languages & countries). */
     var hiddenLanguages by mutableStateOf(store.hiddenLanguages); private set
     var artSaverMinutes by mutableStateOf(store.artSaverMinutes); private set
@@ -949,11 +975,16 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         homeFeedJob?.cancel()
         homeFeedJob = viewModelScope.launch {
             val t = System.currentTimeMillis()
+            val learned = taste
             val result = withContext(Dispatchers.Default) {
-                HomeFeed.sport(chans, guide, t) to HomeFeed.topPicks(chans, guide, rec, favs, t)
+                // Once Tuner has learned a little about you, picks follow your taste (with reasons).
+                val picks = if (learned.isEmpty) HomeFeed.topPicks(chans, guide, rec, favs, t)
+                else Recommend.topPicks(chans, guide, learned, rec, t).ifEmpty { HomeFeed.topPicks(chans, guide, rec, favs, t) }
+                Triple(HomeFeed.sport(chans, guide, t), picks, Recommend.yourShowsTonight(chans, guide, learned, t))
             }
             sportNow = result.first
             topPicks = result.second
+            yourShows = result.third
         }
     }
 
@@ -1571,6 +1602,9 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
             store.activeProfileId = p.id
             favourites = store.favourites(p.id)
             favouriteSet = favourites.toSet()
+            taste = Taste.fromJson(store.taste(p.id))
+            becauseFilms = emptyList()
+            becauseFilmOf = null
             recents = store.recents(p.id)
             selectedGroupState = store.lastGroup(p.id) ?: ALL
             unlocked = false
@@ -1862,6 +1896,106 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         if (due != null) {
             dueReminder = due
             sendHa("reminder", ReminderAlarms.payload(due) + ("app_open" to true))
+        }
+    }
+
+    // ---------------- Recommendations ----------------
+
+    /** 👍 / 👎 on a programme or film: more or fewer like it. */
+    fun rate(title: String, genre: String?, like: Boolean) {
+        if (like) taste.like(title, genre) else taste.dislike(title, genre)
+        store.setTaste(activeProfile.id, taste.toJson())
+        tasteVersion++
+        showNotice(if (like) "👍 Got it – more like \"$title\"" else "👎 Got it – fewer like \"$title\"")
+        refreshHomeFeed()
+    }
+
+    fun rateProgramme(channel: Channel, p: Programme, like: Boolean) = rate(p.title, Genres.of(p.category, p.title, channel.group), like)
+
+    /** What Tuner has learned, for Settings › Recommendations. */
+    fun tasteSummary(): Triple<List<Pair<String, Double>>, List<String>, Int> =
+        Triple(taste.genreShares().take(8), taste.topShows(10), taste.liked.size + taste.disliked.size)
+
+    fun resetTaste() {
+        taste = Taste()
+        store.setTaste(activeProfile.id, taste.toJson())
+        tasteVersion++
+        refreshHomeFeed()
+        showNotice("Recommendations reset – Tuner will learn again from what you watch")
+    }
+
+    fun toggleLearnTaste() {
+        learnTaste = !learnTaste
+        store.learnTaste = learnTaste
+    }
+
+    /** Remembers what was just watched, for "Because you watched…". */
+    private fun rememberWatched(kind: String, id: String, title: String, extra: String = "") {
+        store.setLastWatchedFor(activeProfile.id, org.json.JSONObject().put("kind", kind).put("id", id).put("title", title).put("extra", extra).toString())
+    }
+
+    /** Fills "Because you watched…": Plex's own "more like this", else films from your provider in the same category. */
+    fun loadBecause() {
+        val o = runCatching { org.json.JSONObject(store.lastWatchedFor(activeProfile.id) ?: return) }.getOrNull() ?: return
+        val title = o.optString("title")
+        when (o.optString("kind")) {
+            "plex" -> if (plexLinked) plexFeature.loadSimilar(o.optString("extra"), o.optString("id"), title)
+            "film" -> {
+                val list = movies ?: run {
+                    if (hasVod) loadMovies()
+                    return
+                }
+                val category = list.firstOrNull { it.id == o.optString("id") }?.category ?: o.optString("extra")
+                becauseFilms = list.filter { it.category == category && it.id != o.optString("id") && it.id !in resume.keys }
+                    .sortedByDescending { it.rating?.toDoubleOrNull() ?: 0.0 }
+                    .take(20)
+                becauseFilmOf = title
+            }
+        }
+    }
+
+    // ---------------- Trending ----------------
+
+    /** This week's trending list from TMDB, matched against your Plex and your provider's films and series (every 6 hours). */
+    fun loadTrending(force: Boolean = false) {
+        val key = tmdbKey ?: return
+        val t = System.currentTimeMillis()
+        if (!force && t - trendingAt < 6 * 3_600_000L && trending.isNotEmpty()) return
+        trendingAt = t
+        val films = movies.orEmpty()
+        val shows = series.orEmpty()
+        viewModelScope.launch {
+            val list = withContext(Dispatchers.IO) { runCatching { com.titanejstudios.tuner.integrations.Tmdb.trending(key) }.getOrDefault(emptyList()) }
+            if (list.isEmpty()) return@launch
+            val plain = { s: String -> s.lowercase().replace(Regex("^(the|a|an) "), "").replace(Regex("[^\\p{L}\\p{N}]"), "") }
+            val filmIndex = withContext(Dispatchers.Default) {
+                films.groupBy { m -> FilmName.parse(m.name).let { plain(it.first) } }
+            }
+            val seriesIndex = withContext(Dispatchers.Default) {
+                shows.groupBy { s -> FilmName.parse(s.name).let { plain(it.first) } }
+            }
+            val out = list.take(20).map { tr ->
+                val p = plain(tr.title)
+                val plex = if (!plexLinked) null
+                else if (tr.isTv) withTimeoutOrNull(4_000) { plexFeature.showNamed(tr.title) }
+                else withTimeoutOrNull(4_000) { plexFeature.copiesOf(tr.title, tr.year) }?.firstOrNull()
+                val film = if (tr.isTv) null else filmIndex[p]?.let { c ->
+                    c.firstOrNull { FilmName.parse(it.name).second == tr.year } ?: c.firstOrNull { FilmName.parse(it.name).second == null }
+                }
+                val show = if (tr.isTv) seriesIndex[p]?.firstOrNull() else null
+                TrendingItem(tr, plex?.takeIf { !activeProfile.kids || plexFeature.isKidsEntry(it) }, film, show)
+            }
+            trending = out
+        }
+    }
+
+    /** OK on a trending tile: play it where you have it, otherwise show its info. */
+    fun openTrending(item: TrendingItem) {
+        when {
+            item.plex != null -> if (item.plex.isShow) openPlexShow(item.plex) else playPlexEntry(item.plex)
+            item.film != null -> playMovie(item.film, fromStart = false)
+            item.series != null -> openSeriesDetail(item.series)
+            else -> openFilmInfo(item.trend.title + (item.trend.year?.let { " ($it)" } ?: ""), isSeries = item.trend.isTv)
         }
     }
 
@@ -2206,6 +2340,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     }
 
     fun playMovie(m: VodItem, fromStart: Boolean, viaPlex: Boolean = true) {
+        rememberWatched("film", m.id, m.name, m.category)
         // Also on Plex? Plex's copy is usually better (and its progress is shared with the Plex app).
         if (viaPlex && plexLinked && preferPlexFilms) {
             viewModelScope.launch {
@@ -2969,6 +3104,8 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
 
     /** Plays a Plex film or episode. Episodes queue up the rest of the show after them. */
     fun playPlexEntry(entry: com.titanejstudios.tuner.integrations.Plex.Entry, fromStart: Boolean = false, chosen: Boolean = false) {
+        // "Because you watched…": the film, or the show an episode belongs to.
+        (if (entry.type == "episode") plexFeature.show else entry)?.let { rememberWatched("plex", it.ratingKey, it.title, it.server.machineId) }
         if (entry.type == "movie" && !chosen) {
             // In Films and Films 4K? Ask which copy to play.
             viewModelScope.launch {
@@ -3132,6 +3269,17 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
             }
             val key = name to (genre ?: "Other")
             pendingStats[key] = (pendingStats[key] ?: 0L) + 15L
+            // Learning what you like: the programme or film, and its kind.
+            val title = when (m) {
+                is PlayMode.Live -> nowNext(m.channel.id, System.currentTimeMillis()).first?.title
+                is PlayMode.CatchupPlay -> m.programme.title
+                is PlayMode.Vod -> m.title
+                is PlayMode.RecordingPlay -> m.recording.title
+            }
+            if (title != null && learnTaste) {
+                val tk = title to genre
+                pendingTaste[tk] = (pendingTaste[tk] ?: 0L) + 15L
+            }
         }
         if (flush && pendingStats.isNotEmpty()) {
             val pid = activeProfile.id
@@ -3140,6 +3288,12 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
             for ((k, secs) in pendingStats) json = WatchStats.add(json, day, k.first, k.second, secs)
             pendingStats.clear()
             store.setStats(pid, json)
+        }
+        if (flush && pendingTaste.isNotEmpty()) {
+            val t = System.currentTimeMillis()
+            for ((k, secs) in pendingTaste) taste.record(k.first, k.second, secs, t)
+            pendingTaste.clear()
+            store.setTaste(activeProfile.id, taste.toJson())
         }
     }
 

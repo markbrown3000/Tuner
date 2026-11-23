@@ -4,7 +4,7 @@ import java.util.Locale
 
 /** Works out the Home screen's "Sport on now" and "Top picks" rows. Pure, runs off the main thread. */
 object HomeFeed {
-    class Pick(val channel: Channel, val programme: Programme)
+    class Pick(val channel: Channel, val programme: Programme, val reason: String? = null)
 
     private val filler = Regex(
         "^(to be announced|tba|tbc|no information|no info|off air|close|closedown|programmes? start.*|" +
@@ -21,7 +21,7 @@ object HomeFeed {
         return null
     }
 
-    private fun nextAfter(list: List<Programme>?, t: Long): Programme? = list?.firstOrNull { it.start > t }
+    fun nextAfter(list: List<Programme>?, t: Long): Programme? = list?.firstOrNull { it.start > t }
 
     fun sport(channels: List<Channel>, epg: Map<String, List<Programme>>, now: Long, max: Int = 20): List<Channel> {
         val seen = HashSet<String>()

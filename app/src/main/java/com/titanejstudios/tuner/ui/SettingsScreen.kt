@@ -148,6 +148,15 @@ fun SettingsScreen(vm: TunerViewModel) {
 
             item {
                 SettingRow(
+                    "Recommendations",
+                    subtitle = "What Tuner has learned you like – and a reset if it gets it wrong",
+                    detail = if (vm.learnTaste) "Learning" else "Off",
+                    onClick = { vm.navigate(Screen.Recommendations) },
+                )
+            }
+
+            item {
+                SettingRow(
                     "Languages & countries",
                     subtitle = "Hide everything that isn't in English – or pick countries one by one",
                     detail = if (vm.hiddenLanguages.isEmpty()) "Everything" else "${vm.hiddenLanguages.size} hidden",
