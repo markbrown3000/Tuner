@@ -102,8 +102,8 @@ object TunerColors {
     var Accent by mutableStateOf(Color(0xFF1F7BFF)); private set
     var AccentSoft by mutableStateOf(Color(0xFF173A8A)); private set
 
-    val accents = listOf("blue" to "Blue", "red" to "Red", "purple" to "Purple", "green" to "Green", "orange" to "Orange", "teal" to "Teal")
-    val backgrounds = listOf("navy" to "Navy", "black" to "Black", "charcoal" to "Charcoal", "plum" to "Plum")
+    val accents = listOf("sky" to "Sky blue", "blue" to "Blue", "red" to "Red", "purple" to "Purple", "green" to "Green", "orange" to "Orange", "teal" to "Teal")
+    val backgrounds = listOf("ink" to "Evening", "navy" to "Navy", "black" to "Black", "charcoal" to "Charcoal", "plum" to "Plum")
 
     fun apply(accent: String, background: String) {
         val (a, soft) = when (accent) {
@@ -112,7 +112,8 @@ object TunerColors {
             "green" -> Color(0xFF17B26A) to Color(0xFF0E5C3A)
             "orange" -> Color(0xFFFF7A1A) to Color(0xFF8A3F0E)
             "teal" -> Color(0xFF14B8C4) to Color(0xFF0D5A62)
-            else -> Color(0xFF1F7BFF) to Color(0xFF173A8A)
+            "blue" -> Color(0xFF1F7BFF) to Color(0xFF173A8A)
+            else -> Color(0xFF4D9BFF) to Color(0xFF1F3F8A)
         }
         Accent = a
         AccentSoft = soft
@@ -120,7 +121,9 @@ object TunerColors {
             "black" -> listOf(Color(0xFF0E0E12), Color(0xFF000000), Color(0xFF1A1A20), Color(0xFF27272F))
             "charcoal" -> listOf(Color(0xFF22262C), Color(0xFF121417), Color(0xFF2C3139), Color(0xFF3A404A))
             "plum" -> listOf(Color(0xFF1C1035), Color(0xFF0A0618), Color(0xFF2B1B4E), Color(0xFF3A2766))
-            else -> listOf(Color(0xFF0A1030), Color(0xFF04071A), Color(0xFF141C45), Color(0xFF1E2A5E))
+            "navy" -> listOf(Color(0xFF0A1030), Color(0xFF04071A), Color(0xFF141C45), Color(0xFF1E2A5E))
+            // "Evening": deep ink-blue, so pictures and text stand out.
+            else -> listOf(Color(0xFF07123A), Color(0xFF030920), Color(0xFF10204F), Color(0xFF1A2A5E))
         }
         Background = bg[0]
         BackgroundBottom = bg[1]
@@ -295,7 +298,8 @@ fun PillButton(
         onClick = onClick,
         modifier = modifier.height(if (compact) 42.dp else 48.dp),
         selected = selected,
-        baseColor = TunerColors.Panel,
+        // Frosted, so the picture behind shows through.
+        baseColor = Color(0x24FFFFFF),
         shape = RoundedCornerShape(24.dp),
     ) { focused ->
         Text(
@@ -834,14 +838,17 @@ fun TopNav(vm: TunerViewModel, current: Screen, modifier: Modifier = Modifier) {
                 shape = RoundedCornerShape(22.dp),
                 modifier = Modifier.height(44.dp),
             ) { focused ->
-                Text(
-                    (if (vm.activeProfile.kids) "🧸 " else "👤 ") + vm.activeProfile.name,
-                    modifier = Modifier.padding(horizontal = 14.dp),
-                    color = if (focused) Color.White else TunerColors.TextSecondary,
-                    fontSize = 16.sp,
-                    maxLines = 1,
-                    softWrap = false,
-                )
+                Row(Modifier.padding(start = 4.dp, end = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                    ProfileAvatar(vm.activeProfile, 34.dp, vm.profiles.indexOfFirst { it.id == vm.activeProfile.id })
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        vm.activeProfile.name,
+                        color = if (focused) Color.White else TunerColors.TextSecondary,
+                        fontSize = 16.sp,
+                        maxLines = 1,
+                        softWrap = false,
+                    )
+                }
             }
             Spacer(Modifier.width(14.dp))
         }
@@ -945,5 +952,103 @@ fun AutoScrollText(
     }
     Box(modifier.clipToBounds().verticalScroll(scroll, enabled = false)) {
         Text(text, color = color, fontSize = fontSize)
+    }
+}
+
+
+// ---------- Profile pictures ----------
+
+val AvatarColours = listOf(
+    Color(0xFF1F7BFF), Color(0xFFE0567A), Color(0xFFFFB648), Color(0xFF2FBF71),
+    Color(0xFF8A4FFF), Color(0xFF14B8C4), Color(0xFFFF7A1A), Color(0xFF64748B),
+)
+val AvatarIcons = listOf("", "🦊", "🐼", "🦁", "🐸", "🐶", "🐱", "🚀", "⚽", "🎸", "🌈", "🎮", "🧸")
+
+/** A profile's round picture: its colour, with its icon or first letter. */
+@Composable
+fun ProfileAvatar(p: com.titanejstudios.tuner.data.Profile, size: androidx.compose.ui.unit.Dp, index: Int = 0) {
+    val colour = AvatarColours[(if (p.colour >= 0) p.colour else if (p.kids) 2 else index.coerceAtLeast(0)) % AvatarColours.size]
+    Box(Modifier.size(size).clip(androidx.compose.foundation.shape.CircleShape).background(colour), contentAlignment = Alignment.Center) {
+        Text(
+            p.icon.ifEmpty { if (p.kids) "🧸" else p.name.take(1).uppercase() },
+            color = Color.White,
+            fontSize = (size.value * 0.42f).sp,
+            fontWeight = FontWeight.ExtraBold,
+        )
+    }
+}
+
+
+// ---------- Colours from the picture ----------
+
+/**
+ * A dark background colour taken from a picture (its average hue, kept dark so text stays
+ * readable), or null if the picture can't be read.
+ */
+suspend fun pictureTint(context: android.content.Context, url: String): Color? {
+    val request = coil.request.ImageRequest.Builder(context).data(url).size(40).allowHardware(false).build()
+    val result = coil.Coil.imageLoader(context).execute(request) as? coil.request.SuccessResult ?: return null
+    val bmp = (result.drawable as? android.graphics.drawable.BitmapDrawable)?.bitmap ?: return null
+    return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+        var x = 0.0
+        var y = 0.0
+        var sat = 0.0
+        var n = 0
+        val hsv = FloatArray(3)
+        val step = maxOf(1, bmp.width * bmp.height / 900)
+        var i = 0
+        while (i < bmp.width * bmp.height) {
+            val px = bmp.getPixel(i % bmp.width, i / bmp.width)
+            android.graphics.Color.colorToHSV(px, hsv)
+            // Colourful, mid-bright pixels say most about the picture's mood.
+            val w = hsv[1] * (1f - kotlin.math.abs(hsv[2] - 0.6f))
+            val a = Math.toRadians(hsv[0].toDouble())
+            x += kotlin.math.cos(a) * w
+            y += kotlin.math.sin(a) * w
+            sat += hsv[1] * w
+            n++
+            i += step
+        }
+        val weight = kotlin.math.sqrt(x * x + y * y)
+        if (n == 0 || weight < 0.5) return@withContext null
+        val hue = ((Math.toDegrees(kotlin.math.atan2(y, x)) + 360) % 360).toFloat()
+        val s = (sat / maxOf(weight, 1e-6)).toFloat().coerceIn(0.35f, 0.75f)
+        Color(android.graphics.Color.HSVToColor(floatArrayOf(hue, s, 0.24f)))
+    }
+}
+
+/**
+ * The background colour for a screen whose highlighted item has [image]: the theme's colour,
+ * gently tinted towards the picture's colours when "Colours follow the picture" is on.
+ */
+@Composable
+fun rememberPictureTint(image: String?, enabled: Boolean): Color {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var tint by remember { mutableStateOf<Color?>(null) }
+    LaunchedEffect(image, enabled) {
+        if (!enabled || image == null) {
+            tint = null
+            return@LaunchedEffect
+        }
+        delay(250)
+        tint = runCatching { pictureTint(context, image) }.getOrNull()
+    }
+    val target = tint?.let { androidx.compose.ui.graphics.lerp(TunerColors.Background, it, 0.55f) } ?: TunerColors.Background
+    return androidx.compose.animation.animateColorAsState(target, androidx.compose.animation.core.tween(700), label = "tint").value
+}
+
+/** The highlighted film or show above a poster grid: its whole poster, title and details. */
+@Composable
+fun FocusStrip(title: String?, details: String?, image: String?, hint: String, modifier: Modifier = Modifier) {
+    Row(modifier.fillMaxWidth().height(96.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(width = 64.dp, height = 96.dp).clip(RoundedCornerShape(8.dp)).background(Color(0x22FFFFFF))) {
+            if (image != null) coil.compose.AsyncImage(model = image, contentDescription = null, contentScale = androidx.compose.ui.layout.ContentScale.Crop, modifier = Modifier.fillMaxSize())
+        }
+        Spacer(Modifier.width(16.dp))
+        Column(Modifier.weight(1f)) {
+            Text(title ?: "", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            details?.let { Text(it, color = Color(0xFFD4DDF5), fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+            Text(hint, color = Color(0xFF8FA3D4), fontSize = 13.sp, maxLines = 1)
+        }
     }
 }

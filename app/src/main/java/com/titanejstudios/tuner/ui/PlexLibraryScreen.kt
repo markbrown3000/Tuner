@@ -88,7 +88,13 @@ fun PlexLibraryScreen(vm: TunerViewModel) {
         runCatching { focusFor[category ?: categories.first()]?.requestFocus() }
     }
 
-    Column(Modifier.fillMaxSize().skyBackground().padding(horizontal = 40.dp, vertical = 24.dp)) {
+    var focusedEntry by remember { mutableStateOf<Plex.Entry?>(null) }
+    val tint = rememberPictureTint(focusedEntry?.let { it.art ?: it.image }, vm.tintFromPicture)
+    Column(
+        Modifier.fillMaxSize()
+            .background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(tint, TunerColors.BackgroundBottom)))
+            .padding(horizontal = 40.dp, vertical = 24.dp)
+    ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Plex", fontSize = 30.sp, fontWeight = FontWeight.Bold, color = TunerColors.TextPrimary)
             Spacer(Modifier.width(16.dp))
@@ -129,7 +135,16 @@ fun PlexLibraryScreen(vm: TunerViewModel) {
                 vm.refreshPlex(force = true)
             }, compact = true)
         }
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(10.dp))
+        focusedEntry?.let { e ->
+            FocusStrip(
+                e.title,
+                listOfNotNull(e.year, if (e.isShow) "TV" else "Film", e.rating, e.library).joinToString("  ·  "),
+                e.image,
+                if (e.isShow) "OK opens the show  ·  hold OK for more" else "OK to watch  ·  hold OK for more",
+            )
+            Spacer(Modifier.height(10.dp))
+        }
         if (categories.isEmpty()) {
             CenterMessage(plex.libraryStatus ?: "Looking for your Plex libraries…")
             return@Column
@@ -185,6 +200,7 @@ fun PlexLibraryScreen(vm: TunerViewModel) {
                                     progress = if (!e.isShow && e.durationMs > 0 && e.viewOffsetMs > 0) e.viewOffsetMs.toFloat() / e.durationMs else null,
                                     onClick = { if (e.isShow) vm.openPlexShow(e) else vm.playPlexEntry(e) },
                                     onLongClick = { menuFor = e },
+                                    modifier = Modifier.onFocusChanged { if (it.hasFocus) focusedEntry = e },
                                 )
                             }
                         }
@@ -232,6 +248,7 @@ fun PlexLibraryScreen(vm: TunerViewModel) {
                                     progress = if (!e.isShow && e.durationMs > 0 && e.viewOffsetMs > 0) e.viewOffsetMs.toFloat() / e.durationMs else null,
                                     onClick = { if (e.isShow) vm.openPlexShow(e) else vm.playPlexEntry(e) },
                                     onLongClick = { menuFor = e },
+                                    modifier = Modifier.onFocusChanged { if (it.hasFocus) focusedEntry = e },
                                 )
                             }
                         }

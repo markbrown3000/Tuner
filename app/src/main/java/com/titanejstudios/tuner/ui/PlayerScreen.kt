@@ -2,6 +2,7 @@ package com.titanejstudios.tuner.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -75,6 +76,8 @@ fun PlayerScreen(vm: TunerViewModel) {
     var showStats by remember { mutableStateOf(false) }
     var stats by remember { mutableStateOf<List<String>>(emptyList()) }
     var showInfo by remember { mutableStateOf(true) }
+    // After CH+/CH−: the channel strip instead of the full info bar, for a few seconds.
+    var zapStrip by remember { mutableStateOf(false) }
     var infoToken by remember { mutableIntStateOf(0) }
     var digits by remember { mutableStateOf("") }
     var position by remember { mutableLongStateOf(0L) }
@@ -100,6 +103,13 @@ fun PlayerScreen(vm: TunerViewModel) {
     LaunchedEffect(modeKey) { pokeInfo() }
     // Flicking through channels quickly: show each name as you go.
     LaunchedEffect(vm.zapPreview) { if (vm.zapPreview != null) pokeInfo() }
+    LaunchedEffect(vm.zappedAt) {
+        if (vm.zappedAt == 0L) return@LaunchedEffect
+        zapStrip = true
+        pokeInfo()
+        delay(4_000)
+        zapStrip = false
+    }
     LaunchedEffect(infoToken) {
         delay(5_000)
         if (isLive || !playback.isPaused) showInfo = false
@@ -361,7 +371,8 @@ fun PlayerScreen(vm: TunerViewModel) {
 
             if (showInfo && overlay == Overlay.None) {
                 when (mode) {
-                    is PlayMode.Live -> InfoBanner(vm, vm.zapPreview ?: mode.channel, Modifier.align(Alignment.BottomCenter))
+                    is PlayMode.Live -> if (zapStrip) ZapStrip(vm, vm.zapPreview ?: mode.channel, Modifier.align(Alignment.BottomCenter))
+                    else InfoBanner(vm, vm.zapPreview ?: mode.channel, Modifier.align(Alignment.BottomCenter))
                     is PlayMode.CatchupPlay -> SeekControls(
                         title = mode.programme.title,
                         subtitle = "↺ Catch-up  ·  ${mode.channel.name}  ·  ${dayLabel(mode.programme.start)} ${hhmm(mode.programme.start)}",
@@ -676,107 +687,142 @@ private fun InfoBanner(vm: TunerViewModel, channel: Channel, modifier: Modifier)
     val now = vm.now
     val (current, next) = vm.nowNext(channel.id, now)
     val isFavourite = channel.id in vm.favouriteSet
+    val score = current?.let { vm.liveScoreFor(it) }
+    val name = channel.name.uppercase()
+    val badges = buildList {
+        when {
+            Regex("\\b(UHD|4K)\\b").containsMatchIn(name) -> add("4K")
+            Regex("\\b(FHD|HD|1080P?|720P?)\\b").containsMatchIn(name) -> add("HD")
+        }
+        if (name.contains("5.1")) add("5.1")
+        if (remember(channel.id, now / 60_000) { vm.playback.tracks(C.TRACK_TYPE_TEXT).isNotEmpty() }) add("SUBTITLES")
+        if (vm.catchupVersion(channel) != null) add("↺ CATCH-UP")
+        if (current != null && vm.recordingFor(channel, current) != null) add("● REC")
+    }
+    val live = current != null && (score != null || (com.titanejstudios.tuner.data.Sports.classify(current) != null && com.titanejstudios.tuner.data.Sports.looksLive(current)))
+    Row(
+        modifier
+            .fillMaxWidth()
+            .background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xD9030820), Color(0xF5030820))))
+            .padding(start = 56.dp, end = 56.dp, top = 90.dp, bottom = 30.dp),
+        verticalAlignment = Alignment.Bottom,
+    ) {
+        // Logo with the channel number underneath.
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Box(
+                Modifier.size(width = 150.dp, height = 84.dp).clip(RoundedCornerShape(12.dp)).background(Color(0x1FFFFFFF)).padding(8.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                ChannelLogo(channel.logo, channel.name, Modifier.fillMaxSize())
+            }
+            Spacer(Modifier.height(6.dp))
+            Text(
+                vm.channelNumber(channel).toString() + if (isFavourite) "  ★" else "",
+                color = if (isFavourite) TunerColors.Gold else Color.White, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold,
+            )
+        }
+        Spacer(Modifier.width(26.dp))
+        Column(Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (live) {
+                    Text("LIVE", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold,
+                        modifier = Modifier.clip(RoundedCornerShape(5.dp)).background(Color(0xFFE5213B)).padding(horizontal = 8.dp, vertical = 2.dp))
+                }
+                score?.let {
+                    Text(it, color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.ExtraBold,
+                        modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(Color(0x66000000)).padding(horizontal = 12.dp, vertical = 1.dp))
+                }
+                badges.forEach { b ->
+                    Text(b, color = if (b == "● REC") TunerColors.NowLine else Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold,
+                        modifier = Modifier.border(1.dp, Color(0x80FFFFFF), RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 1.dp))
+                }
+                Spacer(Modifier.weight(1f))
+                Text(hhmm(now), color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.SemiBold)
+            }
+            Spacer(Modifier.height(6.dp))
+            Text(
+                current?.title ?: channel.name,
+                color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.ExtraBold,
+                maxLines = 1, overflow = TextOverflow.Ellipsis,
+            )
+            if (current != null) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 6.dp)) {
+                    Text(hhmm(current.start), color = Color(0xFFD4DDF5), fontSize = 15.sp)
+                    Spacer(Modifier.width(12.dp))
+                    ProgressBar(progressOf(current, now), Modifier.weight(1f))
+                    Spacer(Modifier.width(12.dp))
+                    Text(hhmm(current.stop), color = Color(0xFFD4DDF5), fontSize = 15.sp)
+                }
+            } else {
+                Text("No guide information", color = TunerColors.TextSecondary, fontSize = 16.sp)
+            }
+            Text(
+                buildString {
+                    append(channel.name)
+                    if (next != null) {
+                        append("  ·  Next: ${hhmm(next.start)} ${next.title}")
+                        if (vm.hasReminder(channel, next)) append("  ⏰")
+                        if (vm.recordingFor(channel, next) != null) append("  ● will record")
+                    }
+                },
+                color = Color(0xFFC3CDEA), fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            )
+            current?.desc?.let {
+                Text(it, color = TunerColors.TextSecondary, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            Spacer(Modifier.height(6.dp))
+            val prev = vm.previousChannel
+            Text(
+                "◀ channels  ·  ▶ " + (prev?.name?.let { "back to $it" } ?: "previous") +
+                    "  ·  OK mini guide  ·  hold OK menu" + (if (vm.catchupVersion(channel) != null) "  ·  ⏪ from the start" else ""),
+                color = Color(0xFF8FA3D4), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+/** Changing channel: the new channel large, with the ones either side, along the bottom. */
+@Composable
+private fun ZapStrip(vm: TunerViewModel, channel: Channel, modifier: Modifier) {
+    val now = vm.now
+    val around = remember(channel.id, vm.zapChannels) { vm.zapNeighbours(channel.id, 2) }
     Column(
         modifier
             .fillMaxWidth()
-            .background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xE60A1030), Color(0xF704071A))))
-            .padding(start = 56.dp, end = 56.dp, top = 80.dp, bottom = 32.dp)
+            .background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xD9030820), Color(0xF0030820))))
+            .padding(start = 48.dp, end = 48.dp, top = 80.dp, bottom = 28.dp),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                Modifier.clip(RoundedCornerShape(10.dp)).background(TunerColors.Accent).padding(horizontal = 14.dp, vertical = 6.dp)
-            ) {
-                Text(
-                    vm.channelNumber(channel).toString(),
-                    color = Color.White,
-                    fontSize = 30.sp,
-                    fontWeight = FontWeight.Bold,
-                )
-            }
-            Spacer(Modifier.width(20.dp))
-            ChannelLogo(channel.logo, channel.name, Modifier.size(width = 104.dp, height = 68.dp))
-            Spacer(Modifier.width(20.dp))
-            Column(Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.Bottom) {
+            around.forEachIndexed { k, c ->
+                val centre = k == around.size / 2
+                val (cur, next) = vm.nowNext(c.id, now)
+                Column(
+                    Modifier
+                        .then(if (centre) Modifier.width(330.dp) else Modifier.width(196.dp))
+                        .clip(RoundedCornerShape(if (centre) 14.dp else 12.dp))
+                        .background(if (centre) TunerColors.Accent else Color(0xD9141C45))
+                        .then(if (centre) Modifier.border(3.dp, Color.White, RoundedCornerShape(14.dp)) else Modifier)
+                        .padding(if (centre) 16.dp else 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(vm.channelNumber(c).toString(), color = Color(0xFFD4DDF5), fontSize = if (centre) 15.sp else 13.sp)
+                        Spacer(Modifier.weight(1f))
+                        ChannelLogo(c.logo, c.name, Modifier.size(width = if (centre) 64.dp else 48.dp, height = if (centre) 36.dp else 26.dp))
+                    }
+                    Text(c.name, color = Color.White, fontSize = if (centre) 21.sp else 14.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text(
-                        channel.name,
-                        color = Color.White,
-                        fontSize = 28.sp,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f, fill = false),
+                        cur?.let { if (centre) "${it.title} · until ${hhmm(it.stop)}" else it.title } ?: "No guide",
+                        color = if (centre) Color.White else Color(0xFFC3CDEA), fontSize = if (centre) 15.sp else 12.sp,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis,
                     )
-                    if (isFavourite) Text("  ★", color = TunerColors.Gold, fontSize = 26.sp)
-                }
-                Text(
-                    channel.group + (vm.catchupVersion(channel)?.let { "   ·   ↺ catch-up ${it.catchupDays} days" } ?: ""),
-                    color = TunerColors.TextSecondary,
-                    fontSize = 16.sp,
-                    maxLines = 1,
-                )
-            }
-            Text(hhmm(now), color = Color.White, fontSize = 26.sp)
-        }
-
-        Spacer(Modifier.height(16.dp))
-        if (current != null) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("NOW", color = TunerColors.Accent, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.width(12.dp))
-                Text("${hhmm(current.start)} – ${hhmm(current.stop)}", color = TunerColors.TextSecondary, fontSize = 18.sp)
-                Spacer(Modifier.width(14.dp))
-                Text(
-                    current.title,
-                    color = Color.White,
-                    fontSize = 22.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                ProgressBar(progressOf(current, now), Modifier.padding(vertical = 8.dp).width(420.dp))
-                Spacer(Modifier.width(14.dp))
-                GenreChip(current.category)
-                if (vm.recordingFor(channel, current) != null) {
-                    Spacer(Modifier.width(10.dp))
-                    Text("● REC", color = TunerColors.NowLine, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    if (centre) {
+                        cur?.let { ProgressBar(progressOf(it, now), Modifier.fillMaxWidth().padding(vertical = 3.dp), color = Color.White) }
+                        next?.let { Text("Next: ${it.title}", color = Color(0xFFD4DDF5), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                    }
                 }
             }
-            current.desc?.let {
-                Text(it, color = TunerColors.TextSecondary, fontSize = 16.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            }
-        } else {
-            Text("No guide information", color = TunerColors.TextSecondary, fontSize = 18.sp)
         }
-        if (next != null) {
-            Spacer(Modifier.height(6.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("NEXT", color = TunerColors.TextSecondary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.width(12.dp))
-                Text(
-                    "${hhmm(next.start)}  ${next.title}",
-                    color = TunerColors.TextPrimary,
-                    fontSize = 17.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false),
-                )
-                if (vm.hasReminder(channel, next)) Text("   ⏰ reminder set", color = TunerColors.Gold, fontSize = 15.sp)
-                if (vm.recordingFor(channel, next) != null) Text("   ● will record", color = TunerColors.NowLine, fontSize = 15.sp)
-            }
-        }
-        Spacer(Modifier.height(12.dp))
-        val prev = vm.previousChannel
-        Text(
-            "▲▼ channels  ·  ◀ list  ·  ▶ " + (prev?.name?.let { "back to $it" } ?: "previous") +
-                "  ·  OK mini guide (hold OK there to remind or record)  ·  0–9 number  ·  hold OK menu",
-            color = TunerColors.TextSecondary,
-            fontSize = 13.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
     }
 }
 

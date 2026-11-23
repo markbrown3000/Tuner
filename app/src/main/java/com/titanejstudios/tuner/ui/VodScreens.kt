@@ -1,6 +1,7 @@
 package com.titanejstudios.tuner.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -117,7 +118,12 @@ private fun <T> CatalogueScreen(
     updating: Boolean = false,
     /** "Plex ›" button, when Plex is linked. */
     onPlex: (() -> Unit)? = null,
+    /** Poster and details for the strip above the grid. */
+    imageOf: (T) -> String? = { null },
+    detailsOf: (T) -> String? = { null },
+    tintOn: Boolean = true,
 ) {
+    var focusedItem by remember { mutableStateOf<T?>(null) }
     var category by remember { mutableStateOf(if (continueEntries.isNotEmpty()) CONTINUE else ALL_ITEMS) }
     val categories = remember(items, continueEntries.isNotEmpty(), myList.isNotEmpty()) {
         buildList {
@@ -141,10 +147,11 @@ private fun <T> CatalogueScreen(
         runCatching { firstCategory.requestFocus() }
     }
 
+    val tint = rememberPictureTint(focusedItem?.let(imageOf), tintOn)
     Column(
         Modifier
             .fillMaxSize()
-            .skyBackground()
+            .background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(tint, TunerColors.BackgroundBottom)))
             .padding(horizontal = 40.dp, vertical = 24.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -166,7 +173,11 @@ private fun <T> CatalogueScreen(
             Spacer(Modifier.width(8.dp))
             PillButton("Reload", onReload, compact = true)
         }
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(10.dp))
+        focusedItem?.let { f ->
+            FocusStrip(nameOf(f), detailsOf(f), imageOf(f), "OK to watch  ·  hold OK for info, trailer and My list")
+            Spacer(Modifier.height(10.dp))
+        }
         if (items == null || status != null) {
             CenterMessage(status ?: "Loading…")
         } else if (items.isEmpty()) {
@@ -199,9 +210,9 @@ private fun <T> CatalogueScreen(
                 Spacer(Modifier.width(20.dp))
                 if (category == CONTINUE) {
                     LazyVerticalGrid(
-                        columns = GridCells.Adaptive(160.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        columns = GridCells.Adaptive(124.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
                         modifier = Modifier.weight(1f),
                     ) {
                         items(continueEntries, key = { it.contentId }) { e ->
@@ -216,12 +227,15 @@ private fun <T> CatalogueScreen(
                     }
                 } else {
                     LazyVerticalGrid(
-                        columns = GridCells.Adaptive(160.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        columns = GridCells.Adaptive(124.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
                         modifier = Modifier.weight(1f),
                     ) {
-                        items(shown.size) { i -> tile(shown[i], Modifier) }
+                        items(shown.size) { i ->
+                            val item = shown[i]
+                            tile(item, Modifier.onFocusChanged { if (it.hasFocus) focusedItem = item })
+                        }
                     }
                 }
             }
@@ -243,6 +257,8 @@ fun MoviesScreen(vm: TunerViewModel) {
         status = vm.vodStatus,
         categoryOf = { it.category },
         nameOf = { it.name },
+        imageOf = { it.poster },
+        detailsOf = { m -> listOfNotNull(m.category, m.rating?.takeIf { it.isNotBlank() && it != "0" }?.let { "★ $it" }).joinToString("  ·  ") },
         continueEntries = continueEntries,
         onReload = { vm.loadMovies(force = true) },
         switchLabel = "Series ›",
@@ -264,6 +280,7 @@ fun MoviesScreen(vm: TunerViewModel) {
         myList = remember(vm.watchlist) { vm.watchlist.filter { !it.isSeries }.mapNotNull { it.toVod() } },
         updating = vm.vodUpdating,
         onPlex = if (vm.plexLinked) ({ vm.openPlexLibrary() }) else null,
+        tintOn = vm.tintFromPicture,
     )
     menuFor?.let { m ->
         MenuDialog(
@@ -303,6 +320,8 @@ fun SeriesScreen(vm: TunerViewModel) {
         status = vm.vodStatus,
         categoryOf = { it.category },
         nameOf = { it.name },
+        imageOf = { it.cover },
+        detailsOf = { s -> listOfNotNull(s.category, s.rating?.takeIf { it.isNotBlank() && it != "0" }?.let { "★ $it" }, s.plot).joinToString("  ·  ") },
         continueEntries = continueEntries,
         onReload = { vm.loadSeries(force = true) },
         switchLabel = "Films ›",
@@ -323,6 +342,7 @@ fun SeriesScreen(vm: TunerViewModel) {
         myList = remember(vm.watchlist) { vm.watchlist.filter { it.isSeries }.mapNotNull { it.toSeries() } },
         updating = vm.vodUpdating,
         onPlex = if (vm.plexLinked) ({ vm.openPlexLibrary() }) else null,
+        tintOn = vm.tintFromPicture,
     )
     menuFor?.let { s ->
         MenuDialog(

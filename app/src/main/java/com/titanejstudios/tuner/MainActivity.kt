@@ -103,6 +103,13 @@ class MainActivity : ComponentActivity() {
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         val code = event.keyCode
         if (event.action == KeyEvent.ACTION_DOWN) {
+            // The screensaver: OK watches what's showing; any other button just closes it.
+            if (vm.saverOn) {
+                if (code == KeyEvent.KEYCODE_DPAD_CENTER || code == KeyEvent.KEYCODE_ENTER) vm.playSaverSlide()
+                vm.onUserActivity()
+                shortcutKeysDown += code
+                return true
+            }
             // Someone's there – resets "Are you still watching?".
             vm.onUserActivity()
             if (event.repeatCount == 0 && vm.handleShortcut(code)) {
@@ -197,6 +204,10 @@ private fun TunerApp(vm: TunerViewModel) {
             }
             vm.pinPrompt?.let { p -> PinDialog(p, onCancel = { vm.cancelPin() }) }
             vm.notice?.let { NoticeToast(it, Modifier.align(Alignment.BottomCenter)) }
+            if (vm.screen == Screen.Home && !vm.initialLoadDone && vm.channels.isEmpty() && vm.sources.isNotEmpty()) {
+                com.titanejstudios.tuner.ui.StartUpScreen(vm.status)
+            }
+            if (vm.saverOn) com.titanejstudios.tuner.ui.ArtScreensaver(vm)
         }
     }
 }

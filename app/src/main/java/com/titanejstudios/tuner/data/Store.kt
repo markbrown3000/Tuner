@@ -222,6 +222,8 @@ class Store(context: Context) {
                     allowedGroups = if (groups == null) emptySet() else (0 until groups.length()).map { groups.getString(it) }.toSet(),
                     dailyLimitMinutes = o.optInt("limit"),
                     bedtimeMinutes = o.optInt("bedtime", -1),
+                    colour = o.optInt("colour", -1),
+                    icon = o.optString("icon"),
                 )
             }
             list.ifEmpty { listOf(Profile(MAIN_PROFILE, "Everyone")) }
@@ -234,7 +236,7 @@ class Store(context: Context) {
                 arr.put(
                     JSONObject().put("id", it.id).put("name", it.name).put("kids", it.kids)
                         .put("groups", JSONArray(it.allowedGroups.toList())).put("limit", it.dailyLimitMinutes)
-                        .put("bedtime", it.bedtimeMinutes)
+                        .put("bedtime", it.bedtimeMinutes).put("colour", it.colour).put("icon", it.icon)
                 )
             }
             prefs.edit().putString("profiles", arr.toString()).apply()
@@ -483,10 +485,10 @@ class Store(context: Context) {
 
     // ---- Look & sound (5.1) ----
     var themeAccent: String
-        get() = prefs.getString("theme_accent", "blue") ?: "blue"
+        get() = prefs.getString("theme_accent", "sky") ?: "sky"
         set(value) = prefs.edit().putString("theme_accent", value).apply()
     var themeBackground: String
-        get() = prefs.getString("theme_bg", "navy") ?: "navy"
+        get() = prefs.getString("theme_bg", "ink") ?: "ink"
         set(value) = prefs.edit().putString("theme_bg", value).apply()
     var subtitleScale: Float
         get() = prefs.getFloat("subtitle_scale", 1f)
@@ -634,6 +636,16 @@ class Store(context: Context) {
     var homeSmart: Boolean
         get() = prefs.getBoolean("home_smart", true)
         set(value) = prefs.edit().putBoolean("home_smart", value).apply()
+
+    /** Home's background tint follows the highlighted picture's colours. */
+    var tintFromPicture: Boolean
+        get() = prefs.getBoolean("tint_from_picture", true)
+        set(value) = prefs.edit().putBoolean("tint_from_picture", value).apply()
+
+    /** Tuner's own artwork screensaver after a few idle minutes (0 = off). */
+    var artSaverMinutes: Int
+        get() = prefs.getInt("art_saver_minutes", 5)
+        set(value) = prefs.edit().putInt("art_saver_minutes", value).apply()
 
     /** Plex libraries kids' profiles may see ("serverId/sectionKey"). */
     var plexKidsSections: Set<String>

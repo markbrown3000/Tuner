@@ -4,6 +4,7 @@ package com.titanejstudios.tuner.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.animation.core.AnimationSpec
@@ -386,7 +387,10 @@ fun HomeScreen(vm: TunerViewModel) {
         runCatching { firstTile.requestFocus() }
     }
 
-    BoxWithConstraints(Modifier.fillMaxSize().skyBackground()) {
+    // The background takes on the highlighted picture's colours, fading gently between them.
+    val bgTop = rememberPictureTint(h?.image, vm.tintFromPicture)
+    val context = androidx.compose.ui.platform.LocalContext.current
+    BoxWithConstraints(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(bgTop, TunerColors.BackgroundBottom)))) {
         // TVs differ in how tall the screen is in Android's units (often 540, sometimes 720), so
         // the top area takes what's left after the menu, the quick buttons and one full row of tiles.
         val safeBanner = if (vm.safeMode && !vm.safeModeBannerHidden) 70.dp else 0.dp
@@ -396,9 +400,13 @@ fun HomeScreen(vm: TunerViewModel) {
         // The highlighted item's wide picture, behind the menu and fading into the background.
         if (h?.image != null && h.wide) {
             Box(Modifier.align(Alignment.TopEnd).fillMaxWidth(0.68f).height(heroHeight + 150.dp)) {
-                AsyncImage(model = h.image, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-                Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(listOf(TunerColors.Background, TunerColors.Background.copy(alpha = 0.75f), Color.Transparent))))
-                Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0.45f to Color.Transparent, 1f to TunerColors.Background)))
+                // Fades from one picture to the next rather than jumping.
+                AsyncImage(
+                    model = coil.request.ImageRequest.Builder(context).data(h.image).crossfade(500).build(),
+                    contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize(),
+                )
+                Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(listOf(bgTop, bgTop.copy(alpha = 0.75f), Color.Transparent))))
+                Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0.45f to Color.Transparent, 1f to bgTop)))
             }
         }
         Column(Modifier.fillMaxSize().padding(horizontal = 44.dp, vertical = 22.dp)) {
@@ -463,10 +471,7 @@ fun HomeScreen(vm: TunerViewModel) {
             if (rows.isEmpty()) {
                 val status = vm.status
                 when {
-                    status != null || !vm.initialLoadDone -> CenterMessage(
-                        "⟳  " + (status ?: "Loading your channels…") +
-                            "\n\nThe first load after an update can take a minute or two."
-                    )
+                    status != null || !vm.initialLoadDone -> SkeletonRows(status ?: "Loading your channels…")
                     vm.error != null -> CenterMessage(vm.error ?: "")
                     vm.sources.isEmpty() -> CenterMessage("No channels yet – add a playlist in Settings")
                     else -> CenterMessage("No channels to show – check Settings › Playlists")
@@ -968,6 +973,31 @@ private fun KidsHome(vm: TunerViewModel) {
                             modifier = (if (i == 0) Modifier.focusRequester(first) else Modifier).size(width = 270.dp, height = 160.dp),
                         )
                     }
+                }
+            }
+        }
+    }
+}
+
+
+/** Grey tile shapes that gently pulse while Home's rows load, instead of a "Loading…" message. */
+@Composable
+private fun SkeletonRows(status: String) {
+    val pulse = androidx.compose.animation.core.rememberInfiniteTransition(label = "skeleton")
+    val alpha by pulse.animateFloat(
+        initialValue = 0.35f, targetValue = 0.75f,
+        animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+            androidx.compose.animation.core.tween(900), androidx.compose.animation.core.RepeatMode.Reverse,
+        ),
+        label = "alpha",
+    )
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text("⟳  $status", color = TunerColors.TextSecondary, fontSize = 14.sp, maxLines = 1)
+        repeat(2) {
+            Box(Modifier.size(width = 170.dp, height = 18.dp).clip(RoundedCornerShape(7.dp)).background(Color.White.copy(alpha = 0.10f * alpha)))
+            Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                repeat(5) {
+                    Box(Modifier.size(width = TILE_W, height = TILE_H).clip(RoundedCornerShape(12.dp)).background(Color.White.copy(alpha = 0.09f * alpha)))
                 }
             }
         }

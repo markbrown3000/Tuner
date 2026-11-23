@@ -248,12 +248,28 @@ fun SettingsScreen(vm: TunerViewModel) {
             item {
                 val accents = TunerColors.accents
                 val i = accents.indexOfFirst { it.first == vm.themeAccent }
-                SettingRow("Highlight colour", detail = accents.getOrNull(i)?.second ?: "Blue", onClick = { vm.setTheme(accent = accents[(i + 1).mod(accents.size)].first) })
+                SettingRow("Highlight colour", detail = accents.getOrNull(i)?.second ?: "Sky blue", onClick = { vm.setTheme(accent = accents[(i + 1).mod(accents.size)].first) })
             }
             item {
                 val bgs = TunerColors.backgrounds
                 val i = bgs.indexOfFirst { it.first == vm.themeBackground }
-                SettingRow("Background", detail = bgs.getOrNull(i)?.second ?: "Navy", onClick = { vm.setTheme(background = bgs[(i + 1).mod(bgs.size)].first) })
+                SettingRow("Background", detail = bgs.getOrNull(i)?.second ?: "Evening", onClick = { vm.setTheme(background = bgs[(i + 1).mod(bgs.size)].first) })
+            }
+            item {
+                SettingRow(
+                    "Colours follow the picture",
+                    subtitle = "Home, Films & TV and Plex take on the colours of what's highlighted",
+                    detail = if (vm.tintFromPicture) "On" else "Off",
+                    onClick = { vm.toggleTintFromPicture() },
+                )
+            }
+            item {
+                SettingRow(
+                    "Artwork screensaver",
+                    subtitle = "When nothing's playing: your Plex and programme pictures with the time. OK watches what's showing.",
+                    detail = if (vm.artSaverMinutes == 0) "Off" else "After ${vm.artSaverMinutes} min",
+                    onClick = { vm.cycleArtSaver() },
+                )
             }
 
             item {

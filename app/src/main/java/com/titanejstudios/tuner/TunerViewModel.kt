@@ -330,6 +330,12 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     var homeRowsHidden by mutableStateOf(store.homeRowsHidden); private set
     var homeSmart by mutableStateOf(store.homeSmart); private set
     var voiceSearchPending by mutableStateOf(false)
+    var tintFromPicture by mutableStateOf(store.tintFromPicture); private set
+    var artSaverMinutes by mutableStateOf(store.artSaverMinutes); private set
+    /** Tuner's artwork screensaver is showing. */
+    var saverOn by mutableStateOf(false); private set
+    /** When CH+/CH− was last pressed (the player shows the channel strip). */
+    var zappedAt by mutableStateOf(0L); private set
 
     var movies by mutableStateOf<List<VodItem>?>(null); private set
     var series by mutableStateOf<List<SeriesItem>?>(null); private set
@@ -358,8 +364,8 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     private var sleepJob: Job? = null
 
     // Look & sound
-    var themeAccent by mutableStateOf("blue"); private set
-    var themeBackground by mutableStateOf("navy"); private set
+    var themeAccent by mutableStateOf("sky"); private set
+    var themeBackground by mutableStateOf("ink"); private set
     var subtitleScale by mutableStateOf(1f); private set
     var subtitleBox by mutableStateOf(false); private set
     var nightMode by mutableStateOf(false); private set
@@ -606,6 +612,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
                 now = System.currentTimeMillis()
                 checkReminders()
                 offerStartOver()
+                checkSaver()
                 trackUsage()
                 announceProgrammeChange()
                 trackCleanPlay()
@@ -1187,6 +1194,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     fun zap(delta: Int) {
         if (zapList.isEmpty()) return
         lastZapDirection = if (delta < 0) -1 else 1
+        zappedAt = System.currentTimeMillis()
         val fromId = zapPreview?.id ?: playing?.id
         val idx = zapIndexOf(fromId)
         val target = zapList[(idx + delta).mod(zapList.size)]
@@ -1223,6 +1231,14 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         }
         val ch = zapList.getOrNull(number - 1)
         if (ch == null) showNotice("No channel $number") else startLive(ch)
+    }
+
+    /** [each] channels either side of [id] in the channel list (for the channel strip). */
+    fun zapNeighbours(id: String?, each: Int): List<Channel> {
+        if (zapList.isEmpty()) return emptyList()
+        val i = zapIndexOf(id).coerceAtLeast(0)
+        val n = minOf(each, (zapList.size - 1) / 2)
+        return (-n..n).map { zapList[(i + it).mod(zapList.size)] }.distinctBy { it.id }
     }
 
     /** Position in the zap list, counting any version of a combined channel as that channel. */
@@ -3500,6 +3516,50 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     /** Any button on the remote (or the phone remote, or Home Assistant) counts as someone watching. */
     fun onUserActivity() {
         lastUserActivity = System.currentTimeMillis()
+        saverOn = false
+    }
+
+    fun toggleTintFromPicture() {
+        tintFromPicture = !tintFromPicture
+        store.tintFromPicture = tintFromPicture
+    }
+
+    fun cycleArtSaver() {
+        val choices = listOf(5, 10, 20, 0)
+        artSaverMinutes = choices[(choices.indexOf(artSaverMinutes) + 1).mod(choices.size)]
+        store.artSaverMinutes = artSaverMinutes
+    }
+
+    /** One picture in the screensaver. */
+    class SaverSlide(val title: String, val details: String, val image: String, val play: () -> Unit)
+
+    /** Wide artwork for the screensaver: new on Plex, Continue on Plex, and pictures from the guide. */
+    val saverSlides: List<SaverSlide>
+        get() = buildList {
+            plexRecent.forEach { e -> e.art?.let { add(SaverSlide(e.title, listOfNotNull(e.year, if (e.isShow) "TV" else "Film", e.library).joinToString(" · "), it) { if (e.isShow) openPlexShow(e) else playPlexEntry(e) }) } }
+            plexItems.forEach { i -> i.image?.let { add(SaverSlide(i.title, listOfNotNull(i.subtitle, "Continue on Plex").joinToString(" · "), it) { playPlex(i) }) } }
+            topPicks.forEach { p -> p.programme.image?.let { add(SaverSlide(p.programme.title, p.channel.name, it) { play(p.channel, channelsFor(ALL)) }) } }
+        }.distinctBy { it.image }
+
+    private var saverCurrent: SaverSlide? = null
+
+    fun saverIndexChanged(slide: SaverSlide) {
+        saverCurrent = slide
+    }
+
+    /** OK on the screensaver: watch what's showing. */
+    fun playSaverSlide() {
+        saverOn = false
+        saverCurrent?.play?.invoke()
+    }
+
+    /** Idle for a while with nothing playing: show the artwork screensaver. */
+    private fun checkSaver() {
+        val mins = artSaverMinutes
+        if (mins <= 0 || saverOn) return
+        val idle = System.currentTimeMillis() - lastUserActivity
+        val watching = mode != null && playback.isPlaying
+        if (idle > mins * 60_000L && !watching && screen != Screen.Player && saverSlides.isNotEmpty()) saverOn = true
     }
 
     private fun checkStillWatching() {

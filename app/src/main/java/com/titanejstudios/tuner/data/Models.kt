@@ -131,6 +131,10 @@ data class Profile(
     val dailyLimitMinutes: Int = 0,
     /** For kids profiles: no TV after this time (minutes after midnight, -1 = no bedtime) until 6am. */
     val bedtimeMinutes: Int = -1,
+    /** Avatar colour (index into the avatar colours; -1 = automatic). */
+    val colour: Int = -1,
+    /** Avatar picture (an emoji); empty = the first letter of the name. */
+    val icon: String = "",
 )
 
 object RecStatus {
