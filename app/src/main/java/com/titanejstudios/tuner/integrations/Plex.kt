@@ -184,9 +184,14 @@ class Plex(private val clientId: String) {
      * Everything in a library, in Plex's own A–Z order. Fetched [PAGE] at a time: a big library
      * in one go is hundreds of MB of JSON, more than a TV app is allowed. [onPage] gets the list so far.
      */
-    fun sectionItems(section: Section, onPage: (List<Entry>) -> Unit = {}): List<Entry> {
+    fun sectionItems(section: Section, sort: String? = null, title: String? = null, onPage: (List<Entry>) -> Unit = {}): List<Entry> {
         val s = section.server
-        return paged("${s.uri}/library/sections/${section.key}/all", s, poster = true, onPage = onPage)
+        val q = listOfNotNull(
+            sort?.let { "sort=" + URLEncoder.encode(it, "UTF-8") },
+            title?.takeIf { it.isNotBlank() }?.let { "title=" + URLEncoder.encode(it.trim(), "UTF-8") },
+        ).joinToString("&")
+        val url = "${s.uri}/library/sections/${section.key}/all" + (if (q.isEmpty()) "" else "?$q")
+        return paged(url, s, poster = true, onPage = onPage)
     }
 
     /** Every episode of a show, season by season. */

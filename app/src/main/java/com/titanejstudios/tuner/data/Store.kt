@@ -620,6 +620,11 @@ class Store(context: Context) {
         set(value) = prefs.edit().putLong("nas_backup_at", value).apply()
 
     /** Open Tuner by itself when the TV starts up. */
+    /** Plex library order, e.g. "added" – see PlexFeature.SORTS. */
+    var plexSort: String
+        get() = prefs.getString("plex_sort", "title") ?: "title"
+        set(value) = prefs.edit().putString("plex_sort", value).apply()
+
     var openOnBoot: Boolean
         get() = prefs.getBoolean("open_on_boot", false)
         set(value) = prefs.edit().putBoolean("open_on_boot", value).apply()

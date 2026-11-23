@@ -63,8 +63,11 @@ fun PlexLibraryScreen(vm: TunerViewModel) {
         if (category == null || category !in categories) category = categories.firstOrNull()
     }
     val section = sections.firstOrNull { it.id == category }
-    LaunchedEffect(section?.id) { section?.let { plex.loadSection(it) } }
+    LaunchedEffect(section?.id, plex.sort, plex.query) { section?.let { plex.loadSection(it) } }
     var menuFor by remember { mutableStateOf<Plex.Entry?>(null) }
+    var sortMenu by remember { mutableStateOf(false) }
+    var searching by remember { mutableStateOf(false) }
+    val sortLabel = com.titanejstudios.tuner.features.PlexFeature.SORTS.firstOrNull { it.key == plex.sort }?.label ?: "Title A–Z"
 
     val firstCategory = remember { FocusRequester() }
     LaunchedEffect(categories.isNotEmpty()) {
@@ -80,9 +83,19 @@ fun PlexLibraryScreen(vm: TunerViewModel) {
                 category?.let { if (it == PLEX_CONTINUE) it else labels[it] } ?: "",
                 fontSize = 18.sp, color = TunerColors.TextSecondary,
             )
-            Spacer(Modifier.width(16.dp))
-            Text("Hold OK on a poster for more", fontSize = 14.sp, color = TunerColors.TextSecondary)
+            if (plex.query.isNotEmpty()) {
+                Spacer(Modifier.width(12.dp))
+                Text("matching \"${plex.query}\"", fontSize = 16.sp, color = TunerColors.Accent)
+            }
             Spacer(Modifier.weight(1f))
+            PillButton("🔍 Search", { searching = true }, compact = true)
+            Spacer(Modifier.width(8.dp))
+            if (plex.query.isNotEmpty()) {
+                PillButton("✕ Clear", { plex.changeQuery("") }, compact = true)
+                Spacer(Modifier.width(8.dp))
+            }
+            PillButton("Sort: $sortLabel", { sortMenu = true }, compact = true)
+            Spacer(Modifier.width(8.dp))
             if (vm.hasVod) {
                 PillButton("Films ›", { vm.navigate(com.titanejstudios.tuner.Screen.Movies) }, compact = true)
                 Spacer(Modifier.width(8.dp))
@@ -98,7 +111,7 @@ fun PlexLibraryScreen(vm: TunerViewModel) {
             return@Column
         }
         Row(Modifier.weight(1f)) {
-            LazyColumn(Modifier.width(260.dp).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            LazyColumn(Modifier.width(230.dp).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 items(categories.size, key = { categories[it] }) { i ->
                     val c = categories[i]
                     val selected = c == category
@@ -126,9 +139,9 @@ fun PlexLibraryScreen(vm: TunerViewModel) {
                 category == PLEX_CONTINUE -> {
                     val deck = vm.plexItems
                     LazyVerticalGrid(
-                        columns = GridCells.Adaptive(220.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        columns = GridCells.Adaptive(116.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
                         modifier = Modifier.weight(1f),
                     ) {
                         items(deck.size, key = { deck[it].server.machineId + deck[it].ratingKey }) { i ->
@@ -144,16 +157,16 @@ fun PlexLibraryScreen(vm: TunerViewModel) {
                     }
                 }
                 section != null -> {
-                    val entries = plex.sectionItems[section.id]
+                    val entries = plex.itemsFor(section)
                     if (entries == null) {
                         CenterMessage(plex.libraryStatus ?: "Loading ${section.title}…")
                     } else if (entries.isEmpty()) {
-                        CenterMessage("${section.title} is empty")
+                        CenterMessage(if (plex.query.isNotEmpty()) "Nothing in ${section.title} matches \"${plex.query}\"" else "${section.title} is empty")
                     } else {
                         LazyVerticalGrid(
-                            columns = GridCells.Adaptive(160.dp),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                            columns = GridCells.Adaptive(116.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
                             modifier = Modifier.weight(1f),
                         ) {
                             items(entries.size, key = { entries[it].ratingKey }) { i ->
@@ -172,6 +185,31 @@ fun PlexLibraryScreen(vm: TunerViewModel) {
                 }
             }
         }
+    }
+
+    if (sortMenu) {
+        MenuDialog(
+            title = "Sort by",
+            items = com.titanejstudios.tuner.features.PlexFeature.SORTS.map { o ->
+                MenuItem((if (o.key == plex.sort) "✓ " else "") + o.label) { plex.changeSort(o.key) }
+            },
+            onDismiss = { sortMenu = false },
+        )
+    }
+    if (searching) {
+        TextInputDialog(
+            title = "Search " + (section?.let { labels[it.id] } ?: "Plex"),
+            initial = plex.query,
+            hint = "Part of a title is enough",
+            label = "Title",
+            onDismiss = { searching = false },
+            onDone = { text ->
+                searching = false
+                // Search needs a library – from Continue watching, use the first one.
+                if (section == null) categories.firstOrNull { it != PLEX_CONTINUE }?.let { category = it }
+                plex.changeQuery(text)
+            },
+        )
     }
 
     menuFor?.let { e ->

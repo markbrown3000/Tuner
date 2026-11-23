@@ -131,22 +131,38 @@ class PlexFeature(private val store: Store, private val scope: CoroutineScope) {
         }
     }
 
-    /** Loads one library's contents (once; [force] reloads). */
+    /** Library order: Title A–Z, Newly added, … */
+    var sort by mutableStateOf(store.plexSort.takeIf { k -> SORTS.any { it.key == k } } ?: "title"); private set
+    /** Search text for the library being shown ("" = everything). */
+    var query by mutableStateOf(""); private set
+
+    fun changeSort(key: String) { sort = key; store.plexSort = key }
+    fun changeQuery(text: String) { query = text.trim() }
+
+    private fun cacheKey(section: Plex.Section) = "${section.id}|$sort|$query"
+
+    /** What's loaded for [section] with the current order and search, or null while loading. */
+    fun itemsFor(section: Plex.Section): List<Plex.Entry>? = sectionItems[cacheKey(section)]
+
+    /** Loads one library's contents in the current order/search (once; [force] reloads). */
     fun loadSection(section: Plex.Section, force: Boolean = false) {
-        if (sectionItems.containsKey(section.id) && !force) return
+        val key = cacheKey(section)
+        if (sectionItems.containsKey(key) && !force) return
         libraryJob?.cancel()
-        libraryStatus = "Loading ${section.title}…"
+        libraryStatus = if (query.isEmpty()) "Loading ${section.title}…" else "Searching ${section.title} for \"$query\"…"
+        val plexSort = SORTS.firstOrNull { it.key == sort }?.let { if (section.isShows) it.shows else it.films }
+        val title = query
         libraryJob = scope.launch {
             val result = withContext(Dispatchers.IO) {
                 runCatching {
-                    client().sectionItems(section) { soFar ->
+                    client().sectionItems(section, plexSort, title) { soFar ->
                         // Show posters as each page arrives instead of waiting for the whole library.
-                        scope.launch { if (libraryJob?.isActive == true) sectionItems = keepRecent(sectionItems, section.id, soFar) }
+                        scope.launch { if (libraryJob?.isActive == true) sectionItems = keepRecent(sectionItems, key, soFar) }
                     }
                 }
             }
             result.onSuccess { list ->
-                sectionItems = keepRecent(sectionItems, section.id, list)
+                sectionItems = keepRecent(sectionItems, key, list)
                 libraryStatus = null
             }.onFailure {
                 AppLog.warn("Plex: couldn't load ${section.title}", it)
@@ -160,7 +176,7 @@ class PlexFeature(private val store: Store, private val scope: CoroutineScope) {
         val m = LinkedHashMap(map)
         m.remove(id)
         m[id] = list
-        while (m.size > 3) m.remove(m.keys.first())
+        while (m.size > 4) m.remove(m.keys.first())
         return m
     }
 
@@ -182,5 +198,19 @@ class PlexFeature(private val store: Store, private val scope: CoroutineScope) {
         scope.launch(Dispatchers.IO) {
             runCatching { client().timeline(item, if (stopped) "stopped" else "playing", positionMs, durationMs) }
         }
+    }
+
+    /** One way of ordering a library; [films]/[shows] are Plex's sort values. */
+    class SortOption(val key: String, val label: String, val films: String, val shows: String)
+
+    companion object {
+        val SORTS = listOf(
+            SortOption("title", "Title A–Z", "titleSort", "titleSort"),
+            SortOption("added", "Newly added", "addedAt:desc", "episode.addedAt:desc"),
+            SortOption("released", "Newest releases", "originallyAvailableAt:desc", "originallyAvailableAt:desc"),
+            SortOption("rating", "Highest rated", "audienceRating:desc", "audienceRating:desc"),
+            SortOption("watched", "Recently watched", "lastViewedAt:desc", "lastViewedAt:desc"),
+            SortOption("unwatched", "Unwatched first", "viewCount,titleSort", "unviewedLeafCount:desc,titleSort"),
+        )
     }
 }
