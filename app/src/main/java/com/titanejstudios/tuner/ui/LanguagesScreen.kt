@@ -47,7 +47,7 @@ fun LanguagesScreen(vm: TunerViewModel) {
         Spacer(Modifier.height(14.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             PillButton("🇬🇧 English only", { vm.englishOnly() }, Modifier.focusRequester(first), compact = true)
-            PillButton("Show everything", { vm.setHiddenLanguages(emptySet()) }, compact = true)
+            PillButton("Show everything", { vm.changeHiddenLanguages(emptySet()) }, compact = true)
             Text(
                 if (hidden.isEmpty()) "Everything shown" else "${hidden.size} hidden",
                 color = TunerColors.TextSecondary, fontSize = 15.sp,
@@ -66,7 +66,7 @@ fun LanguagesScreen(vm: TunerViewModel) {
                 val code = tag?.code ?: Languages.NONE
                 val shown = code !in hidden
                 FocusSurface(
-                    onClick = { vm.setHiddenLanguages(if (shown) hidden + code else hidden - code) },
+                    onClick = { vm.changeHiddenLanguages(if (shown) hidden + code else hidden - code) },
                     baseColor = if (shown) TunerColors.Panel else Color(0x66000000),
                     modifier = Modifier.fillMaxWidth().height(54.dp),
                 ) { focused ->

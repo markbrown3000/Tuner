@@ -1887,7 +1887,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         return counts.values.sortedByDescending { it.second }
     }
 
-    fun setHiddenLanguages(hidden: Set<String>) {
+    fun changeHiddenLanguages(hidden: Set<String>) {
         hiddenLanguages = hidden
         store.hiddenLanguages = hidden
         recomputeVisible()
@@ -1899,7 +1899,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     /** Hides every country/language that isn't English (things with no country tag stay). */
     fun englishOnly() {
         // Every non-English tag, including ones only used by films and series.
-        setHiddenLanguages(Languages.nonEnglish)
+        changeHiddenLanguages(Languages.nonEnglish)
         showNotice("Showing English channels only – change it in Settings › Languages & countries")
     }
 
