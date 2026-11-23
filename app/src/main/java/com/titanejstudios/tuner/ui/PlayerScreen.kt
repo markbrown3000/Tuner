@@ -172,7 +172,14 @@ fun PlayerScreen(vm: TunerViewModel) {
     }
 
     fun handleKey(e: KeyEvent): Boolean {
-        if (overlay != Overlay.None) return false
+        if (overlay != Overlay.None) {
+            // BACK always closes whatever menu is open over the video.
+            if (e.nativeKeyEvent.keyCode == AndroidKey.KEYCODE_BACK) {
+                if (e.type == KeyEventType.KeyUp) overlay = Overlay.None
+                return true
+            }
+            return false
+        }
         val code = e.nativeKeyEvent.keyCode
         val down = e.type == KeyEventType.KeyDown
         val first = down && e.nativeKeyEvent.repeatCount == 0
@@ -432,11 +439,28 @@ fun PlayerScreen(vm: TunerViewModel) {
                     onDismiss = { overlay = Overlay.None },
                 )
                 Overlay.Audio -> {
-                    val tracks = remember { playback.tracks(C.TRACK_TYPE_AUDIO) }
+                    val tracks = remember { playback.tracks(C.TRACK_TYPE_AUDIO, includeUnsupported = true) }
+                    val anyUnsupported = tracks.any { !it.supported }
                     MenuDialog(
                         title = "Audio",
+                        subtitle = when {
+                            !anyUnsupported -> null
+                            vm.audioPassthrough -> "Tracks marked ✗ can't be played by this TV or your soundbar."
+                            else -> "Tracks marked ✗ (often DTS or Dolby TrueHD) can't be decoded by the TV. " +
+                                "Turning on Settings › Audio passthrough lets a soundbar or AV receiver play them instead."
+                        },
                         items = tracks.map { t ->
-                            MenuItem(t.label, if (t.selected) "✓" else null) { playback.selectTrack(t, C.TRACK_TYPE_AUDIO) }
+                            MenuItem(
+                                t.label,
+                                when {
+                                    !t.supported -> "✗ not supported"
+                                    t.selected -> "✓"
+                                    else -> null
+                                },
+                            ) {
+                                if (t.supported) playback.selectTrack(t, C.TRACK_TYPE_AUDIO)
+                                else vm.showNotice("This TV can't play that sound track" + (if (!vm.audioPassthrough) " – try turning on Audio passthrough in Settings" else ""))
+                            }
                         },
                         onDismiss = { overlay = Overlay.None },
                     )
@@ -494,7 +518,7 @@ private fun OptionsMenu(
 ) {
     val context = LocalContext.current
     val playback = vm.playback
-    val audio = remember { playback.tracks(C.TRACK_TYPE_AUDIO) }
+    val audio = remember { playback.tracks(C.TRACK_TYPE_AUDIO, includeUnsupported = true) }
     val text = remember { playback.tracks(C.TRACK_TYPE_TEXT) }
     val items = buildList {
         if (mode is PlayMode.Live && channel != null) {
@@ -531,8 +555,9 @@ private fun OptionsMenu(
             if (mode is PlayMode.CatchupPlay) add(MenuItem("Back to live TV") { vm.backToLive() })
             add(MenuItem("Restart from the beginning") { playback.seekTo(0L) })
         }
-        if (audio.size > 1) {
-            add(MenuItem("Audio", audio.firstOrNull { it.selected }?.label) { onOverlay(Overlay.Audio) })
+        // Shown whenever there's sound to choose or explain – films and Plex often have several tracks.
+        if (audio.size > 1 || (audio.isNotEmpty() && mode !is PlayMode.Live)) {
+            add(MenuItem("🔈 Audio", audio.firstOrNull { it.selected }?.label ?: "${audio.size} tracks") { onOverlay(Overlay.Audio) })
         }
         if (text.isNotEmpty()) {
             val detail = if (playback.subtitlesDisabled) "Off" else text.firstOrNull { it.selected }?.label ?: "Auto"

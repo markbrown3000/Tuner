@@ -1,7 +1,15 @@
+@file:kotlin.OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+
 package com.titanejstudios.tuner.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.animation.core.AnimationSpec
+import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
+import androidx.compose.foundation.gestures.BringIntoViewSpec
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -216,12 +224,19 @@ fun HomeScreen(vm: TunerViewModel) {
                     else -> CenterMessage("No channels to show – check Settings › Playlists")
                 }
             } else {
+                // Scrolling down the rows keeps each row's title in view above the highlighted tile.
+                val outerSpec = LocalBringIntoViewSpec.current
+                val headroom = with(LocalDensity.current) { 48.dp.toPx() }
+                val rowsSpec = remember(outerSpec, headroom) { rowTitleSpec(outerSpec, headroom) }
+                CompositionLocalProvider(LocalBringIntoViewSpec provides rowsSpec) {
                 LazyColumn(
                     verticalArrangement = Arrangement.spacedBy(14.dp),
                     contentPadding = PaddingValues(bottom = 30.dp),
                 ) {
                     rows.forEachIndexed { i, row ->
                         item(key = row.name) {
+                            // Sideways scrolling inside a row keeps the normal behaviour.
+                            CompositionLocalProvider(LocalBringIntoViewSpec provides outerSpec) {
                             Column {
                                 Text(row.title, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(bottom = 8.dp))
                                 val m = if (i == 0) Modifier.focusRequester(firstTile) else Modifier
@@ -251,8 +266,10 @@ fun HomeScreen(vm: TunerViewModel) {
                                     HomeRow.All -> ChannelRail(vm, allChannels.take(40), m, ::showChannel)
                                 }
                             }
+                            }
                         }
                     }
+                }
                 }
             }
         }
@@ -306,6 +323,23 @@ private fun RecordingRail(vm: TunerViewModel, list: List<Recording>, firstModifi
                     Text(r.channelName, color = if (focused) Color.White else TunerColors.TextSecondary, fontSize = 13.sp, maxLines = 1)
                 }
             }
+        }
+    }
+}
+
+/**
+ * Up/down on Home: always leave [headroom] pixels above the highlighted tile, so the row's title
+ * ("Continue watching"…) isn't cut off at the top.
+ */
+private fun rowTitleSpec(outer: BringIntoViewSpec, headroom: Float) = object : BringIntoViewSpec {
+    override val scrollAnimationSpec: AnimationSpec<Float> = outer.scrollAnimationSpec
+
+    override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float {
+        val trailing = offset + size
+        return when {
+            offset < headroom -> offset - headroom
+            trailing > containerSize -> minOf(trailing - containerSize, offset - headroom)
+            else -> 0f
         }
     }
 }

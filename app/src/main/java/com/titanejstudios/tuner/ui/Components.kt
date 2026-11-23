@@ -490,6 +490,13 @@ fun ModalLayer(onDismiss: () -> Unit, content: @Composable BoxScope.() -> Unit) 
     Box(
         Modifier
             .fillMaxSize()
+            // BACK closes the dialog straight from the remote's key press as well, so it still works
+            // when something else (like the player underneath) would otherwise get the back press.
+            .onPreviewKeyEvent { e ->
+                if (e.nativeKeyEvent.keyCode != android.view.KeyEvent.KEYCODE_BACK) return@onPreviewKeyEvent false
+                if (e.type == KeyEventType.KeyUp) onDismiss()
+                true
+            }
             .background(Color(0xB3000000))
             .trapFocus(),
         contentAlignment = Alignment.Center,

@@ -37,7 +37,14 @@ import java.util.Locale
 @OptIn(UnstableApi::class)
 class PlaybackController(private val context: Context) {
 
-    class TrackOption(val label: String, val group: Tracks.Group?, val index: Int, val selected: Boolean)
+    class TrackOption(
+        val label: String,
+        val group: Tracks.Group?,
+        val index: Int,
+        val selected: Boolean,
+        /** False when this TV can't decode it (e.g. DTS or TrueHD with Audio passthrough off). */
+        val supported: Boolean = true,
+    )
 
     private val primary: ExoPlayer = PlayerFactory.build(context, bufferBytes = 128 * 1024 * 1024, longPause = true)
 
@@ -672,13 +679,18 @@ class PlaybackController(private val context: Context) {
 
     // ---------------- Tracks ----------------
 
-    fun tracks(type: Int): List<TrackOption> {
+    /**
+     * The audio or subtitle tracks in what's playing. With [includeUnsupported], tracks this TV
+     * can't decode are listed too (so you can see they exist), marked as not supported.
+     */
+    fun tracks(type: Int, includeUnsupported: Boolean = false): List<TrackOption> {
         val out = ArrayList<TrackOption>()
         for (g in player.currentTracks.groups) {
             if (g.type != type) continue
             for (i in 0 until g.length) {
-                if (!g.isTrackSupported(i)) continue
-                out += TrackOption(describe(g.getTrackFormat(i), out.size + 1, type), g, i, g.isTrackSelected(i))
+                val ok = g.isTrackSupported(i)
+                if (!ok && !includeUnsupported) continue
+                out += TrackOption(describe(g.getTrackFormat(i), out.size + 1, type), g, i, g.isTrackSelected(i), ok)
             }
         }
         return out
