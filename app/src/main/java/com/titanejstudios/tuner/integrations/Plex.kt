@@ -153,6 +153,8 @@ class Plex(private val clientId: String) {
         val leafCount: Int,
         val viewedLeafCount: Int,
         val server: Server,
+        /** Which library it's in ("Movies (4K)") – shown in search results. */
+        val library: String? = null,
     ) {
         val isShow: Boolean get() = type == "show"
 
@@ -230,6 +232,60 @@ class Plex(private val clientId: String) {
 
     private fun entries(root: JSONObject, s: Server, poster: Boolean): List<Entry> {
         val md = root.optJSONObject("MediaContainer")?.optJSONArray("Metadata") ?: return emptyList()
+        return entries(md, s, poster)
+    }
+
+    /**
+     * Searches every library on every server, the way the Plex app does: it copes with
+     * missing words, typos and "the", and finds films by actor or director too.
+     * Films and shows only; the same title in two libraries (Films and Films 4K) appears once.
+     */
+    fun search(servers: List<Server>, query: String): List<Entry> {
+        val q = query.trim()
+        if (q.isEmpty()) return emptyList()
+        val found = ArrayList<Entry>()
+        for (s in servers) {
+            try {
+                val url = "${s.uri}/hubs/search?query=" + URLEncoder.encode(q, "UTF-8") +
+                    "&limit=40&includeCollections=0&includeExternalMedia=0"
+                val hubs = JSONObject(read(open(url, token = s.token, timeoutMs = 20_000)))
+                    .optJSONObject("MediaContainer")?.optJSONArray("Hub") ?: continue
+                for (i in 0 until hubs.length()) {
+                    val hub = hubs.optJSONObject(i) ?: continue
+                    if (hub.optString("type") !in setOf("movie", "show")) continue
+                    val md = hub.optJSONArray("Metadata") ?: continue
+                    found += entries(md, s, poster = true).filter { it.type == "movie" || it.type == "show" }
+                }
+            } catch (e: Exception) {
+                AppLog.warn("Plex: search failed on ${s.name}", e)
+            }
+        }
+        // Best matches first: exact title, then starts with, then has every word, then the rest (Plex's order).
+        val words = norm(q).split(' ').filter { it.isNotBlank() }
+        fun score(e: Entry): Int {
+            val t = norm(e.title)
+            return when {
+                t == norm(q) -> 0
+                t.startsWith(norm(q)) -> 1
+                words.all { it in t } -> 2
+                words.any { it in t } -> 3
+                else -> 4
+            }
+        }
+        return found
+            .withIndex()
+            .sortedWith(compareBy({ score(it.value) }, { it.index }))
+            .map { it.value }
+            .distinctBy { "${it.type}|${norm(it.title)}|${it.year}" }
+    }
+
+    private fun norm(s: String) = s.lowercase()
+        .replace(Regex("[^\\p{L}\\p{N} ]"), " ")
+        .replace(Regex("^(the|a|an) "), "")
+        .replace(Regex("\\s+"), " ")
+        .trim()
+
+    private fun entries(md: org.json.JSONArray, s: Server, poster: Boolean): List<Entry> {
         val out = ArrayList<Entry>(md.length())
         for (i in 0 until md.length()) {
             val m = md.getJSONObject(i)
@@ -261,6 +317,7 @@ class Plex(private val clientId: String) {
                 leafCount = m.optInt("leafCount"),
                 viewedLeafCount = m.optInt("viewedLeafCount"),
                 server = s,
+                library = m.optString("librarySectionTitle").takeIf { it.isNotBlank() },
             )
         }
         return out

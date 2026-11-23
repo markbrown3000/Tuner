@@ -35,7 +35,10 @@ import androidx.compose.ui.unit.sp
 import com.titanejstudios.tuner.FAVOURITES
 import com.titanejstudios.tuner.TunerViewModel
 import com.titanejstudios.tuner.data.Channel
+import com.titanejstudios.tuner.data.Programme
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 
 private const val ALL_CATCHUP = "All catch-up"
 
@@ -65,16 +68,48 @@ fun CatchupScreen(vm: TunerViewModel) {
         if (selected == null || channels.none { it.id == selected?.id }) selected = channels.firstOrNull()
     }
     val first = remember { FocusRequester() }
-    LaunchedEffect(Unit) {
+    var query by remember { mutableStateOf("") }
+    var searching by remember { mutableStateOf(false) }
+    LaunchedEffect(query) {
         delay(80)
         runCatching { first.requestFocus() }
     }
     Column(Modifier.fillMaxSize().skyBackground().padding(horizontal = 44.dp, vertical = 26.dp)) {
-        Text("Catch-up", color = Color.White, fontSize = 32.sp, fontWeight = FontWeight.Bold)
-        Text("Programmes from the last few days, on channels your provider offers catch-up for.", color = TunerColors.TextSecondary, fontSize = 15.sp)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Catch-up", color = Color.White, fontSize = 32.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    if (query.isEmpty()) "Programmes from the last few days, on channels your provider offers catch-up for."
+                    else "Catch-up matching \"$query\" on every channel",
+                    color = if (query.isEmpty()) TunerColors.TextSecondary else TunerColors.Accent, fontSize = 15.sp,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                )
+            }
+            if (all.isNotEmpty()) {
+                PillButton("🔍 Search", { searching = true }, compact = true)
+                if (query.isNotEmpty()) {
+                    Spacer(Modifier.width(8.dp))
+                    PillButton("✕ Clear", { query = "" }, compact = true)
+                }
+            }
+        }
         Spacer(Modifier.height(14.dp))
+        if (searching) {
+            TextInputDialog(
+                title = "Search catch-up",
+                initial = query,
+                hint = "A programme, team, or anything in the description",
+                label = "Search",
+                onDismiss = { searching = false },
+                onDone = { searching = false; query = it.trim() },
+            )
+        }
         if (all.isEmpty()) {
             CenterMessage("None of your channels have catch-up")
+            return@Column
+        }
+        if (query.isNotEmpty()) {
+            CatchupResults(vm, all, query, first)
             return@Column
         }
         if (groups.size > 2) {
@@ -159,6 +194,75 @@ private fun CatchupList(vm: TunerViewModel, ch: Channel, channels: List<Channel>
                             p.desc?.let {
                                 Text(it, color = if (focused) Color(0xDDFFFFFF) else TunerColors.TextSecondary, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
+                        }
+                        GenreChip(p.category)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Normalised for matching: lower case, no punctuation, single spaces. */
+private fun plain(s: String) = s.lowercase().replace(Regex("[^\\p{L}\\p{N} ]"), " ").replace(Regex("\\s+"), " ").trim()
+
+/**
+ * Searches catch-up on every channel. Every word has to be there (in any order) in the title,
+ * or failing that in the description. Title matches come first, then the newest.
+ */
+@Composable
+private fun CatchupResults(vm: TunerViewModel, all: List<Channel>, query: String, first: FocusRequester) {
+    var results by remember { mutableStateOf<List<Pair<Channel, Programme>>?>(null) }
+    LaunchedEffect(query, all, vm.epg) {
+        results = null
+        results = withContext(Dispatchers.Default) {
+            val q = plain(query)
+            val words = q.split(' ').filter { it.isNotBlank() }
+            val found = ArrayList<Triple<Int, Channel, Programme>>()
+            for (ch in all) {
+                for (p in vm.catchupProgrammes(ch)) {
+                    val t = plain(p.title)
+                    val score = when {
+                        t == q -> 0
+                        t.startsWith(q) -> 1
+                        words.all { it in t } -> 2
+                        words.all { it in plain(p.title + " " + (p.desc ?: "") + " " + (p.category ?: "")) } -> 3
+                        else -> continue
+                    }
+                    found += Triple(score, ch, p)
+                }
+            }
+            found.sortedWith(compareBy<Triple<Int, Channel, Programme>> { it.first }.thenByDescending { it.third.start })
+                .take(300)
+                .map { it.second to it.third }
+        }
+    }
+    val list = results
+    when {
+        list == null -> CenterMessage("Searching catch-up…")
+        list.isEmpty() -> CenterMessage("Nothing on catch-up matches \"$query\"")
+        else -> LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(4.dp), contentPadding = PaddingValues(4.dp)) {
+            items(list.size, key = { list[it].first.id + "|" + list[it].second.start }) { i ->
+                val (ch, p) = list[i]
+                FocusSurface(
+                    onClick = { vm.playCatchup(ch, p, all) },
+                    baseColor = TunerColors.Panel,
+                    modifier = (if (i == 0) Modifier.focusRequester(first) else Modifier).fillMaxWidth().height(66.dp),
+                ) { focused ->
+                    Row(Modifier.fillMaxSize().padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.width(110.dp)) {
+                            Text(dayLabel(p.start), color = TunerColors.Accent, fontSize = 13.sp, maxLines = 1)
+                            Text(hhmm(p.start), color = TunerColors.TextSecondary, fontSize = 15.sp)
+                        }
+                        ChannelLogo(ch.logo, ch.name, Modifier.size(width = 64.dp, height = 38.dp))
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(p.title, color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(
+                                listOfNotNull(ch.name, p.desc).joinToString("  ·  "),
+                                color = if (focused) Color(0xDDFFFFFF) else TunerColors.TextSecondary,
+                                fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            )
                         }
                         GenreChip(p.category)
                     }

@@ -140,9 +140,32 @@ class PlexFeature(private val store: Store, private val scope: CoroutineScope) {
     var query by mutableStateOf(""); private set
 
     fun changeSort(key: String) { sort = key; store.plexSort = key }
-    fun changeQuery(text: String) { query = text.trim() }
+    /** Search results from every library, or null while searching. */
+    var searchResults by mutableStateOf<List<Plex.Entry>?>(null); private set
+    private var searchJob: Job? = null
 
-    private fun cacheKey(section: Plex.Section) = "${section.id}|$sort|$query"
+    /** Searches all your Plex libraries at once ("" clears the search). */
+    fun changeQuery(text: String) {
+        query = text.trim()
+        searchJob?.cancel()
+        searchResults = null
+        if (query.isEmpty()) return
+        val q = query
+        searchJob = scope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    if (servers.isEmpty()) store.plexToken?.let { servers = client().servers(it) }
+                    client().search(servers, q)
+                }
+            }
+            searchResults = result.getOrElse {
+                AppLog.warn("Plex search failed", it)
+                emptyList()
+            }
+        }
+    }
+
+    private fun cacheKey(section: Plex.Section) = "${section.id}|$sort"
 
     /** What's loaded for [section] with the current order and search, or null while loading. */
     fun itemsFor(section: Plex.Section): List<Plex.Entry>? = sectionItems[cacheKey(section)]
@@ -152,9 +175,9 @@ class PlexFeature(private val store: Store, private val scope: CoroutineScope) {
         val key = cacheKey(section)
         if (sectionItems.containsKey(key) && !force) return
         libraryJob?.cancel()
-        libraryStatus = if (query.isEmpty()) "Loading ${section.title}…" else "Searching ${section.title} for \"$query\"…"
+        libraryStatus = "Loading ${section.title}…"
         val plexSort = SORTS.firstOrNull { it.key == sort }?.let { if (section.isShows) it.shows else it.films }
-        val title = query
+        val title: String? = null
         libraryJob = scope.launch {
             val result = withContext(Dispatchers.IO) {
                 runCatching {

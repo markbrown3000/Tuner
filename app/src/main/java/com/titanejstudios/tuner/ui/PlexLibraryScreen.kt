@@ -41,6 +41,7 @@ import com.titanejstudios.tuner.integrations.Plex
 import kotlinx.coroutines.delay
 
 private const val PLEX_CONTINUE = "▶ Continue watching"
+private const val PLEX_RESULTS = "🔍 Search results"
 
 /** Films & TV › Plex: your Plex libraries (films and TV), with Continue watching first. */
 @Composable
@@ -52,8 +53,9 @@ fun PlexLibraryScreen(vm: TunerViewModel) {
         val dupes = sections.groupBy { it.title }.filter { it.value.size > 1 }.keys
         sections.associate { it.id to (if (it.title in dupes) "${it.title} (${it.server.name})" else it.title) }
     }
-    val categories = remember(sections, vm.plexItems.isNotEmpty()) {
+    val categories = remember(sections, vm.plexItems.isNotEmpty(), plex.query.isNotEmpty()) {
         buildList {
+            if (plex.query.isNotEmpty()) add(PLEX_RESULTS)
             if (vm.plexItems.isNotEmpty()) add(PLEX_CONTINUE)
             sections.forEach { add(it.id) }
         }
@@ -63,7 +65,7 @@ fun PlexLibraryScreen(vm: TunerViewModel) {
         if (category == null || category !in categories) plex.libraryCategory = categories.firstOrNull()
     }
     val section = sections.firstOrNull { it.id == category }
-    LaunchedEffect(section?.id, plex.sort, plex.query) { section?.let { plex.loadSection(it) } }
+    LaunchedEffect(section?.id, plex.sort) { section?.let { plex.loadSection(it) } }
     var menuFor by remember { mutableStateOf<Plex.Entry?>(null) }
     var sortMenu by remember { mutableStateOf(false) }
     var searching by remember { mutableStateOf(false) }
@@ -84,18 +86,21 @@ fun PlexLibraryScreen(vm: TunerViewModel) {
             Text("Plex", fontSize = 30.sp, fontWeight = FontWeight.Bold, color = TunerColors.TextPrimary)
             Spacer(Modifier.width(16.dp))
             Text(
-                category?.let { if (it == PLEX_CONTINUE) it else labels[it] } ?: "",
+                category?.let { if (it == PLEX_CONTINUE || it == PLEX_RESULTS) it else labels[it] } ?: "",
                 fontSize = 18.sp, color = TunerColors.TextSecondary,
             )
             if (plex.query.isNotEmpty()) {
                 Spacer(Modifier.width(12.dp))
-                Text("matching \"${plex.query}\"", fontSize = 16.sp, color = TunerColors.Accent)
+                Text("for \"${plex.query}\"", fontSize = 16.sp, color = TunerColors.Accent, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
             }
             Spacer(Modifier.weight(1f))
             PillButton("🔍 Search", { searching = true }, compact = true)
             Spacer(Modifier.width(8.dp))
             if (plex.query.isNotEmpty()) {
-                PillButton("✕ Clear", { plex.changeQuery("") }, compact = true)
+                PillButton("✕ Clear", {
+                    plex.changeQuery("")
+                    if (category == PLEX_RESULTS) plex.libraryCategory = null
+                }, compact = true)
                 Spacer(Modifier.width(8.dp))
             }
             PillButton("Sort: $sortLabel", { sortMenu = true }, compact = true)
@@ -128,7 +133,7 @@ fun PlexLibraryScreen(vm: TunerViewModel) {
                             .then(focusFor[c]?.let { Modifier.focusRequester(it) } ?: Modifier),
                     ) { focused ->
                         Text(
-                            if (c == PLEX_CONTINUE) c else (if (s?.isShows == true) "📺 " else "🎬 ") + (labels[c] ?: c),
+                            if (c == PLEX_CONTINUE || c == PLEX_RESULTS) c else (if (s?.isShows == true) "📺 " else "🎬 ") + (labels[c] ?: c),
                             modifier = Modifier.padding(horizontal = 14.dp),
                             color = if (focused || selected) Color.White else TunerColors.TextSecondary,
                             fontSize = 16.sp,
@@ -140,6 +145,33 @@ fun PlexLibraryScreen(vm: TunerViewModel) {
             }
             Spacer(Modifier.width(20.dp))
             when {
+                category == PLEX_RESULTS -> {
+                    val results = plex.searchResults
+                    if (results == null) {
+                        CenterMessage("Searching all your Plex libraries for \"${plex.query}\"…")
+                    } else if (results.isEmpty()) {
+                        CenterMessage("Nothing on Plex matches \"${plex.query}\"")
+                    } else {
+                        LazyVerticalGrid(
+                            columns = GridCells.Adaptive(116.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            items(results.size, key = { results[it].server.machineId + results[it].ratingKey }) { i ->
+                                val e = results[i]
+                                PosterCard(
+                                    title = e.title,
+                                    image = e.image,
+                                    caption = listOfNotNull(e.year, e.library).joinToString("  ·  ").ifEmpty { null },
+                                    progress = if (!e.isShow && e.durationMs > 0 && e.viewOffsetMs > 0) e.viewOffsetMs.toFloat() / e.durationMs else null,
+                                    onClick = { if (e.isShow) vm.openPlexShow(e) else vm.playPlexEntry(e) },
+                                    onLongClick = { menuFor = e },
+                                )
+                            }
+                        }
+                    }
+                }
                 category == PLEX_CONTINUE -> {
                     val deck = vm.plexItems
                     LazyVerticalGrid(
@@ -165,7 +197,7 @@ fun PlexLibraryScreen(vm: TunerViewModel) {
                     if (entries == null) {
                         CenterMessage(plex.libraryStatus ?: "Loading ${section.title}…")
                     } else if (entries.isEmpty()) {
-                        CenterMessage(if (plex.query.isNotEmpty()) "Nothing in ${section.title} matches \"${plex.query}\"" else "${section.title} is empty")
+                        CenterMessage("${section.title} is empty")
                     } else {
                         LazyVerticalGrid(
                             columns = GridCells.Adaptive(116.dp),
@@ -202,16 +234,15 @@ fun PlexLibraryScreen(vm: TunerViewModel) {
     }
     if (searching) {
         TextInputDialog(
-            title = "Search " + (section?.let { labels[it.id] } ?: "Plex"),
+            title = "Search all of Plex",
             initial = plex.query,
-            hint = "Part of a title is enough",
+            hint = "A title, part of one, or an actor – films and TV",
             label = "Title",
             onDismiss = { searching = false },
             onDone = { text ->
                 searching = false
-                // Search needs a library – from Continue watching, use the first one.
-                if (section == null) categories.firstOrNull { it != PLEX_CONTINUE }?.let { plex.libraryCategory = it }
                 plex.changeQuery(text)
+                plex.libraryCategory = if (text.isBlank()) null else PLEX_RESULTS
             },
         )
     }
