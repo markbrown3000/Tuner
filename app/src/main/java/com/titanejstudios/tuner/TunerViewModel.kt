@@ -42,6 +42,7 @@ import com.titanejstudios.tuner.data.Repository
 import com.titanejstudios.tuner.data.ResumeEntry
 import com.titanejstudios.tuner.data.SeriesItem
 import com.titanejstudios.tuner.data.FilmName
+import com.titanejstudios.tuner.data.Languages
 import com.titanejstudios.tuner.data.CatchupApps
 import com.titanejstudios.tuner.data.Source
 import com.titanejstudios.tuner.data.Store
@@ -101,7 +102,7 @@ import java.util.Locale
 enum class Screen {
     Home, Channels, Guide, Player, Search, Movies, Series, SeriesDetail, Settings, SourceEdit, Manage,
     ProfilePicker, ProfileEdit, PhoneSetup, EpgMap, Recordings, MultiView, Sports, Apps, Log,
-    WhatsOn, Stats, ShareTv, Catchup, Categories, Plex, Football, Update, SelfTest, PlexLibrary, PlexShow, HomeRows,
+    WhatsOn, Stats, ShareTv, Catchup, Categories, Plex, Football, Update, SelfTest, PlexLibrary, PlexShow, HomeRows, Languages,
 }
 
 const val FAVOURITES = "★ Favourites"
@@ -331,6 +332,8 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     var homeSmart by mutableStateOf(store.homeSmart); private set
     var voiceSearchPending by mutableStateOf(false)
     var tintFromPicture by mutableStateOf(store.tintFromPicture); private set
+    /** Countries/languages hidden (Settings › Languages & countries). */
+    var hiddenLanguages by mutableStateOf(store.hiddenLanguages); private set
     var artSaverMinutes by mutableStateOf(store.artSaverMinutes); private set
     /** Tuner's artwork screensaver is showing. */
     var saverOn by mutableStateOf(false); private set
@@ -864,7 +867,10 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         originalGroups = allChannels.mapTo(HashSet()) { it.group }
         // Your renamed / merged categories.
         val renames = groupRenames
-        val source = if (renames.isEmpty()) allChannels else allChannels.map { c -> renames[c.group]?.let { c.copy(group = it) } ?: c }
+        val renamed = if (renames.isEmpty()) allChannels else allChannels.map { c -> renames[c.group]?.let { c.copy(group = it) } ?: c }
+        // Languages & countries you've hidden (e.g. everything not in English).
+        val hiddenLang = hiddenLanguages
+        val source = if (hiddenLang.isEmpty()) renamed else renamed.filter { languageShown(Languages.tagOf(it)?.code, hiddenLang) }
         channels = source.filter { it.id !in hiddenCh && it.id !in dead }
         // Categories in the provider's order (playlist by playlist), like TiviMate.
         val sourceIndex = sources.withIndex().associate { (i, src) -> src.id to i }
@@ -1859,6 +1865,44 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         }
     }
 
+    // ---------------- Languages & countries ----------------
+
+    private fun languageShown(code: String?, hidden: Set<String>): Boolean = (code ?: Languages.NONE) !in hidden
+
+    /** Films/series without the hidden languages ([text] = category and name, where the tags are). */
+    private fun <T> langFilter(list: List<T>, text: (T) -> Pair<String, String>): List<T> {
+        val hidden = hiddenLanguages
+        if (hidden.isEmpty()) return list
+        return list.filter { val (cat, name) = text(it); languageShown(Languages.tagOfItem(cat, name)?.code, hidden) }
+    }
+
+    /** Every country/language found in your channels (and films/series, if loaded), most first. */
+    fun languageCounts(): List<Pair<Languages.Tag?, Int>> {
+        val counts = HashMap<String, Pair<Languages.Tag?, Int>>()
+        fun add(tag: Languages.Tag?) {
+            val k = tag?.code ?: Languages.NONE
+            counts[k] = tag to ((counts[k]?.second ?: 0) + 1)
+        }
+        allChannels.forEach { add(Languages.tagOf(it)) }
+        return counts.values.sortedByDescending { it.second }
+    }
+
+    fun setHiddenLanguages(hidden: Set<String>) {
+        hiddenLanguages = hidden
+        store.hiddenLanguages = hidden
+        recomputeVisible()
+        // Films and series are filtered as they load: load them again from the saved lists.
+        movies = null
+        series = null
+    }
+
+    /** Hides every country/language that isn't English (things with no country tag stay). */
+    fun englishOnly() {
+        // Every non-English tag, including ones only used by films and series.
+        setHiddenLanguages(Languages.nonEnglish)
+        showNotice("Showing English channels only – change it in Settings › Languages & countries")
+    }
+
     // ---------------- Home rows (5.5) ----------------
 
     fun saveHomeRows(order: List<String>, hidden: Set<String>) {
@@ -2024,13 +2068,13 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         viewModelScope.launch {
             val cached = withContext(Dispatchers.IO) { srcs.map { it to vodCache.loadMovies(it.id) } }
             val complete = cached.all { it.second != null }
-            if (complete && movies == null) movies = cached.flatMap { it.second!!.items }
+            if (complete && movies == null) movies = langFilter(cached.flatMap { it.second!!.items }) { it.category to it.name }
             val stale = cached.any { it.second == null || System.currentTimeMillis() - it.second!!.savedAt > VodCache.MAX_AGE_MS }
             if (!force && complete && !stale) return@launch
             if (complete) vodUpdating = true else vodStatus = "Loading films…"
             try {
                 movies = withContext(Dispatchers.IO) {
-                    srcs.flatMap { src -> XtreamClient.loadMovies(src).also { runCatching { vodCache.saveMovies(src.id, it) } } }
+                    langFilter(srcs.flatMap { src -> XtreamClient.loadMovies(src).also { runCatching { vodCache.saveMovies(src.id, it) } } }) { it.category to it.name }
                 }
             } catch (e: Exception) {
                 if (!complete) movies = emptyList()
@@ -2048,13 +2092,13 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         viewModelScope.launch {
             val cached = withContext(Dispatchers.IO) { srcs.map { it to vodCache.loadSeries(it.id) } }
             val complete = cached.all { it.second != null }
-            if (complete && series == null) series = cached.flatMap { it.second!!.items }
+            if (complete && series == null) series = langFilter(cached.flatMap { it.second!!.items }) { it.category to it.name }
             val stale = cached.any { it.second == null || System.currentTimeMillis() - it.second!!.savedAt > VodCache.MAX_AGE_MS }
             if (!force && complete && !stale) return@launch
             if (complete) vodUpdating = true else vodStatus = "Loading series…"
             try {
                 series = withContext(Dispatchers.IO) {
-                    srcs.flatMap { src -> XtreamClient.loadSeries(src).also { runCatching { vodCache.saveSeries(src.id, it) } } }
+                    langFilter(srcs.flatMap { src -> XtreamClient.loadSeries(src).also { runCatching { vodCache.saveSeries(src.id, it) } } }) { it.category to it.name }
                 }
             } catch (e: Exception) {
                 if (!complete) series = emptyList()

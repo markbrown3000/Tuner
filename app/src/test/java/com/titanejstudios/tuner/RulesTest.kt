@@ -182,4 +182,18 @@ class ChannelMergeTest {
         assertEquals("My5", c.forChannel("Channel 5 HD")?.name)
         assertNull(c.forChannel("Sky Sports Main Event"))
     }
+
+    @Test
+    fun countryTagsAreFound() {
+        val l = com.titanejstudios.tuner.data.Languages
+        assertEquals("UK", l.tagOf("UK | Sports")?.code)
+        assertEquals("AR", l.tagOf("|AR| MBC 1")?.code)
+        assertEquals("FR", l.tagOf("[FR] Films")?.code)
+        assertEquals("UK", l.tagOf("VIP | UK Sport")?.code)
+        assertEquals("AR", l.tagOf("Arabic Movies")?.code)
+        assertEquals("US", l.tagOf("USA: NBC")?.code)
+        assertNull(l.tagOf("Sky Sports Main Event"))
+        assertNull(l.tagOf("BBC One HD"))
+        assertNull(l.tagOf("4K | Movies"))
+    }
 }

@@ -177,6 +177,7 @@ private fun TunerApp(vm: TunerViewModel) {
             Screen.PlexLibrary -> com.titanejstudios.tuner.ui.PlexLibraryScreen(vm)
             Screen.PlexShow -> com.titanejstudios.tuner.ui.PlexShowScreen(vm)
             Screen.HomeRows -> com.titanejstudios.tuner.ui.HomeRowsScreen(vm)
+            Screen.Languages -> com.titanejstudios.tuner.ui.LanguagesScreen(vm)
         }
 
         if (!vm.inPip) {

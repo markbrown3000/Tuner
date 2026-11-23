@@ -637,6 +637,11 @@ class Store(context: Context) {
         get() = prefs.getBoolean("home_smart", true)
         set(value) = prefs.edit().putBoolean("home_smart", value).apply()
 
+    /** Country/language tags hidden everywhere (see Languages); "-" = things with no tag. */
+    var hiddenLanguages: Set<String>
+        get() = prefs.getStringSet("hidden_languages", emptySet())?.toSet() ?: emptySet()
+        set(value) = prefs.edit().putStringSet("hidden_languages", value).apply()
+
     /** Home's background tint follows the highlighted picture's colours. */
     var tintFromPicture: Boolean
         get() = prefs.getBoolean("tint_from_picture", true)

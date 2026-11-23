@@ -148,6 +148,15 @@ fun SettingsScreen(vm: TunerViewModel) {
 
             item {
                 SettingRow(
+                    "Languages & countries",
+                    subtitle = "Hide everything that isn't in English – or pick countries one by one",
+                    detail = if (vm.hiddenLanguages.isEmpty()) "Everything" else "${vm.hiddenLanguages.size} hidden",
+                    onClick = { vm.navigate(Screen.Languages) },
+                )
+            }
+
+            item {
+                SettingRow(
                     "Home rows",
                     subtitle = "Show, hide and reorder Home's rows – and whether they change with the time of day",
                     detail = if (vm.homeRowsHidden.isEmpty()) "All shown" else "${vm.homeRowsHidden.size} hidden",
