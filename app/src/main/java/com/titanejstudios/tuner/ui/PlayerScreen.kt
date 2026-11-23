@@ -1,5 +1,7 @@
 package com.titanejstudios.tuner.ui
 
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -313,7 +315,7 @@ fun PlayerScreen(vm: TunerViewModel) {
     val audioManager = remember { context.getSystemService(android.media.AudioManager::class.java) }
     val phoneGestures = if (!vm.isPhone) Modifier else Modifier
         .pointerInput(isLive) {
-            androidx.compose.foundation.gestures.detectTapGestures(
+            detectTapGestures(
                 onTap = {
                     controls = !controls
                     controlsToken++
@@ -331,7 +333,7 @@ fun PlayerScreen(vm: TunerViewModel) {
             var total = 0f
             var volStart = 0
             var brightStart = 0.5f
-            androidx.compose.foundation.gestures.detectVerticalDragGestures(
+            detectVerticalDragGestures(
                 onDragStart = { o ->
                     startX = o.x
                     total = 0f

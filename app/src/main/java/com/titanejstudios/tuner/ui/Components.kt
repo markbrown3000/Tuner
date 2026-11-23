@@ -1,5 +1,6 @@
 package com.titanejstudios.tuner.ui
 
+import androidx.compose.foundation.gestures.detectTapGestures
 import android.view.View
 import android.view.ViewGroup
 import androidx.activity.compose.BackHandler
@@ -248,7 +249,7 @@ fun Modifier.tvClickable(onClick: () -> Unit, onLongClick: (() -> Unit)? = null)
         .focusable()
         // Phones and tablets: tap = OK, press and hold = hold OK.
         .pointerInput(Unit) {
-            androidx.compose.foundation.gestures.detectTapGestures(
+            detectTapGestures(
                 onTap = { click() },
                 onLongPress = { longClick?.invoke() ?: click() },
             )
