@@ -705,7 +705,7 @@ class Store(context: Context) {
     /** Watch time by day type and hour, per profile (see Habits). */
     fun habits(profileId: String): String = prefs.getString("habits_$profileId", "{}") ?: "{}"
     fun setHabits(profileId: String, json: String) = prefs.edit().putString("habits_$profileId", json).apply()
-    var offerUsualChannel: Boolean
+    var offerUsual: Boolean
         get() = prefs.getBoolean("offer_usual", true)
         set(value) = prefs.edit().putBoolean("offer_usual", value).apply()
 
