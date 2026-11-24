@@ -1209,8 +1209,12 @@ private fun KidsHome(vm: TunerViewModel) {
             recent.forEach { add(channelCard(vm, it, recent, vm.now, emptySet())) }
         }
     }
+    val ytCards = remember(vm.youtube.feed, vm.activeProfile.id) {
+        if (vm.youTubeAllowed) vm.youtube.feed.take(20).map { youTubeCard(vm, it) } else emptyList()
+    }
+    val sections = listOf("Carry on watching" to carryOn, "New on your YouTube" to ytCards).filter { it.second.isNotEmpty() }
     val first = remember { FocusRequester() }
-    LaunchedEffect(channels.isNotEmpty(), carryOn.isNotEmpty()) {
+    LaunchedEffect(channels.isNotEmpty(), sections.isNotEmpty()) {
         delay(80)
         runCatching { first.requestFocus() }
     }
@@ -1220,6 +1224,8 @@ private fun KidsHome(vm: TunerViewModel) {
             Spacer(Modifier.height(8.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Hi ${vm.activeProfile.name}! 🧸", color = Color.White, fontSize = 34.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.width(20.dp))
+                if (vm.youTubeAllowed) PillButton("▶ YouTube", { vm.navigate(Screen.YouTube) }, compact = true)
                 Spacer(Modifier.weight(1f))
                 val left = vm.timeLeftSeconds()
                 if (left != Long.MAX_VALUE) {
@@ -1241,21 +1247,23 @@ private fun KidsHome(vm: TunerViewModel) {
                     verticalArrangement = Arrangement.spacedBy(18.dp),
                     contentPadding = PaddingValues(8.dp),
                 ) {
-                    if (carryOn.isNotEmpty()) {
-                        item(key = "carry-on", span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
+                    sections.forEachIndexed { si, (title, row) ->
+                        item(key = "section-$title", span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
                             Column {
-                                Text("Carry on watching", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                                Text(title, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
                                 Spacer(Modifier.height(10.dp))
                                 androidx.compose.foundation.lazy.LazyRow(
                                     horizontalArrangement = Arrangement.spacedBy(18.dp),
                                     contentPadding = PaddingValues(vertical = 8.dp),
                                 ) {
-                                    items(carryOn.size, key = { carryOn[it].key }) { i ->
-                                        HomeTile(carryOn[i], if (i == 0) Modifier.focusRequester(first) else Modifier, onFocus = {})
+                                    items(row.size, key = { row[it].key }) { i ->
+                                        HomeTile(row[i], if (si == 0 && i == 0) Modifier.focusRequester(first) else Modifier, onFocus = {})
                                     }
                                 }
-                                Spacer(Modifier.height(10.dp))
-                                Text("Your channels", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                                if (si == sections.lastIndex) {
+                                    Spacer(Modifier.height(10.dp))
+                                    Text("Your channels", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                                }
                             }
                         }
                     }
@@ -1266,7 +1274,7 @@ private fun KidsHome(vm: TunerViewModel) {
                             channel = c,
                             onClick = { vm.play(c, channels) },
                             onFocused = {},
-                            modifier = (if (i == 0 && carryOn.isEmpty()) Modifier.focusRequester(first) else Modifier).size(width = 270.dp, height = 160.dp),
+                            modifier = (if (i == 0 && sections.isEmpty()) Modifier.focusRequester(first) else Modifier).size(width = 270.dp, height = 160.dp),
                         )
                     }
                 }

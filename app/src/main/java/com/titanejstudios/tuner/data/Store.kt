@@ -224,6 +224,7 @@ class Store(context: Context) {
                     bedtimeMinutes = o.optInt("bedtime", -1),
                     colour = o.optInt("colour", -1),
                     icon = o.optString("icon"),
+                    youtube = o.optBoolean("yt", true),
                 )
             }
             list.ifEmpty { listOf(Profile(MAIN_PROFILE, "Everyone")) }
@@ -236,7 +237,7 @@ class Store(context: Context) {
                 arr.put(
                     JSONObject().put("id", it.id).put("name", it.name).put("kids", it.kids)
                         .put("groups", JSONArray(it.allowedGroups.toList())).put("limit", it.dailyLimitMinutes)
-                        .put("bedtime", it.bedtimeMinutes).put("colour", it.colour).put("icon", it.icon)
+                        .put("bedtime", it.bedtimeMinutes).put("colour", it.colour).put("icon", it.icon).put("yt", it.youtube)
                 )
             }
             prefs.edit().putString("profiles", arr.toString()).apply()

@@ -134,6 +134,7 @@ fun YouTubePlayerScreen(vm: TunerViewModel) {
 
                 override fun onStateChange(youTubePlayer: YouTubePlayer, state: PlayerConstants.PlayerState) {
                     playing = state == PlayerConstants.PlayerState.PLAYING
+                    vm.youTubePlaying(playing)
                     if (state == PlayerConstants.PlayerState.ENDED) vm.back()
                 }
 
@@ -165,7 +166,12 @@ fun YouTubePlayerScreen(vm: TunerViewModel) {
             }, true, options)
         }
     }
-    DisposableEffect(view) { onDispose { runCatching { view.release() } } }
+    DisposableEffect(view) {
+        onDispose {
+            vm.youTubePlaying(false)
+            runCatching { view.release() }
+        }
+    }
     LaunchedEffect(Unit) {
         delay(120)
         runCatching { focus.requestFocus() }
@@ -215,6 +221,7 @@ fun YouTubePlayerScreen(vm: TunerViewModel) {
                 position = cur
                 if (dur > 0f) length = dur
                 playing = !paused
+                vm.youTubePlaying(!paused)
                 if (dur > 0f && cur >= dur - 0.5f && paused) vm.back()
             },
             onGiveUp = {
@@ -343,7 +350,11 @@ fun YouTubeScreen(vm: TunerViewModel) {
     var typing by remember { mutableStateOf(false) }
     val first = remember { FocusRequester() }
     LaunchedEffect(Unit) {
-        if (!vm.activeProfile.kids) yt.loadFeed()
+        if (!vm.youTubeAllowed) {
+            vm.back()
+            return@LaunchedEffect
+        }
+        yt.loadFeed()
         delay(80)
         runCatching { first.requestFocus() }
     }
@@ -364,7 +375,7 @@ fun YouTubeScreen(vm: TunerViewModel) {
                 Spacer(Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     PillButton(if (yt.query.isBlank()) "🔍 Search YouTube" else "🔍 ${yt.query}", { typing = true }, Modifier.focusRequester(first), compact = true)
-                    if (!kids) {
+                    run {
                         when {
                             yt.signedIn -> {
                                 PillButton(if (yt.loadingFeed) "Updating…" else "↻ Subscriptions", { yt.loadFeed(force = true) }, compact = true)
@@ -374,7 +385,7 @@ fun YouTubeScreen(vm: TunerViewModel) {
                         }
                     }
                 }
-                if (!kids) {
+                run {
                     Text(
                         if (yt.signedIn) "${vm.activeProfile.name}'s YouTube" + (yt.email?.let { " · $it" } ?: "")
                         else "Each profile signs in to their own YouTube",
@@ -399,13 +410,13 @@ fun YouTubeScreen(vm: TunerViewModel) {
             item(span = { GridItemSpan(maxLineSpan) }) { Header("Results for \"${yt.query}\"", narrow) }
             items(yt.results.size, key = { "r" + yt.results[it].id }) { i -> VideoCard(vm, yt.results[i], narrow) }
         }
-        if (!kids && yt.signedIn) {
+        if (yt.signedIn) {
             item(span = { GridItemSpan(maxLineSpan) }) {
                 Header(if (yt.feed.isEmpty() && yt.loadingFeed) "Loading your subscriptions…" else "From your subscriptions", narrow)
             }
             items(yt.feed.size, key = { "f" + yt.feed[it].id }) { i -> VideoCard(vm, yt.feed[i], narrow) }
         }
-        if (!yt.signedIn && yt.results.isEmpty() && !kids) {
+        if (!yt.signedIn && yt.results.isEmpty()) {
             item(span = { GridItemSpan(maxLineSpan) }) {
                 Text(
                     "Search for anything, or sign in to YouTube to see the latest videos from the channels you subscribe to.",

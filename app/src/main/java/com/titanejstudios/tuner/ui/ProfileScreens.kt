@@ -108,6 +108,7 @@ fun ProfileEditScreen(vm: TunerViewModel) {
     var bedtime by remember { mutableIntStateOf(existing?.bedtimeMinutes ?: -1) }
     var colour by remember { mutableIntStateOf(existing?.colour ?: -1) }
     var icon by remember { mutableStateOf(existing?.icon ?: "") }
+    var youtube by remember { mutableStateOf(existing?.youtube ?: true) }
     val first = remember { FocusRequester() }
     LaunchedEffect(Unit) {
         delay(60)
@@ -124,6 +125,7 @@ fun ProfileEditScreen(vm: TunerViewModel) {
                 bedtimeMinutes = if (kids) bedtime else -1,
                 colour = colour,
                 icon = icon,
+                youtube = youtube,
             )
         )
     }
@@ -200,6 +202,15 @@ fun ProfileEditScreen(vm: TunerViewModel) {
                             KidsRules.bedtimeChoices.forEach { b ->
                                 PillButton(KidsRules.label(b), { bedtime = b }, selected = bedtime == b, compact = true)
                             }
+                        }
+                    }
+                }
+                item {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("YouTube – strict SafeSearch, no Shorts, and it counts towards their TV time", color = TunerColors.TextSecondary, fontSize = 16.sp)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            PillButton("Allowed", { youtube = true }, selected = youtube, compact = true)
+                            PillButton("Off", { youtube = false }, selected = !youtube, compact = true)
                         }
                     }
                 }

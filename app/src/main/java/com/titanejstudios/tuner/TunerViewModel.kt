@@ -396,6 +396,13 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     )
     /** YouTube: search, your subscriptions, and the player (trailers too). */
     val youtube = com.titanejstudios.tuner.features.YouTubeFeature(store, viewModelScope, store.activeProfileId)
+    /** Grown-ups always; kids if their profile allows it. */
+    val youTubeAllowed: Boolean get() = !activeProfile.kids || activeProfile.youtube
+    /** A YouTube video is actually playing (kids' TV time counts it). */
+    private var ytPlaying = false
+    fun youTubePlaying(on: Boolean) {
+        ytPlaying = on
+    }
     /** The YouTube video on screen. */
     var ytVideo by mutableStateOf<com.titanejstudios.tuner.integrations.YouTube.Video?>(null); private set
     /** Sync between houses through your own Google Drive. */
@@ -1485,7 +1492,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
             cloud.start()
             cloud.syncSoon(4_000L)
         }
-        if (!activeProfile.kids) youtube.loadFeed()
+        if (youTubeAllowed) youtube.loadFeed()
         if (extrasStarted) refreshPlex()
         AppState.foreground = true
         loadApps()
@@ -1684,7 +1691,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     private fun trackUsage() {
         val p = activeProfile
         if (!p.kids) return
-        val watching = mode != null && playback.isPlaying
+        val watching = (mode != null && playback.isPlaying) || (screen == Screen.YouTubePlayer && ytPlaying)
         if (!watching) return
         if (p.dailyLimitMinutes > 0) store.addUsage(p.id, today(), 15)
         val bedtime = isBedtimeNow()
@@ -1725,7 +1732,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
             activeProfile = p
             store.activeProfileId = p.id
             youtube.useProfile(p.id)
-            if (!p.kids) youtube.loadFeed()
+            if (!p.kids || p.youtube) youtube.loadFeed()
             favourites = store.favourites(p.id)
             favouriteSet = favourites.toSet()
             taste = Taste.fromJson(store.taste(p.id))
@@ -4216,6 +4223,11 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
 
     /** Plays a YouTube video full screen inside Flicker. */
     fun playYouTube(v: com.titanejstudios.tuner.integrations.YouTube.Video) {
+        if (!youTubeAllowed) return
+        if (timeLeftSeconds() <= 0 || isBedtimeNow()) {
+            timesUp = true
+            return
+        }
         // Whatever Flicker was playing pauses (films keep their place).
         when (mode) {
             is PlayMode.Vod -> {

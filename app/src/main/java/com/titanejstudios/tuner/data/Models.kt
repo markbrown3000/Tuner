@@ -135,6 +135,8 @@ data class Profile(
     val colour: Int = -1,
     /** Avatar picture (an emoji); empty = the first letter of the name. */
     val icon: String = "",
+    /** For kids profiles: YouTube allowed (strict SafeSearch, counts towards their TV time). */
+    val youtube: Boolean = true,
 )
 
 object RecStatus {
