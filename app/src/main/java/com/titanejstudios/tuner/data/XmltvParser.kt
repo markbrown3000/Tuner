@@ -69,6 +69,9 @@ object XmltvParser {
         var progDesc: String? = null
         var progCategory: String? = null
         var progImage: String? = null
+        var progSub: String? = null
+        var progEpisode: String? = null
+        var progFlags = ""
 
         try {
             val parser = Xml.newPullParser()
@@ -92,6 +95,9 @@ object XmltvParser {
                             progDesc = null
                             progCategory = null
                             progImage = null
+                            progSub = null
+                            progEpisode = null
+                            progFlags = ""
                         }
                         "icon" -> {
                             val src = parser.getAttributeValue(null, "src")?.trim()?.takeIf { it.startsWith("http") }
@@ -104,6 +110,16 @@ object XmltvParser {
                         "title" -> if (progChannel != null && progTitle == null) progTitle = text(parser)
                         "desc" -> if (progChannel != null && progDesc == null) progDesc = text(parser)
                         "category" -> if (progChannel != null && progCategory == null) progCategory = text(parser)
+                        "sub-title" -> if (progChannel != null && progSub == null) progSub = text(parser)
+                        "episode-num" -> if (progChannel != null) {
+                            val system = parser.getAttributeValue(null, "system")
+                            val ep = ProgrammeExtra.episodeFromXmltv(system, text(parser))
+                            // xmltv_ns (series and episode) wins over other numbering.
+                            if (ep != null && (progEpisode == null || system.equals("xmltv_ns", ignoreCase = true))) progEpisode = ep
+                        }
+                        "new" -> if (progChannel != null && 'N' !in progFlags) progFlags += "N"
+                        "premiere" -> if (progChannel != null && 'P' !in progFlags) progFlags += "P"
+                        "last-chance" -> if (progChannel != null && 'L' !in progFlags) progFlags += "L"
                     }
                 } else if (event == XmlPullParser.END_TAG) {
                     when (parser.name) {
@@ -134,6 +150,7 @@ object XmltvParser {
                                         progDesc?.takeIf { it.isNotBlank() },
                                         progCategory?.takeIf { it.isNotBlank() },
                                         progImage,
+                                        ProgrammeExtra.pack(progFlags, progSub?.takeIf { it.isNotBlank() && !it.equals(title, ignoreCase = true) }, progEpisode),
                                     )
                                     for (t in targets) {
                                         if (progStop > (catchupFrom[t] ?: from)) {

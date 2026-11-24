@@ -88,13 +88,36 @@ object YouTube {
             }
             page = o.optString("nextPageToken").takeIf { it.isNotBlank() }
         } while (page != null && subs.size < channels)
+        return uploads(subs.take(channels), perChannel, null, access)
+    }
+
+    /** A YouTube channel (for a grown-up to approve for a kids' profile). */
+    class Channel(val id: String, val title: String, val thumb: String?)
+
+    /** Channels matching [query] (strict SafeSearch). 100 units. */
+    fun searchChannels(query: String, apiKey: String?, access: String?): List<Channel> {
+        val q = URLEncoder.encode(query, "UTF-8")
+        val o = get("$API/search?part=snippet&type=channel&safeSearch=strict&maxResults=20&q=$q", apiKey, access)
+        val items = o.optJSONArray("items") ?: return emptyList()
+        return (0 until items.length()).mapNotNull { i ->
+            val it = items.optJSONObject(i) ?: return@mapNotNull null
+            val id = it.optJSONObject("id")?.optString("channelId")?.takeIf { v -> v.startsWith("UC") } ?: return@mapNotNull null
+            val sn = it.optJSONObject("snippet")
+            val thumbs = sn?.optJSONObject("thumbnails")
+            val thumb = listOf("medium", "high", "default").firstNotNullOfOrNull { k -> thumbs?.optJSONObject(k)?.optString("url")?.takeIf { u -> u.isNotBlank() } }
+            Channel(id, unescape(sn?.optString("channelTitle").orEmpty().ifBlank { sn?.optString("title").orEmpty() }), thumb)
+        }
+    }
+
+    /** The newest normal videos (no Shorts) from [channelIds], newest first. About 1 unit per channel. */
+    fun uploads(channelIds: List<String>, perChannel: Int, apiKey: String?, access: String?): List<Video> {
         val out = ArrayList<Video>()
         var maybeShorts = false
-        for (ch in subs.take(channels)) {
+        for (ch in channelIds) {
             // A channel's uploads playlist is its id with "UC" swapped for "UU"; "UULF" is the same
             // without Shorts (or live streams). Not every channel has the second: then sort them out after.
-            val o = runCatching { get("$API/playlistItems?part=snippet&maxResults=$perChannel&playlistId=UULF${ch.drop(2)}", null, access) }.getOrNull()
-                ?: runCatching { get("$API/playlistItems?part=snippet&maxResults=$perChannel&playlistId=UU${ch.drop(2)}", null, access) }.getOrNull()
+            val o = runCatching { get("$API/playlistItems?part=snippet&maxResults=$perChannel&playlistId=UULF${ch.drop(2)}", apiKey, access) }.getOrNull()
+                ?: runCatching { get("$API/playlistItems?part=snippet&maxResults=$perChannel&playlistId=UU${ch.drop(2)}", apiKey, access) }.getOrNull()
                     ?.also { maybeShorts = true }
                 ?: continue
             val items = o.optJSONArray("items") ?: continue
@@ -105,7 +128,7 @@ object YouTube {
             }
         }
         val all = out.distinctBy { it.id }.sortedByDescending { it.publishedAt }
-        return if (maybeShorts) withoutShorts(all, null, access) else all.filterNot { "#short" in it.title.lowercase() }
+        return if (maybeShorts) withoutShorts(all, apiKey, access) else all.filterNot { "#short" in it.title.lowercase() }
     }
 
     fun toJson(list: List<Video>): String {

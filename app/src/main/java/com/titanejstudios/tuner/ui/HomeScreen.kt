@@ -1209,10 +1209,15 @@ private fun KidsHome(vm: TunerViewModel) {
             recent.forEach { add(channelCard(vm, it, recent, vm.now, emptySet())) }
         }
     }
-    val ytCards = remember(vm.youtube.feed, vm.activeProfile.id) {
-        if (vm.youTubeAllowed) vm.youtube.feed.take(20).map { youTubeCard(vm, it) } else emptyList()
+    val ytCards = remember(vm.youtube.feed, vm.youtube.approvedFeed, vm.activeProfile) {
+        when {
+            !vm.youTubeAllowed -> emptyList()
+            vm.youTubeApprovedOnly -> vm.youtube.approvedFeed.take(20).map { youTubeCard(vm, it) }
+            else -> vm.youtube.feed.take(20).map { youTubeCard(vm, it) }
+        }
     }
-    val sections = listOf("Carry on watching" to carryOn, "New on your YouTube" to ytCards).filter { it.second.isNotEmpty() }
+    val ytKids = remember { vm.youTubeKidsPackage != null }
+    val sections = listOf("Carry on watching" to carryOn, (if (vm.youTubeApprovedOnly) "New from your YouTube channels" else "New on your YouTube") to ytCards).filter { it.second.isNotEmpty() }
     val first = remember { FocusRequester() }
     LaunchedEffect(channels.isNotEmpty(), sections.isNotEmpty()) {
         delay(80)
@@ -1226,6 +1231,10 @@ private fun KidsHome(vm: TunerViewModel) {
                 Text("Hi ${vm.activeProfile.name}! 🧸", color = Color.White, fontSize = 34.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.width(20.dp))
                 if (vm.youTubeAllowed) PillButton("▶ YouTube", { vm.navigate(Screen.YouTube) }, compact = true)
+                if (ytKids && vm.youTubeAllowed) {
+                    Spacer(Modifier.width(10.dp))
+                    PillButton("YouTube Kids", { vm.openYouTubeKids() }, compact = true)
+                }
                 Spacer(Modifier.weight(1f))
                 val left = vm.timeLeftSeconds()
                 if (left != Long.MAX_VALUE) {

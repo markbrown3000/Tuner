@@ -11,7 +11,7 @@ import android.database.sqlite.SQLiteStatement
  * scanning everything.
  */
 class Database private constructor(context: Context) :
-    SQLiteOpenHelper(context, "tuner.db", null, 3) {
+    SQLiteOpenHelper(context, "tuner.db", null, 4) {
 
     companion object {
         @Volatile
@@ -36,7 +36,7 @@ class Database private constructor(context: Context) :
         db.execSQL("CREATE INDEX channels_src ON channels(source_id, pos)")
         db.execSQL(
             "CREATE TABLE programmes (source_id TEXT NOT NULL, channel_id TEXT NOT NULL, start INTEGER NOT NULL, " +
-                "stop INTEGER NOT NULL, title TEXT, descr TEXT, category TEXT, image TEXT)"
+                "stop INTEGER NOT NULL, title TEXT, descr TEXT, category TEXT, image TEXT, extra TEXT)"
         )
         db.execSQL("CREATE INDEX prog_ch ON programmes(channel_id, start)")
         db.execSQL("CREATE INDEX prog_src ON programmes(source_id)")
@@ -52,6 +52,10 @@ class Database private constructor(context: Context) :
         if (oldVersion < 3) {
             // Programme pictures arrive with the next guide update – no need to re-download now.
             db.execSQL("ALTER TABLE programmes ADD COLUMN image TEXT")
+        }
+        if (oldVersion < 4) {
+            // Episode titles, numbers and NEW/premiere/final arrive with the next guide update.
+            db.execSQL("ALTER TABLE programmes ADD COLUMN extra TEXT")
         }
     }
 
@@ -142,7 +146,7 @@ class Database private constructor(context: Context) :
         writableDatabase.inTransaction {
             delete("programmes", "source_id = ?", arrayOf(sourceId))
             delete("xmltv_channels", "source_id = ?", arrayOf(sourceId))
-            val prog = compileStatement("INSERT INTO programmes VALUES (?,?,?,?,?,?,?,?)")
+            val prog = compileStatement("INSERT INTO programmes VALUES (?,?,?,?,?,?,?,?,?)")
             val xml = compileStatement("INSERT INTO xmltv_channels VALUES (?,?,?)")
             fill(
                 { channelId, p ->
@@ -155,6 +159,7 @@ class Database private constructor(context: Context) :
                     prog.str(6, p.desc)
                     prog.str(7, p.category)
                     prog.str(8, p.image)
+                    prog.str(9, p.extra)
                     prog.executeInsert()
                 },
                 { id, name ->
@@ -181,7 +186,7 @@ class Database private constructor(context: Context) :
         val earliest = minOf(from, catchupFrom.values.minOrNull() ?: from)
         val out = HashMap<String, ArrayList<Programme>>()
         readableDatabase.rawQuery(
-            "SELECT channel_id, start, stop, title, descr, category, image FROM programmes " +
+            "SELECT channel_id, start, stop, title, descr, category, image, extra FROM programmes " +
                 "WHERE source_id IN (${placeholders(sourceIds.size)}) AND stop > ? AND start < ? ORDER BY channel_id, start",
             (sourceIds + earliest.toString() + to.toString()).toTypedArray(),
         ).use { c ->
@@ -192,7 +197,7 @@ class Database private constructor(context: Context) :
                 val list = out.getOrPut(id) { ArrayList() }
                 val start = c.getLong(1)
                 if (list.isNotEmpty() && list.last().start == start) continue
-                list += Programme(start, stop, c.getString(3) ?: "", c.getString(4), c.getString(5), c.getString(6))
+                list += Programme(start, stop, c.getString(3) ?: "", c.getString(4), c.getString(5), c.getString(6), c.getString(7))
             }
         }
         return out
@@ -204,13 +209,13 @@ class Database private constructor(context: Context) :
         val like = "%" + query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
         val out = ArrayList<Pair<String, Programme>>()
         readableDatabase.rawQuery(
-            "SELECT channel_id, start, stop, title, descr, category, image FROM programmes " +
+            "SELECT channel_id, start, stop, title, descr, category, image, extra FROM programmes " +
                 "WHERE source_id IN (${placeholders(sourceIds.size)}) AND stop > ? AND title LIKE ? ESCAPE '\\' " +
                 "ORDER BY start LIMIT $limit",
             (sourceIds + after.toString() + like).toTypedArray(),
         ).use { c ->
             while (c.moveToNext()) {
-                out += c.getString(0) to Programme(c.getLong(1), c.getLong(2), c.getString(3) ?: "", c.getString(4), c.getString(5), c.getString(6))
+                out += c.getString(0) to Programme(c.getLong(1), c.getLong(2), c.getString(3) ?: "", c.getString(4), c.getString(5), c.getString(6), c.getString(7))
             }
         }
         return out
@@ -236,13 +241,13 @@ class Database private constructor(context: Context) :
         val args = sourceIds + from.toString() + to.toString() + (titleWords + descWords).map { like(it) } + categoryWords.map { like(it) }
         val out = ArrayList<Pair<String, Programme>>()
         readableDatabase.rawQuery(
-            "SELECT channel_id, start, stop, title, descr, category, image FROM programmes " +
+            "SELECT channel_id, start, stop, title, descr, category, image, extra FROM programmes " +
                 "WHERE source_id IN (${placeholders(sourceIds.size)}) AND start >= ? AND start < ? AND (" + words.joinToString(" OR ") + ")" + cats +
                 " ORDER BY start LIMIT $limit",
             args.toTypedArray(),
         ).use { c ->
             while (c.moveToNext()) {
-                out += c.getString(0) to Programme(c.getLong(1), c.getLong(2), c.getString(3) ?: "", c.getString(4), c.getString(5), c.getString(6))
+                out += c.getString(0) to Programme(c.getLong(1), c.getLong(2), c.getString(3) ?: "", c.getString(4), c.getString(5), c.getString(6), c.getString(7))
             }
         }
         return out

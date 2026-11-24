@@ -241,7 +241,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
 
     /** Live TV keeps playing in the preview on Channels/Guide; anything else stops it. */
     private fun afterNavigation() {
-        if (mode != null && screen !in setOf(Screen.Player, Screen.Channels, Screen.Guide, Screen.Home)) {
+        if (mode != null && screen !in setOf(Screen.Player, Screen.Channels, Screen.Guide, Screen.Home, Screen.WhatsOn)) {
             if (mode is PlayMode.Vod) saveResume(syncHome = true)
             stopPlayback()
         }
@@ -398,6 +398,31 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     val youtube = com.titanejstudios.tuner.features.YouTubeFeature(store, viewModelScope, store.activeProfileId)
     /** Grown-ups always; kids if their profile allows it. */
     val youTubeAllowed: Boolean get() = !activeProfile.kids || activeProfile.youtube
+    /** A kids' profile that only sees videos from channels a grown-up picked. */
+    val youTubeApprovedOnly: Boolean get() = activeProfile.kids && activeProfile.youtube && activeProfile.ytApprovedOnly
+
+    /** Updates this profile's YouTube rows: approved channels for kids that have them, else subscriptions. */
+    fun refreshYouTube(force: Boolean = false) {
+        if (!youTubeAllowed) return
+        if (youTubeApprovedOnly) youtube.loadApproved(activeProfile.ytChannelIds, force) else youtube.loadFeed(force)
+    }
+
+    /** The real YouTube Kids app, if it's on this device (it keeps its own kids' profiles and parent settings). */
+    val youTubeKidsPackage: String?
+        get() {
+            val pm = app.packageManager
+            return listOf("com.google.android.youtube.tvkids", "com.google.android.apps.youtube.kids")
+                .firstOrNull { pm.getLeanbackLaunchIntentForPackage(it) != null || pm.getLaunchIntentForPackage(it) != null }
+        }
+
+    fun openYouTubeKids() {
+        val pkg = youTubeKidsPackage ?: run {
+            showNotice("YouTube Kids isn't installed on this device")
+            return
+        }
+        if (mode is PlayMode.Vod) saveResume(syncHome = true)
+        if (!InstalledApps.launch(app, pkg)) showNotice("Couldn't open YouTube Kids")
+    }
     /** A YouTube video is actually playing (kids' TV time counts it). */
     private var ytPlaying = false
     fun youTubePlaying(on: Boolean) {
@@ -474,11 +499,22 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     var frameRateMatch by mutableStateOf(false); private set
 
     // What's on
-    var whatsOnSlot by mutableStateOf(0)
+    /** Days from today (0–6). */
+    var whatsOnDay by mutableStateOf(0); private set
+    /** Minutes after midnight, or null for "now" (today only). */
+    var whatsOnMinute by mutableStateOf<Int?>(null); private set
     var whatsOnGenre by mutableStateOf<String?>(null)
     var whatsOnFavouritesOnly by mutableStateOf(false)
-    var whatsOnResults by mutableStateOf<List<HomeFeed.Pick>?>(null); private set
+    /** Hide shopping, adult, radio and +1 channels. */
+    var whatsOnTidy by mutableStateOf(store.whatsOnTidy); private set
+    /** A small live picture of the highlighted channel. */
+    var whatsOnPreview by mutableStateOf(store.whatsOnPreview); private set
+    var whatsOnResult by mutableStateOf<WhatsOn.Result?>(null); private set
     private var whatsOnJob: Job? = null
+    /** Film details from TMDB for What's On (title → info, or null when not found). */
+    val filmLookups = androidx.compose.runtime.mutableStateMapOf<String, Tmdb.Info?>()
+    private val filmLookupsAsked = HashSet<String>()
+    private var whatsOnPreviewJob: Job? = null
 
     // Watch stats (seconds not yet saved, flushed every minute)
     var statsSummary by mutableStateOf<WatchStats.Summary?>(null); private set
@@ -1298,7 +1334,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         startLive(channel)
     }
 
-    private fun startLive(channel: Channel, force: Boolean = false) {
+    private fun startLive(channel: Channel, force: Boolean = false, preview: Boolean = false) {
         if (vpnBlocks()) return
         if (zapPreview != null) {
             zapJob?.cancel()
@@ -1321,8 +1357,11 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
             alternates = StreamAlternates.forChannel(channel, altIndex).filter { it != channel.url },
             key = channel.id,
         )
-        addRecent(channel.id)
-        store.setLastChannel(activeProfile.id, channel.id)
+        // A preview isn't "watching" yet: no recents or last channel until you choose it.
+        if (!preview) {
+            addRecent(channel.id)
+            store.setLastChannel(activeProfile.id, channel.id)
+        }
         scheduleStandby(channel)
         val p = nowNext(channel.id, System.currentTimeMillis()).first
         lastAnnouncedProgramme = p?.start ?: 0L
@@ -1492,7 +1531,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
             cloud.start()
             cloud.syncSoon(4_000L)
         }
-        if (youTubeAllowed) youtube.loadFeed()
+        refreshYouTube()
         if (extrasStarted) refreshPlex()
         AppState.foreground = true
         loadApps()
@@ -1732,7 +1771,6 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
             activeProfile = p
             store.activeProfileId = p.id
             youtube.useProfile(p.id)
-            if (!p.kids || p.youtube) youtube.loadFeed()
             favourites = store.favourites(p.id)
             favouriteSet = favourites.toSet()
             taste = Taste.fromJson(store.taste(p.id))
@@ -1744,6 +1782,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
             unlocked = false
             timesUp = false
             stopPlayback()
+            refreshYouTube()
             recomputeVisible()
             publishFavouritesRow()
             movies = null
@@ -1775,12 +1814,19 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         if (p.id == activeProfile.id) {
             activeProfile = p
             recomputeVisible()
+            refreshYouTube()
         }
         back()
     }
 
+    /** Any profile can go (Everyone too), as long as a grown-up profile is left. */
+    fun canDeleteProfile(p: Profile): Boolean = profiles.any { it.id != p.id && !it.kids }
+
     fun deleteProfile(p: Profile) {
-        if (p.id == Store.MAIN_PROFILE) return
+        if (!canDeleteProfile(p)) {
+            showNotice("Keep at least one grown-up profile")
+            return
+        }
         profiles = profiles.filter { it.id != p.id }
         store.profiles = profiles
         if (activeProfile.id == p.id) switchProfile(profiles.first())
@@ -3199,26 +3245,131 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
 
     // ---------------- What's on ----------------
 
-    val whatsOnSlots: List<WhatsOn.Slot> get() = WhatsOn.slots(now)
-
     fun openWhatsOn(genre: String? = null) {
         whatsOnGenre = genre
         navigate(Screen.WhatsOn)
         updateWhatsOn()
     }
 
+    /** The time What's On is showing. */
+    val whatsOnAt: Long
+        get() = whatsOnMinute?.let { WhatsOn.timeOf(whatsOnDay, it, now) } ?: now
+
+    fun setWhatsOnDay(days: Int) {
+        whatsOnDay = days.coerceIn(0, 6)
+        // Another day: start at 8pm. Today: now.
+        whatsOnMinute = if (whatsOnDay == 0) null else (whatsOnMinute ?: 20 * 60)
+        updateWhatsOn()
+    }
+
+    fun whatsOnNow() {
+        whatsOnDay = 0
+        whatsOnMinute = null
+        updateWhatsOn()
+    }
+
+    fun setWhatsOnTime(minuteOfDay: Int) {
+        whatsOnMinute = minuteOfDay
+        updateWhatsOn()
+    }
+
+    /** ◀ ▶ on the time: half an hour at a time, across midnight into the next or previous day. */
+    fun stepWhatsOnTime(halfHours: Int) {
+        val t = System.currentTimeMillis()
+        val nowMinute = ((t - WhatsOn.timeOf(0, 0, t)) / 60_000L).toInt()
+        val current = whatsOnMinute ?: (nowMinute / 30 * 30)
+        var day = whatsOnDay
+        var m = current + halfHours * 30
+        while (m < 0) { m += 24 * 60; day-- }
+        while (m >= 24 * 60) { m -= 24 * 60; day++ }
+        if (day < 0 || (day == 0 && m + 30 <= nowMinute)) {
+            whatsOnNow()
+            return
+        }
+        if (day > 6) return
+        whatsOnDay = day
+        whatsOnMinute = m
+        updateWhatsOn()
+    }
+
+    fun toggleWhatsOnTidy() {
+        whatsOnTidy = !whatsOnTidy
+        store.whatsOnTidy = whatsOnTidy
+        updateWhatsOn()
+    }
+
+    fun toggleWhatsOnPreview() {
+        whatsOnPreview = !whatsOnPreview
+        store.whatsOnPreview = whatsOnPreview
+        if (!whatsOnPreview) {
+            whatsOnPreviewJob?.cancel()
+            if (screen == Screen.WhatsOn && mode is PlayMode.Live) stopPlayback()
+        }
+    }
+
     fun updateWhatsOn() {
-        val slots = WhatsOn.slots(System.currentTimeMillis())
-        val slot = slots.getOrNull(whatsOnSlot) ?: slots.first()
+        val t = System.currentTimeMillis()
+        val isNow = whatsOnMinute == null
+        val at = if (isNow) t else WhatsOn.timeOf(whatsOnDay, whatsOnMinute ?: 0, t)
         val chans = allowedAll
         val guide = epg
         val favs = favouriteSet
         val genre = whatsOnGenre
         val favOnly = whatsOnFavouritesOnly
+        val tidy = whatsOnTidy
+        // A copy: viewing keeps updating the real one while this runs.
+        val tasteNow = Taste.fromJson(taste.toJson())
+        val teams = football.teams
         whatsOnJob?.cancel()
         whatsOnJob = viewModelScope.launch {
-            whatsOnResults = withContext(Dispatchers.Default) { WhatsOn.list(chans, guide, slot.at, genre, favs, favOnly) }
+            val r = withContext(Dispatchers.Default) { WhatsOn.build(chans, guide, at, isNow, genre, favs, favOnly, tidy, tasteNow, teams) }
+            whatsOnResult = r
+            lookUpFilms((r.soon + r.main).filter { Genres.of(it.programme.category, it.programme.title, it.channel.group) == "Film" }.take(24).map { it.programme.title })
         }
+    }
+
+    /** Posters, ratings and running times for the films on What's On (TMDB, if there's a key). */
+    fun lookUpFilms(titles: List<String>) {
+        val key = tmdbKey ?: return
+        val todo = titles.map { it.trim() }.filter { it.isNotEmpty() && filmLookupsAsked.add(it) }
+        if (todo.isEmpty()) return
+        viewModelScope.launch {
+            for (title in todo) {
+                val info = withContext(Dispatchers.IO) { runCatching { Tmdb.lookup(key, title, false) }.getOrNull() }
+                filmLookups[title] = info
+            }
+        }
+    }
+
+    /**
+     * The highlighted show on What's On: after a moment on it, its channel plays in the corner
+     * (if it's on now, and the preview is turned on).
+     */
+    fun whatsOnFocused(c: Channel, p: Programme) {
+        whatsOnPreviewJob?.cancel()
+        if (!whatsOnPreview || screen != Screen.WhatsOn) return
+        val t = System.currentTimeMillis()
+        if (p.start > t || p.stop <= t) return
+        if (!isAllowed(c) || timeLeftSeconds() <= 0 || isBedtimeNow()) return
+        val current = mode
+        if (current is PlayMode.Live && current.channel.id == c.id) return
+        if (current != null && current !is PlayMode.Live) return
+        whatsOnPreviewJob = viewModelScope.launch {
+            delay(1_200)
+            if (screen == Screen.WhatsOn) startLive(c, preview = true)
+        }
+    }
+
+    /** OK on a show that's on now: full screen (straight away if it's already in the preview). */
+    fun watchFromWhatsOn(c: Channel, list: List<Channel>) {
+        whatsOnPreviewJob?.cancel()
+        val current = mode
+        if (current is PlayMode.Live && current.channel.id == c.id && isAllowed(c)) {
+            zapList = list.ifEmpty { listOf(c) }
+            addRecent(c.id)
+            store.setLastChannel(activeProfile.id, c.id)
+            navigate(Screen.Player)
+        } else play(c, list)
     }
 
     // ---------------- TV's Live tab ----------------

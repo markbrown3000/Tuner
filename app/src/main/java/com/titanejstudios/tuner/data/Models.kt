@@ -33,7 +33,73 @@ data class Programme(
     val category: String? = null,
     /** XMLTV <icon src="…"> – a picture for the programme, if the guide has one. */
     val image: String? = null,
-)
+    /** Extra guide details: [ProgrammeExtra] packs the episode title, number and NEW/premiere/final. */
+    val extra: String? = null,
+) {
+    /** "The One Where…" (XMLTV <sub-title>). */
+    val episodeTitle: String? get() = ProgrammeExtra.part(extra, 1)
+
+    /** "S2 E5" – from XMLTV <episode-num>, or the description ("(S2, ep 5)"). */
+    val episodeLabel: String?
+        get() = ProgrammeExtra.part(extra, 2) ?: ProgrammeExtra.episodeFromText(desc)
+
+    /** First showing of a new episode. */
+    val isNew: Boolean
+        get() = 'N' in ProgrammeExtra.flags(extra) || ProgrammeExtra.newText.containsMatchIn(title) || ProgrammeExtra.newDesc.containsMatchIn(desc.orEmpty())
+
+    val isPremiere: Boolean
+        get() = 'P' in ProgrammeExtra.flags(extra) || ProgrammeExtra.premiereText.containsMatchIn(title + " " + desc.orEmpty().take(160))
+
+    /** Last in the series (or the last chance to see it). */
+    val isFinal: Boolean
+        get() = 'L' in ProgrammeExtra.flags(extra) || ProgrammeExtra.finalText.containsMatchIn(title + " " + desc.orEmpty().take(200))
+}
+
+/** Packs extra guide details into one stored text: "flags␟episode title␟S2 E5". */
+object ProgrammeExtra {
+    private const val SEP = '\u001F'
+
+    fun pack(flags: String, episodeTitle: String?, episode: String?): String? {
+        if (flags.isEmpty() && episodeTitle.isNullOrBlank() && episode.isNullOrBlank()) return null
+        return flags + SEP + episodeTitle.orEmpty().trim() + SEP + episode.orEmpty().trim()
+    }
+
+    fun flags(extra: String?): String = extra?.substringBefore(SEP).orEmpty()
+
+    fun part(extra: String?, i: Int): String? = extra?.split(SEP)?.getOrNull(i)?.takeIf { it.isNotBlank() }
+
+    /** XMLTV "xmltv_ns" numbering is zero-based: "1.4.0/1" is series 2, episode 5. */
+    fun episodeFromXmltv(system: String?, value: String?): String? {
+        val v = value?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        if (system.equals("xmltv_ns", ignoreCase = true)) {
+            val parts = v.split('.')
+            val s = parts.getOrNull(0)?.substringBefore('/')?.trim()?.toIntOrNull()?.plus(1)
+            val e = parts.getOrNull(1)?.substringBefore('/')?.trim()?.toIntOrNull()?.plus(1)
+            return when {
+                s != null && e != null -> "S$s E$e"
+                e != null -> "Ep $e"
+                else -> null
+            }
+        }
+        if (system.equals("onscreen", ignoreCase = true) || system == null) return episodeFromText(v)
+        return null
+    }
+
+    private val seriesEp = Regex("(?i)\\b(?:S|Series\\s*)(\\d{1,3})\\s*[,.]?\\s*(?:E|Ep\\.?|Episode\\s*)\\s*(\\d{1,4})\\b")
+    private val epOnly = Regex("(?i)\\((?:Ep\\.?|Episode)\\s*(\\d{1,4})(?:\\s*/\\s*\\d+)?\\)")
+
+    fun episodeFromText(text: String?): String? {
+        val t = text ?: return null
+        seriesEp.find(t)?.let { return "S${it.groupValues[1].toInt()} E${it.groupValues[2].toInt()}" }
+        epOnly.find(t)?.let { return "Ep ${it.groupValues[1].toInt()}" }
+        return null
+    }
+
+    val newText = Regex("(?i)^\\s*new\\s*[:!-]|\\[new\\]|\\(new\\)")
+    val newDesc = Regex("(?i)^\\s*(new(\\s+series|\\s+episode)?\\s*[.:!]|\\(new\\)|\\[new\\])")
+    val premiereText = Regex("(?i)\\b(premiere|world premiere|tv premiere|first showing)\\b")
+    val finalText = Regex("(?i)\\b(series finale|season finale|final episode|last in (the )?series|last episode)\\b")
+}
 
 /** "Record every episode": any programme with this title on this channel gets recorded. */
 data class SeriesLink(
@@ -137,7 +203,13 @@ data class Profile(
     val icon: String = "",
     /** For kids profiles: YouTube allowed (strict SafeSearch, counts towards their TV time). */
     val youtube: Boolean = true,
-)
+    /** For kids profiles: only videos from these YouTube channels (no searching). */
+    val ytApprovedOnly: Boolean = false,
+    /** The approved channels, as "UC…id\tName". */
+    val ytChannels: List<String> = emptyList(),
+) {
+    val ytChannelIds: List<String> get() = ytChannels.map { it.substringBefore('\t') }
+}
 
 object RecStatus {
     const val SCHEDULED = "scheduled"

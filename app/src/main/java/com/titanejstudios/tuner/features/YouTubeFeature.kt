@@ -42,6 +42,16 @@ class YouTubeFeature(private val store: Store, private val scope: CoroutineScope
     var feed by mutableStateOf(YouTube.fromJson(store.ytFeedOf(pid))); private set
     var loadingFeed by mutableStateOf(false); private set
 
+    /** Kids' approved channels: their newest videos. */
+    var approvedFeed by mutableStateOf<List<YouTube.Video>>(emptyList()); private set
+    var loadingApproved by mutableStateOf(false); private set
+    private var approvedFor: List<String> = emptyList()
+    private var approvedAt = 0L
+    /** Channel search, for a grown-up choosing a kids' profile's channels. */
+    var channelResults by mutableStateOf<List<YouTube.Channel>>(emptyList()); private set
+    var searchingChannels by mutableStateOf(false); private set
+    var channelStatus by mutableStateOf<String?>(null); private set
+
     private var access: GoogleDrive.Tokens? = null
     private var signInJob: Job? = null
 
@@ -133,6 +143,61 @@ class YouTubeFeature(private val store: Store, private val scope: CoroutineScope
         val t = google.refresh(refresh)
         access = t
         return t.access
+    }
+
+    // ---------------- Kids: approved channels ----------------
+
+    fun searchChannels(q: String) {
+        val text = q.trim()
+        if (text.length < 2) return
+        if (!canSearch) {
+            channelStatus = "Searching needs the YouTube key (see README › YouTube)"
+            return
+        }
+        searchingChannels = true
+        channelStatus = null
+        scope.launch {
+            val r = withContext(Dispatchers.IO) {
+                runCatching { YouTube.searchChannels(text, apiKey, if (apiKey == null) runCatching { accessToken() }.getOrNull() else null) }
+            }
+            searchingChannels = false
+            r.onSuccess {
+                channelResults = it
+                if (it.isEmpty()) channelStatus = "No channels found for \"$text\""
+            }.onFailure { channelStatus = it.message ?: "Couldn't search YouTube" }
+        }
+    }
+
+    fun clearChannelSearch() {
+        channelResults = emptyList()
+        channelStatus = null
+    }
+
+    /** The newest videos from [channelIds] (every hour, or now when [force] or the list changed). */
+    fun loadApproved(channelIds: List<String>, force: Boolean = false) {
+        if (channelIds.isEmpty()) {
+            approvedFeed = emptyList()
+            approvedFor = emptyList()
+            return
+        }
+        if (loadingApproved) return
+        if (!force && channelIds == approvedFor && approvedFeed.isNotEmpty() && System.currentTimeMillis() - approvedAt < 3_600_000L) return
+        if (channelIds != approvedFor) approvedFeed = emptyList()
+        loadingApproved = true
+        scope.launch {
+            val r = withContext(Dispatchers.IO) {
+                runCatching {
+                    val token = if (apiKey == null) runCatching { accessToken() }.getOrNull() else null
+                    YouTube.uploads(channelIds.take(40), 8, apiKey, token)
+                }
+            }
+            loadingApproved = false
+            r.onSuccess {
+                approvedFeed = it
+                approvedFor = channelIds
+                approvedAt = System.currentTimeMillis()
+            }.onFailure { AppLog.warn("Kids' YouTube channels failed", it) }
+        }
     }
 
     // ---------------- Search & subscriptions ----------------

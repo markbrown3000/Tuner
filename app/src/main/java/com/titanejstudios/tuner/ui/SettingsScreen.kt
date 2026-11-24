@@ -850,7 +850,7 @@ fun SettingsScreen(vm: TunerViewModel) {
             items = buildList {
                 if (p.id != vm.activeProfile.id) add(MenuItem("Switch to ${p.name}") { vm.switchProfile(p) })
                 add(MenuItem("Edit") { vm.startEditProfile(p) })
-                if (p.id != Store.MAIN_PROFILE) add(MenuItem("Delete") { vm.deleteProfile(p) })
+                if (vm.canDeleteProfile(p)) add(MenuItem("Delete", "its favourites and history go too") { vm.deleteProfile(p) })
             },
             onDismiss = { profileMenu = null },
         )

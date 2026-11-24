@@ -354,11 +354,15 @@ fun YouTubeScreen(vm: TunerViewModel) {
             vm.back()
             return@LaunchedEffect
         }
-        yt.loadFeed()
+        vm.refreshYouTube()
         delay(80)
         runCatching { first.requestFocus() }
     }
     val narrow = narrowScreen()
+    if (vm.youTubeApprovedOnly) {
+        KidsApprovedYouTube(vm, first, narrow)
+        return
+    }
     val kids = vm.activeProfile.kids
     val code = yt.code
 
@@ -437,6 +441,120 @@ fun YouTubeScreen(vm: TunerViewModel) {
             typing = false
             yt.search(it, kids)
         }
+    }
+}
+
+/**
+ * A kids' profile that only gets the channels a grown-up picked: their newest videos,
+ * a button per channel, and no searching.
+ */
+@Composable
+private fun KidsApprovedYouTube(vm: TunerViewModel, first: FocusRequester, narrow: Boolean) {
+    val yt = vm.youtube
+    val channels = vm.activeProfile.ytChannels.map { it.substringBefore('\t') to it.substringAfter('\t', "") }
+    var only by remember { mutableStateOf<String?>(null) }
+    val videos = yt.approvedFeed.filter { v -> only == null || v.channel == only }
+    LazyVerticalGrid(
+        columns = GridCells.Adaptive(if (narrow) 160.dp else 250.dp),
+        modifier = Modifier.fillMaxSize().skyBackground(),
+        contentPadding = PaddingValues(start = if (narrow) 10.dp else 56.dp, end = if (narrow) 10.dp else 56.dp, bottom = 24.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        item(span = { GridItemSpan(maxLineSpan) }) {
+            Column(Modifier.padding(top = if (narrow) 12.dp else 28.dp)) {
+                Text("▶ YouTube", fontSize = if (narrow) 26.sp else 32.sp, fontWeight = FontWeight.Bold, color = TunerColors.TextPrimary)
+                Spacer(Modifier.height(8.dp))
+                androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    item(key = "all") { PillButton("All", { only = null }, Modifier.focusRequester(first), selected = only == null, compact = true) }
+                    items(channels.size, key = { "c" + channels[it].first }) { i ->
+                        val name = channels[i].second.ifBlank { "Channel ${i + 1}" }
+                        PillButton(name, { only = name }, selected = only == name, compact = true)
+                    }
+                    if (vm.youTubeKidsPackage != null) item(key = "ytkids") { PillButton("YouTube Kids app", { vm.openYouTubeKids() }, compact = true) }
+                }
+            }
+        }
+        when {
+            channels.isEmpty() -> item(span = { GridItemSpan(maxLineSpan) }) {
+                Text("No channels yet – ask a grown-up to pick some in Settings › Profiles.", color = TunerColors.TextSecondary, fontSize = 16.sp)
+            }
+            videos.isEmpty() && yt.loadingApproved -> item(span = { GridItemSpan(maxLineSpan) }) { Header("Loading…", narrow) }
+            videos.isEmpty() -> item(span = { GridItemSpan(maxLineSpan) }) {
+                Text("No videos yet.", color = TunerColors.TextSecondary, fontSize = 16.sp)
+            }
+            else -> items(videos.size, key = { "v" + videos[it].id }) { i -> VideoCard(vm, videos[i], narrow) }
+        }
+    }
+}
+
+/**
+ * For a grown-up editing a kids' profile: find YouTube channels and tick the ones allowed.
+ * [chosen] are "UC…id\tName" entries.
+ */
+@Composable
+fun ApprovedChannelsPicker(vm: TunerViewModel, chosen: List<String>, onChange: (List<String>) -> Unit, onDone: () -> Unit) {
+    val yt = vm.youtube
+    var typing by remember { mutableStateOf(false) }
+    var query by remember { mutableStateOf("") }
+    val first = remember { FocusRequester() }
+    LaunchedEffect(Unit) {
+        yt.clearChannelSearch()
+        delay(80)
+        runCatching { first.requestFocus() }
+    }
+    androidx.activity.compose.BackHandler { onDone() }
+    val ids = chosen.map { it.substringBefore('\t') }.toSet()
+    val narrow = narrowScreen()
+    androidx.compose.foundation.lazy.LazyColumn(
+        Modifier.fillMaxSize().skyBackground().padding(horizontal = if (narrow) 12.dp else 56.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        contentPadding = PaddingValues(vertical = 20.dp),
+    ) {
+        item {
+            Text("YouTube channels they can watch", fontSize = if (narrow) 24.sp else 30.sp, fontWeight = FontWeight.Bold, color = TunerColors.TextPrimary)
+            Spacer(Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                PillButton(if (query.isBlank()) "🔍 Find a channel" else "🔍 $query", { typing = true }, Modifier.focusRequester(first), compact = true)
+                PillButton("✓ Done", { onDone() }, compact = true)
+            }
+            yt.channelStatus?.let { Text(it, color = TunerColors.Gold, fontSize = 14.sp, modifier = Modifier.padding(top = 6.dp)) }
+            if (yt.searchingChannels) Text("Searching…", color = TunerColors.TextSecondary, fontSize = 14.sp, modifier = Modifier.padding(top = 6.dp))
+        }
+        if (chosen.isNotEmpty()) {
+            item { Header("Allowed (${chosen.size}) – OK removes", narrow) }
+            items(chosen.size, key = { "a" + chosen[it] }) { i ->
+                val entry = chosen[i]
+                SettingRow(entry.substringAfter('\t', entry), detail = "✓ Allowed", onClick = { onChange(chosen - entry) })
+            }
+        }
+        if (yt.channelResults.isNotEmpty()) {
+            item { Header("Found – OK allows", narrow) }
+            items(yt.channelResults.size, key = { "r" + yt.channelResults[it].id }) { i ->
+                val c = yt.channelResults[i]
+                val on = c.id in ids
+                SettingRow(
+                    c.title,
+                    detail = if (on) "✓ Allowed" else "Allow",
+                    onClick = {
+                        onChange(if (on) chosen.filterNot { it.startsWith(c.id + "\t") || it == c.id } else chosen + (c.id + "\t" + c.title.replace('\t', ' ')))
+                    },
+                )
+            }
+        }
+    }
+    if (typing) {
+        TextInputDialog(
+            title = "Find a YouTube channel",
+            initial = query,
+            label = "Channel name",
+            onDone = {
+                typing = false
+                query = it
+                yt.searchChannels(it)
+            },
+            onDismiss = { typing = false },
+        )
     }
 }
 

@@ -54,6 +54,134 @@ object WhatsOn {
         return out
     }
 
+    /** One programme on the What's On list. */
+    class Entry(
+        val channel: Channel,
+        val programme: Programme,
+        /** What follows it on that channel. */
+        val next: Programme?,
+        /** "Also on ITV1 +1 at 22:00". */
+        val alsoOn: String?,
+        /** Why it's near the top ("You watch a lot of drama"). */
+        val reason: String?,
+        val yourTeam: Boolean,
+        val favourite: Boolean,
+    )
+
+    class Result(
+        /** Starting in the next half hour (only when looking at "now"). */
+        val soon: List<Entry>,
+        val main: List<Entry>,
+    )
+
+    private val clutterName = Regex(
+        "(?i)(\\bqvc\\b|ideal world|jewellery|\\bgems\\b|\\btjc\\b|shop|teleshopping|\\bxxx\\b|adult|babestation|\\bradio\\b|\\bfm\\b|18\\s*\\+|\\bpay ?per ?view\\b|\\bppv\\b)"
+    )
+    private val plusOne = Regex("(?i)\\s*\\+\\s*1(?![0-9])")
+
+    /** Shopping, adult and radio channels – hidden from What's On unless you ask for everything. */
+    fun isClutter(c: Channel): Boolean = clutterName.containsMatchIn(c.name) || clutterName.containsMatchIn(c.group)
+
+    fun isPlusOne(c: Channel): Boolean = plusOne.containsMatchIn(c.name)
+
+    /** "ITV1 +1 HD" → the key of "ITV1". */
+    private fun baseKey(c: Channel): String = ChannelMerge.key(c.name.replace(plusOne, " "))
+
+    /**
+     * What's on at [at] (with "starting soon" when [at] is now), in "for you" order: shows you
+     * follow or like first, then favourites, then by how well each suits your viewing.
+     */
+    fun build(
+        channels: List<Channel>,
+        epg: Map<String, List<Programme>>,
+        at: Long,
+        isNow: Boolean,
+        genre: String?,
+        favourites: Set<String>,
+        favouritesOnly: Boolean,
+        tidy: Boolean,
+        taste: Taste,
+        teams: Set<String>,
+        max: Int = 300,
+    ): Result {
+        val seen = HashSet<String>()
+        // Where each programme is shown on a +1 channel (base channel key + title → +1 channel).
+        val plusOnes = HashMap<String, Pair<Channel, Programme>>()
+        if (tidy) {
+            for (c in channels) {
+                if (!isPlusOne(c)) continue
+                val list = epg[c.id] ?: continue
+                for (p in list) if (p.stop > at && p.start < at + 6 * 3_600_000L) plusOnes.putIfAbsent(baseKey(c) + "|" + p.title.lowercase(Locale.ROOT), c to p)
+            }
+        }
+        val baseKeys = if (tidy) channels.filter { !isPlusOne(it) }.map { ChannelMerge.key(it.name) }.toSet() else emptySet()
+
+        fun entry(c: Channel, p: Programme): Entry? {
+            if (p.title.isBlank() || p.title.equals(c.name, ignoreCase = true)) return null
+            val kind = Genres.of(p.category, p.title, c.group)
+            if (genre != null && kind != genre) return null
+            if (!seen.add(p.title.lowercase(Locale.ROOT) + "|" + p.start)) return null
+            val list = epg[c.id]
+            val next = list?.firstOrNull { it.start >= p.stop }
+            val also = plusOnes[ChannelMerge.key(c.name) + "|" + p.title.lowercase(Locale.ROOT)]
+                ?.takeIf { it.second.start > p.start }
+                ?.let { (pc, pp) -> "Also on ${pc.name} at ${hhmm(pp.start)}" }
+            val team = teams.any { SportFollow.mentions(p.title, it) }
+            return Entry(c, p, next, also, null, team, c.id in favourites)
+        }
+
+        val soon = ArrayList<Entry>()
+        val main = ArrayList<Pair<Entry, Double>>()
+        for (c in channels) {
+            if (favouritesOnly && c.id !in favourites) continue
+            if (tidy && isClutter(c)) continue
+            // A +1 channel's programmes show as "Also on … +1" on the main channel instead.
+            if (tidy && isPlusOne(c) && baseKey(c) in baseKeys) continue
+            val list = epg[c.id] ?: continue
+            val p = list.firstOrNull { it.start <= at && it.stop > at }
+            if (p != null) {
+                entry(c, p)?.let { e ->
+                    val (fit, why) = taste.score(p.title, Genres.of(p.category, p.title, c.group), at)
+                    var score = fit
+                    if (e.yourTeam) score += 20.0
+                    if (e.favourite) score += 3.0
+                    if (p.isNew || p.isPremiere) score += 1.5
+                    if (Sports.classify(p) != null && Sports.looksLive(p)) score += 1.0
+                    main += Entry(e.channel, e.programme, e.next, e.alsoOn, why, e.yourTeam, e.favourite) to score
+                }
+            }
+            if (isNow && soon.size < 60) {
+                val up = list.firstOrNull { it.start > at && it.start <= at + 30 * 60_000L }
+                if (up != null) entry(c, up)?.let { soon += it }
+            }
+            if (main.size >= max) break
+        }
+        // Stable: equal scores keep the channel order.
+        val ordered = main.sortedByDescending { it.second }.map { it.first }
+        val soonOrdered = soon.sortedWith(compareByDescending<Entry> { it.yourTeam }.thenByDescending { it.favourite }.thenBy { it.programme.start })
+        return Result(soonOrdered.take(40), ordered)
+    }
+
+    private fun hhmm(t: Long): String = java.text.SimpleDateFormat("HH:mm", Locale.UK).format(java.util.Date(t))
+
+    /** Midnight [days] from today, plus [minuteOfDay]. */
+    fun timeOf(days: Int, minuteOfDay: Int, now: Long): Long {
+        val cal = Calendar.getInstance().apply { timeInMillis = now }
+        cal.add(Calendar.DAY_OF_YEAR, days)
+        cal.set(Calendar.HOUR_OF_DAY, 0)
+        cal.set(Calendar.MINUTE, 0)
+        cal.set(Calendar.SECOND, 0)
+        cal.set(Calendar.MILLISECOND, 0)
+        return cal.timeInMillis + minuteOfDay * 60_000L
+    }
+
+    /** "Today", "Tomorrow", "Thu 27". */
+    fun dayName(days: Int, now: Long): String = when (days) {
+        0 -> "Today"
+        1 -> "Tomorrow"
+        else -> java.text.SimpleDateFormat("EEE d", Locale.UK).format(java.util.Date(timeOf(days, 12 * 60, now)))
+    }
+
     fun list(
         channels: List<Channel>,
         epg: Map<String, List<Programme>>,

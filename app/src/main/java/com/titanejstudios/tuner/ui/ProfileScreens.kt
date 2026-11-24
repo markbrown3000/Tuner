@@ -109,8 +109,11 @@ fun ProfileEditScreen(vm: TunerViewModel) {
     var colour by remember { mutableIntStateOf(existing?.colour ?: -1) }
     var icon by remember { mutableStateOf(existing?.icon ?: "") }
     var youtube by remember { mutableStateOf(existing?.youtube ?: true) }
+    var ytOnly by remember { mutableStateOf(existing?.ytApprovedOnly ?: false) }
+    var ytChannels by remember { mutableStateOf(existing?.ytChannels ?: emptyList()) }
+    var pickingChannels by remember { mutableStateOf(false) }
     val first = remember { FocusRequester() }
-    LaunchedEffect(Unit) {
+    LaunchedEffect(pickingChannels) {
         delay(60)
         runCatching { first.requestFocus() }
     }
@@ -126,8 +129,15 @@ fun ProfileEditScreen(vm: TunerViewModel) {
                 colour = colour,
                 icon = icon,
                 youtube = youtube,
+                ytApprovedOnly = youtube && ytOnly,
+                ytChannels = ytChannels,
             )
         )
+    }
+
+    if (pickingChannels) {
+        com.titanejstudios.tuner.ui.ApprovedChannelsPicker(vm, ytChannels, onChange = { ytChannels = it }, onDone = { pickingChannels = false })
+        return
     }
 
     Column(Modifier.fillMaxSize().skyBackground().padding(screenPadding(64.dp, 24.dp))) {
@@ -138,7 +148,7 @@ fun ProfileEditScreen(vm: TunerViewModel) {
             PillButton("✓ Save", { save() }, compact = true)
             Spacer(Modifier.width(10.dp))
             PillButton("Cancel", { vm.back() }, compact = true)
-            if (existing != null && existing.id != Store.MAIN_PROFILE) {
+            if (existing != null && vm.canDeleteProfile(existing)) {
                 Spacer(Modifier.width(10.dp))
                 PillButton("Delete profile", {
                     vm.deleteProfile(existing)
@@ -207,10 +217,18 @@ fun ProfileEditScreen(vm: TunerViewModel) {
                 }
                 item {
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text("YouTube – strict SafeSearch, no Shorts, and it counts towards their TV time", color = TunerColors.TextSecondary, fontSize = 16.sp)
+                        Text("YouTube – no Shorts, and it counts towards their TV time", color = TunerColors.TextSecondary, fontSize = 16.sp)
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            PillButton("Allowed", { youtube = true }, selected = youtube, compact = true)
+                            PillButton("Only channels I pick", { youtube = true; ytOnly = true }, selected = youtube && ytOnly, compact = true)
+                            PillButton("Search (strict SafeSearch)", { youtube = true; ytOnly = false }, selected = youtube && !ytOnly, compact = true)
                             PillButton("Off", { youtube = false }, selected = !youtube, compact = true)
+                        }
+                        if (youtube && ytOnly) {
+                            PillButton(
+                                if (ytChannels.isEmpty()) "Choose their channels…" else "Their channels (${ytChannels.size})…",
+                                { pickingChannels = true },
+                                compact = true,
+                            )
                         }
                     }
                 }

@@ -225,6 +225,8 @@ class Store(context: Context) {
                     colour = o.optInt("colour", -1),
                     icon = o.optString("icon"),
                     youtube = o.optBoolean("yt", true),
+                    ytApprovedOnly = o.optBoolean("yt_only"),
+                    ytChannels = o.optJSONArray("yt_ch")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList(),
                 )
             }
             list.ifEmpty { listOf(Profile(MAIN_PROFILE, "Everyone")) }
@@ -238,6 +240,7 @@ class Store(context: Context) {
                     JSONObject().put("id", it.id).put("name", it.name).put("kids", it.kids)
                         .put("groups", JSONArray(it.allowedGroups.toList())).put("limit", it.dailyLimitMinutes)
                         .put("bedtime", it.bedtimeMinutes).put("colour", it.colour).put("icon", it.icon).put("yt", it.youtube)
+                        .put("yt_only", it.ytApprovedOnly).put("yt_ch", JSONArray(it.ytChannels))
                 )
             }
             prefs.edit().putString("profiles", arr.toString()).apply()
@@ -467,6 +470,12 @@ class Store(context: Context) {
     var footballKey: String?
         get() = prefs.getString("football_key", null)
         set(value) = prefs.edit().putString("football_key", value).apply()
+    var whatsOnTidy: Boolean
+        get() = prefs.getBoolean("whats_on_tidy", true)
+        set(value) = prefs.edit().putBoolean("whats_on_tidy", value).apply()
+    var whatsOnPreview: Boolean
+        get() = prefs.getBoolean("whats_on_preview", true)
+        set(value) = prefs.edit().putBoolean("whats_on_preview", value).apply()
     var footballTeams: Set<String>
         get() = getList("football_teams").toSet()
         set(value) = putList("football_teams", value)
