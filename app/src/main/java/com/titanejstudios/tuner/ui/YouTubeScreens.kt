@@ -77,10 +77,11 @@ fun YouTubePlayerScreen(vm: TunerViewModel) {
         return
     }
     val context = LocalContext.current
-    var player by remember { mutableStateOf<YouTubePlayer?>(null) }
-    var playing by remember { mutableStateOf(false) }
-    var position by remember { mutableFloatStateOf(0f) }
-    var length by remember { mutableFloatStateOf(0f) }
+    // Fresh for each video (⏭ Next changes the video without leaving this screen).
+    var player by remember(video.id) { mutableStateOf<YouTubePlayer?>(null) }
+    var playing by remember(video.id) { mutableStateOf(false) }
+    var position by remember(video.id) { mutableFloatStateOf(0f) }
+    var length by remember(video.id) { mutableFloatStateOf(0f) }
     var showBar by remember { mutableStateOf(true) }
     var barToken by remember { mutableIntStateOf(0) }
     val focus = remember { FocusRequester() }
@@ -106,6 +107,22 @@ fun YouTubePlayerScreen(vm: TunerViewModel) {
         if (playing) p.pause() else p.play()
         poke()
     }
+    // ▼ (or the ⋯ button on a phone): the options row along the bottom.
+    var optionsOpen by remember { mutableStateOf(false) }
+    val optionsFocus = remember { FocusRequester() }
+    var speed by remember(video.id) { mutableFloatStateOf(1f) }
+    fun setSpeed(x: Float) {
+        speed = x
+        if (plainPage) js("v.playbackRate=$x;return '';")
+        else player?.setPlaybackRate(
+            when (x) {
+                0.5f -> PlayerConstants.PlaybackRate.RATE_0_5
+                1.5f -> PlayerConstants.PlaybackRate.RATE_1_5
+                2f -> PlayerConstants.PlaybackRate.RATE_2
+                else -> PlayerConstants.PlaybackRate.RATE_1
+            }
+        )
+    }
     fun skip(seconds: Float) {
         val to = (position + seconds).coerceIn(0f, if (length > 0f) length - 1f else Float.MAX_VALUE)
         if (plainPage) js("v.currentTime=$to;return '';")
@@ -114,9 +131,17 @@ fun YouTubePlayerScreen(vm: TunerViewModel) {
         poke()
     }
 
-    // Part-watched before: carry on from there.
-    val startAt = remember(video.id) { vm.youtube.resumeAt(video.id) }
-    val view = remember(video.id) {
+    // Part-watched before: carry on from there. (Turning subtitles on or off restarts the
+    // player where it was – YouTube only takes that setting when it starts.)
+    var startAt by remember(video.id) { mutableFloatStateOf(vm.youtube.resumeAt(video.id)) }
+    val captions = vm.ytCaptions
+    fun toggleCaptions() {
+        startAt = position
+        player = null
+        speed = 1f
+        vm.toggleYouTubeCaptions()
+    }
+    val view = remember(video.id, captions) {
         YouTubePlayerView(context).apply {
             enableAutomaticInitialization = false
             keepScreenOn = true
@@ -126,7 +151,7 @@ fun YouTubePlayerScreen(vm: TunerViewModel) {
             descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
             // YouTube now refuses embedded players that don't say where they are (error 152/153):
             // name the app as the origin, as version 13 of the player library does.
-            val options = IFramePlayerOptions.Builder().controls(0).rel(0).ivLoadPolicy(3).ccLoadPolicy(1)
+            val options = IFramePlayerOptions.Builder().controls(0).rel(0).ivLoadPolicy(3).ccLoadPolicy(if (captions) 1 else 0)
                 .origin("https://" + context.packageName).build()
             initialize(object : AbstractYouTubePlayerListener() {
                 override fun onReady(youTubePlayer: YouTubePlayer) {
@@ -137,7 +162,8 @@ fun YouTubePlayerScreen(vm: TunerViewModel) {
                 override fun onStateChange(youTubePlayer: YouTubePlayer, state: PlayerConstants.PlayerState) {
                     playing = state == PlayerConstants.PlayerState.PLAYING
                     vm.youTubePlaying(playing)
-                    if (state == PlayerConstants.PlayerState.ENDED) vm.back()
+                    // The end: the next video in the list (like YouTube's autoplay), or back.
+                    if (state == PlayerConstants.PlayerState.ENDED && !vm.playNextYouTube()) vm.back()
                 }
 
                 override fun onCurrentSecond(youTubePlayer: YouTubePlayer, second: Float) {
@@ -168,10 +194,14 @@ fun YouTubePlayerScreen(vm: TunerViewModel) {
             }, true, options)
         }
     }
-    DisposableEffect(view) {
+    DisposableEffect(video.id) {
         onDispose {
             vm.youTubePlaying(false)
             vm.youTubeStopped(video, position, length)
+        }
+    }
+    DisposableEffect(view) {
+        onDispose {
             runCatching { view.release() }
         }
     }
@@ -179,8 +209,8 @@ fun YouTubePlayerScreen(vm: TunerViewModel) {
         delay(120)
         runCatching { focus.requestFocus() }
     }
-    LaunchedEffect(barToken, playing) {
-        if (!playing) return@LaunchedEffect
+    LaunchedEffect(barToken, playing, optionsOpen) {
+        if (!playing || optionsOpen) return@LaunchedEffect
         delay(4_000)
         showBar = false
     }
@@ -189,7 +219,7 @@ fun YouTubePlayerScreen(vm: TunerViewModel) {
         Modifier.fillMaxSize().background(Color.Black)
             .focusRequester(focus)
             .onPreviewKeyEvent { e ->
-                if (failed != null) return@onPreviewKeyEvent false
+                if (failed != null || optionsOpen) return@onPreviewKeyEvent false
                 val code = e.nativeKeyEvent.keyCode
                 val down = e.type == KeyEventType.KeyDown
                 val up = e.type == KeyEventType.KeyUp
@@ -207,8 +237,19 @@ fun YouTubePlayerScreen(vm: TunerViewModel) {
                         if (down) skip(if (code == AndroidKey.KEYCODE_MEDIA_FAST_FORWARD) 30f else 10f)
                         true
                     }
-                    AndroidKey.KEYCODE_DPAD_UP, AndroidKey.KEYCODE_DPAD_DOWN, AndroidKey.KEYCODE_INFO -> {
+                    AndroidKey.KEYCODE_DPAD_DOWN, AndroidKey.KEYCODE_MENU -> {
+                        if (down) {
+                            poke()
+                            optionsOpen = true
+                        }
+                        true
+                    }
+                    AndroidKey.KEYCODE_DPAD_UP, AndroidKey.KEYCODE_INFO -> {
                         if (down) poke()
+                        true
+                    }
+                    AndroidKey.KEYCODE_MEDIA_NEXT -> {
+                        if (down) vm.playNextYouTube()
                         true
                     }
                     else -> false
@@ -220,6 +261,7 @@ fun YouTubePlayerScreen(vm: TunerViewModel) {
         else PlainYouTubePage(
             video.id,
             startAt,
+            captions,
             onCreated = { web.value = it },
             onStatus = { cur, dur, paused ->
                 position = cur
@@ -264,7 +306,17 @@ fun YouTubePlayerScreen(vm: TunerViewModel) {
                 }
             )
         }
-        if (failed == null && (showBar || !playing)) {
+        if (optionsOpen) {
+            androidx.activity.compose.BackHandler {
+                optionsOpen = false
+                runCatching { focus.requestFocus() }
+            }
+            LaunchedEffect(Unit) {
+                delay(60)
+                runCatching { optionsFocus.requestFocus() }
+            }
+        }
+        if (failed == null && (showBar || !playing || optionsOpen)) {
             Column(
                 Modifier.align(Alignment.BottomStart).fillMaxWidth()
                     .background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xE6000000))))
@@ -280,8 +332,33 @@ fun YouTubePlayerScreen(vm: TunerViewModel) {
                     ProgressBar(if (length > 0f) (position / length).coerceIn(0f, 1f) else 0f, Modifier.weight(1f).padding(horizontal = 12.dp), color = Color(0xFFFF3B30))
                     Text(clock((length * 1000).toLong()), color = Color.White, fontSize = 13.sp)
                 }
+                if (optionsOpen || vm.isPhone) {
+                    Spacer(Modifier.height(10.dp))
+                    val next = vm.ytNext
+                    androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        item { PillButton(if (playing) "⏸ Pause" else "▶ Play", { toggle() }, Modifier.focusRequester(optionsFocus), compact = true) }
+                        item { PillButton("⏪ 10 s", { skip(-10f) }, compact = true) }
+                        item { PillButton("⏩ 10 s", { skip(10f) }, compact = true) }
+                        item { PillButton("↺ Start again", { skip(-position) }, compact = true) }
+                        item { PillButton(if (captions) "CC Subtitles: on" else "CC Subtitles: off", { toggleCaptions() }, selected = captions, compact = true) }
+                        item {
+                            PillButton("Speed ${if (speed == 1f) "1" else speed.toString().removeSuffix(".0")}×", {
+                                val choices = listOf(1f, 1.5f, 2f, 0.5f)
+                                setSpeed(choices[(choices.indexOf(speed) + 1).mod(choices.size)])
+                                poke()
+                            }, compact = true)
+                        }
+                        if (next != null) item { PillButton("⏭ Next: " + next.title.take(28), { vm.playNextYouTube() }, compact = true) }
+                        if (!vm.youTubeApprovedOnly && video.channel.isNotBlank()) item {
+                            PillButton("More from ${video.channel.take(24)}", { vm.moreFromYouTubeChannel(video) }, compact = true)
+                        }
+                        if (!vm.activeProfile.kids) item { PillButton("Open in YouTube app", { vm.watchInYouTubeApp(video.id) }, compact = true) }
+                    }
+                }
                 Text(
-                    if (vm.isPhone) "Tap to pause · double-tap a side to skip 10 s" else "OK play/pause  ·  ◀ ▶ 10 s  ·  BACK close",
+                    if (vm.isPhone) "Tap to pause · double-tap a side to skip 10 s"
+                    else if (optionsOpen) "BACK hides the options"
+                    else "OK play/pause  ·  ◀ ▶ 10 s  ·  ▼ options  ·  BACK close",
                     color = Color(0xFF9A9A9A), fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp),
                 )
             }
@@ -298,13 +375,14 @@ fun YouTubePlayerScreen(vm: TunerViewModel) {
 private fun PlainYouTubePage(
     id: String,
     startAt: Float,
+    captions: Boolean,
     onCreated: (WebView) -> Unit,
     onStatus: (Float, Float, Boolean) -> Unit,
     onGiveUp: () -> Unit,
 ) {
     val context = LocalContext.current
     val referrer = "https://" + context.packageName
-    val page = remember(id) {
+    val page = remember(id, captions) {
         WebView(context).apply {
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
@@ -317,7 +395,7 @@ private fun PlainYouTubePage(
             webViewClient = android.webkit.WebViewClient()
             webChromeClient = android.webkit.WebChromeClient()
             loadUrl(
-                "https://www.youtube.com/embed/$id?autoplay=1&start=${startAt.toInt()}&controls=0&rel=0&iv_load_policy=3&cc_load_policy=1&playsinline=1&origin=$referrer",
+                "https://www.youtube.com/embed/$id?autoplay=1&start=${startAt.toInt()}&controls=0&rel=0&iv_load_policy=3&cc_load_policy=${if (captions) 1 else 0}&playsinline=1&origin=$referrer",
                 mapOf("Referer" to "$referrer/"),
             )
             onCreated(this)
@@ -384,6 +462,7 @@ fun YouTubeScreen(vm: TunerViewModel) {
                 Spacer(Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     PillButton(if (yt.query.isBlank()) "🔍 Search YouTube" else "🔍 ${yt.query}", { typing = true }, Modifier.focusRequester(first), compact = true)
+                    if (yt.query.isNotBlank() || yt.results.isNotEmpty()) PillButton("✕ Clear search", { yt.clearSearch() }, compact = true)
                     run {
                         when {
                             yt.signedIn -> {
@@ -417,7 +496,7 @@ fun YouTubeScreen(vm: TunerViewModel) {
         if (yt.searching) item(span = { GridItemSpan(maxLineSpan) }) { Header("Searching…", narrow) }
         if (yt.results.isNotEmpty()) {
             item(span = { GridItemSpan(maxLineSpan) }) { Header("Results for \"${yt.query}\"", narrow) }
-            items(yt.results.size, key = { "r" + yt.results[it].id }) { i -> VideoCard(vm, yt.results[i], narrow) }
+            items(yt.results.size, key = { "r" + yt.results[it].id }) { i -> VideoCard(vm, yt.results[i], narrow, yt.results) }
         }
         val carryOn = yt.history.filter { it.unfinished }.take(8)
         if (carryOn.isNotEmpty() && yt.results.isEmpty()) {
@@ -426,13 +505,13 @@ fun YouTubeScreen(vm: TunerViewModel) {
         }
         if (yt.recommended.isNotEmpty() && yt.results.isEmpty()) {
             item(span = { GridItemSpan(maxLineSpan) }) { Header("Recommended for you", narrow) }
-            items(yt.recommended.size, key = { "p" + yt.recommended[it].id }) { i -> VideoCard(vm, yt.recommended[i], narrow) }
+            items(yt.recommended.size, key = { "p" + yt.recommended[it].id }) { i -> VideoCard(vm, yt.recommended[i], narrow, yt.recommended) }
         }
         if (yt.signedIn) {
             item(span = { GridItemSpan(maxLineSpan) }) {
                 Header(if (yt.feed.isEmpty() && yt.loadingFeed) "Loading your subscriptions…" else "From your subscriptions", narrow)
             }
-            items(yt.feed.size, key = { "f" + yt.feed[it].id }) { i -> VideoCard(vm, yt.feed[i], narrow) }
+            items(yt.feed.size, key = { "f" + yt.feed[it].id }) { i -> VideoCard(vm, yt.feed[i], narrow, yt.feed) }
         }
         if (!yt.signedIn && yt.results.isEmpty()) {
             item(span = { GridItemSpan(maxLineSpan) }) {
@@ -497,7 +576,7 @@ private fun KidsApprovedYouTube(vm: TunerViewModel, first: FocusRequester, narro
             videos.isEmpty() -> item(span = { GridItemSpan(maxLineSpan) }) {
                 Text("No videos yet.", color = TunerColors.TextSecondary, fontSize = 16.sp)
             }
-            else -> items(videos.size, key = { "v" + videos[it].id }) { i -> VideoCard(vm, videos[i], narrow) }
+            else -> items(videos.size, key = { "v" + videos[it].id }) { i -> VideoCard(vm, videos[i], narrow, videos) }
         }
     }
 }
@@ -578,9 +657,9 @@ private fun Header(text: String, narrow: Boolean) {
 }
 
 @Composable
-private fun VideoCard(vm: TunerViewModel, v: YouTube.Video, narrow: Boolean) {
+private fun VideoCard(vm: TunerViewModel, v: YouTube.Video, narrow: Boolean, queue: List<YouTube.Video> = emptyList()) {
     FocusSurface(
-        onClick = { vm.playYouTube(v) },
+        onClick = { vm.playYouTube(v, queue) },
         baseColor = TunerColors.Panel,
         modifier = Modifier.padding(horizontal = if (narrow) 4.dp else 0.dp),
     ) { focused ->

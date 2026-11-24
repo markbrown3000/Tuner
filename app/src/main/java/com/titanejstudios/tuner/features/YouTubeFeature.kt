@@ -247,6 +247,12 @@ class YouTubeFeature(private val store: Store, private val scope: CoroutineScope
         return t.access
     }
 
+    fun clearSearch() {
+        query = ""
+        results = emptyList()
+        status = null
+    }
+
     // ---------------- Kids: approved channels ----------------
 
     fun searchChannels(q: String) {

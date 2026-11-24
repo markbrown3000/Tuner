@@ -730,6 +730,9 @@ class Store(context: Context) {
         prefs.edit().putString("yt_feed2_$profileId", value).putLong("yt_feed2_at_$profileId", System.currentTimeMillis()).apply()
     }
     /** What this profile watched on YouTube in Flicker (newest first), and its recommendations. */
+    var ytCaptions: Boolean
+        get() = prefs.getBoolean("youtube_captions", false)
+        set(value) = prefs.edit().putBoolean("youtube_captions", value).apply()
     fun ytHistoryOf(profileId: String): String? = prefs.getString("ythist_$profileId", null)
     fun saveYtHistory(profileId: String, value: String) = prefs.edit().putString("ythist_$profileId", value).apply()
     fun ytRecsOf(profileId: String): String? = prefs.getString("ytrec_$profileId", null)

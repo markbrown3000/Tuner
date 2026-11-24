@@ -4385,8 +4385,48 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         playYouTube(com.titanejstudios.tuner.integrations.YouTube.Video(youtubeKey, title?.let { "$it – trailer" } ?: "Trailer", "", null, 0L))
     }
 
+    /** YouTube subtitles (off unless you turn them on in the player's options). */
+    var ytCaptions by mutableStateOf(store.ytCaptions); private set
+
+    fun toggleYouTubeCaptions() {
+        ytCaptions = !ytCaptions
+        store.ytCaptions = ytCaptions
+    }
+
+    /** The list the playing YouTube video came from (for ⏭ Next and playing on at the end). */
+    private var ytQueue: List<com.titanejstudios.tuner.integrations.YouTube.Video> = emptyList()
+
+    val ytNext: com.titanejstudios.tuner.integrations.YouTube.Video?
+        get() {
+            val cur = ytVideo ?: return null
+            val i = ytQueue.indexOfFirst { it.id == cur.id }
+            return if (i >= 0) ytQueue.getOrNull(i + 1) else null
+        }
+
+    /** On to the next video in the list (false at the end, or when TV time's up). */
+    fun playNextYouTube(): Boolean {
+        val n = ytNext ?: return false
+        if (timeLeftSeconds() <= 0 || isBedtimeNow()) {
+            timesUp = true
+            return false
+        }
+        ytVideo = n
+        return true
+    }
+
+    /** "More from this channel": back to YouTube, searching for it. */
+    fun moreFromYouTubeChannel(v: com.titanejstudios.tuner.integrations.YouTube.Video) {
+        if (screen == Screen.YouTubePlayer) back()
+        if (screen != Screen.YouTube) navigate(Screen.YouTube)
+        youtube.search(v.channel, activeProfile.kids)
+    }
+
     /** Plays a YouTube video full screen inside Flicker. */
-    fun playYouTube(v: com.titanejstudios.tuner.integrations.YouTube.Video) {
+    fun playYouTube(
+        v: com.titanejstudios.tuner.integrations.YouTube.Video,
+        queue: List<com.titanejstudios.tuner.integrations.YouTube.Video> = emptyList(),
+    ) {
+        ytQueue = queue
         if (!youTubeAllowed) return
         if (timeLeftSeconds() <= 0 || isBedtimeNow()) {
             timesUp = true
