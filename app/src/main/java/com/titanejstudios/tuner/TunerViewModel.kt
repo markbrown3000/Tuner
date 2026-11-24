@@ -404,7 +404,15 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     /** Updates this profile's YouTube rows: approved channels for kids that have them, else subscriptions. */
     fun refreshYouTube(force: Boolean = false) {
         if (!youTubeAllowed) return
-        if (youTubeApprovedOnly) youtube.loadApproved(activeProfile.ytChannelIds, force) else youtube.loadFeed(force)
+        if (youTubeApprovedOnly) youtube.loadApproved(activeProfile.ytChannelIds, force) else {
+            youtube.loadFeed(force)
+            youtube.loadRecommended(force)
+        }
+    }
+
+    /** The YouTube player closed: remember how far this profile got (and learn what it likes). */
+    fun youTubeStopped(v: com.titanejstudios.tuner.integrations.YouTube.Video, position: Float, length: Float) {
+        youtube.watched(v, position, length)
     }
 
     /** The real YouTube Kids app, if it's on this device (it keeps its own kids' profiles and parent settings). */
@@ -4197,6 +4205,8 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         if (mins <= 0 || saverOn) return
         val idle = System.currentTimeMillis() - lastUserActivity
         val watching = mode != null && playback.isPlaying
+        // Never over a YouTube video (playing or paused – a paused one is still being watched).
+        if (screen == Screen.YouTubePlayer || screen == Screen.MultiView) return
         if (idle > mins * 60_000L && !watching && screen != Screen.Player && saverSlides.isNotEmpty()) saverOn = true
     }
 
@@ -4643,6 +4653,12 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         return allChannels.firstOrNull { com.titanejstudios.tuner.data.ChannelMerge.key(it.name) == key }
     }
 
+    /** Grown-ups: let kids' profiles see a Plex library (or not) – on every device. */
+    fun toggleKidsPlexLibrary(s: Plex.Section) {
+        plexFeature.toggleKids(s)
+        profilesChanged()
+    }
+
     /** Profiles were added, edited or deleted here: tell the other devices and houses. */
     private fun profilesChanged() {
         store.setSyncStamp(com.titanejstudios.tuner.integrations.LinkSync.PROFILES, System.currentTimeMillis())
@@ -4652,6 +4668,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
 
     private fun applyLinkChanges(changed: Set<String>) {
         if (com.titanejstudios.tuner.integrations.LinkSync.PROFILES in changed) {
+            plexFeature.reloadKids()
             profiles = store.profiles
             val now = profiles.firstOrNull { it.id == activeProfile.id }
             when {

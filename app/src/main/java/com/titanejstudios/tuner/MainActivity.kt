@@ -195,6 +195,13 @@ private fun TunerApp(vm: TunerViewModel) {
         // Phones: upright for browsing, sideways and full screen for watching.
         val phone = vm.isPhone
         val watching = vm.screen == Screen.Player || vm.screen == Screen.MultiView || vm.screen == Screen.YouTubePlayer
+        // A YouTube video keeps the TV's own screensaver away too (the web player doesn't always).
+        val youTubeOn = vm.screen == Screen.YouTubePlayer
+        LaunchedEffect(youTubeOn) {
+            val w = activity?.window ?: return@LaunchedEffect
+            if (youTubeOn) w.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            else w.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
         LaunchedEffect(phone, watching) {
             val a = activity ?: return@LaunchedEffect
             if (!phone) return@LaunchedEffect

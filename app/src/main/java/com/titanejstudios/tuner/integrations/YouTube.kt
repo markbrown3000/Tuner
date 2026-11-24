@@ -21,6 +21,8 @@ object YouTube {
         val channel: String,
         val thumb: String?,
         val publishedAt: Long,
+        /** The uploader's channel (for "more from channels you watch"). */
+        val channelId: String? = null,
     )
 
     const val SCOPE = "https://www.googleapis.com/auth/youtube.readonly"
@@ -133,7 +135,7 @@ object YouTube {
 
     fun toJson(list: List<Video>): String {
         val a = JSONArray()
-        list.forEach { a.put(JSONObject().put("id", it.id).put("t", it.title).put("c", it.channel).put("img", it.thumb).put("at", it.publishedAt)) }
+        list.forEach { a.put(videoJson(it)) }
         return a.toString()
     }
 
@@ -141,9 +143,18 @@ object YouTube {
         val a = JSONArray(json ?: "[]")
         (0 until a.length()).map { i ->
             val o = a.getJSONObject(i)
-            Video(o.getString("id"), o.optString("t"), o.optString("c"), o.optString("img").takeIf { it.isNotBlank() && it != "null" }, o.optLong("at"))
+            videoFromJson(o)
         }
     }.getOrDefault(emptyList())
+
+    fun videoJson(v: Video): JSONObject =
+        JSONObject().put("id", v.id).put("t", v.title).put("c", v.channel).put("img", v.thumb).put("at", v.publishedAt).put("cid", v.channelId)
+
+    fun videoFromJson(o: JSONObject): Video = Video(
+        o.getString("id"), o.optString("t"), o.optString("c"),
+        o.optString("img").takeIf { it.isNotBlank() && it != "null" }, o.optLong("at"),
+        o.optString("cid").takeIf { it.startsWith("UC") },
+    )
 
     private fun video(id: String, sn: JSONObject?): Video? {
         sn ?: return null
@@ -153,7 +164,9 @@ object YouTube {
         val thumb = listOf("high", "medium", "standard", "default").firstNotNullOfOrNull { k -> thumbs?.optJSONObject(k)?.optString("url")?.takeIf { it.isNotBlank() } }
         val iso = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC") }
         val at = runCatching { iso.parse(sn.optString("publishedAt").take(19))?.time }.getOrNull() ?: 0L
-        return Video(id, title, unescape(sn.optString("channelTitle")), thumb, at)
+        val channelId = sn.optString("videoOwnerChannelId").takeIf { it.startsWith("UC") } ?: sn.optString("channelId").takeIf { it.startsWith("UC") }
+        val channelName = sn.optString("videoOwnerChannelTitle").ifBlank { sn.optString("channelTitle") }
+        return Video(id, title, unescape(channelName), thumb, at, channelId)
     }
 
     /** Search titles come back with &amp; and &#39; in them. */

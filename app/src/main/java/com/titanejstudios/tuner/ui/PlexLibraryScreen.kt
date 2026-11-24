@@ -333,7 +333,7 @@ fun PlexLibraryScreen(vm: TunerViewModel) {
             title = labels[s.id] ?: s.title,
             subtitle = if (allowed) "Kids' profiles can see this library" else "Kids' profiles can't see this library",
             items = listOf(
-                MenuItem(if (allowed) "🚫 Hide from kids' profiles" else "🧸 Allow for kids' profiles") { plex.toggleKids(s) },
+                MenuItem(if (allowed) "🚫 Hide from kids' profiles" else "🧸 Allow for kids' profiles") { vm.toggleKidsPlexLibrary(s) },
             ),
             onDismiss = { libraryMenu = null },
         )

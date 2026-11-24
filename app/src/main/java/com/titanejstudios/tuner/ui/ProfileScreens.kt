@@ -50,6 +50,9 @@ import kotlinx.coroutines.delay
 fun ProfilePickerScreen(vm: TunerViewModel) {
     val current = remember { FocusRequester() }
     LaunchedEffect(Unit) {
+        // Picking who's watching: get any profile changes from the other TVs first.
+        vm.cloud.syncSoon(0L)
+        vm.link.syncSoon(0L)
         delay(60)
         runCatching { current.requestFocus() }
     }

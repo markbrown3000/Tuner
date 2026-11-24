@@ -33,7 +33,22 @@ class CloudSyncFeature(
     private val onSynced: (Set<String>) -> Unit,
 ) {
     /** Another device in the sync file. */
-    class Device(val id: String, val name: String, val house: String, val phone: Boolean, val seenAt: Long)
+    class Device(val id: String, val name: String, val house: String, val phone: Boolean, val seenAt: Long, val profiles: List<String> = emptyList())
+
+    /** The other devices' latest lists (for "Copy profiles from this device"). */
+    private val snapshots = java.util.concurrent.ConcurrentHashMap<String, JSONObject>()
+
+    /** Makes this device's profiles a copy of [d]'s (and tells the rest to follow). */
+    fun copyProfilesFrom(d: Device) {
+        val snap = snapshots[d.id]
+        if (snap == null || !LinkSync.copyProfiles(store, snap)) {
+            status = "${d.name} hasn't shared its profiles yet – update Flicker there and press Sync now on it"
+            return
+        }
+        status = "✓ Profiles copied from ${d.name}"
+        onSynced(setOf(LinkSync.PROFILES, TvSync.FAVOURITES))
+        syncSoon(1_000L)
+    }
 
     private val drive = GoogleDrive(BuildConfig.GOOGLE_CLIENT_ID, BuildConfig.GOOGLE_CLIENT_SECRET)
 
@@ -139,7 +154,7 @@ class CloudSyncFeature(
 
     // ---------------- Syncing ----------------
 
-    /** Every 10 minutes while Flicker is open (and once now). */
+    /** Every 3 minutes while Flicker is open (and once now). */
     fun start() {
         if (!signedIn || !available) return
         if (loopJob?.isActive == true) return
@@ -147,7 +162,7 @@ class CloudSyncFeature(
             delay(3_000)
             while (true) {
                 if (isForeground()) syncOnce()
-                delay(10 * 60_000L)
+                delay(3 * 60_000L)
             }
         }
     }
@@ -236,8 +251,12 @@ class CloudSyncFeature(
             }
             if (id == me) continue
             val theirHouse = d.optString("house", "Home")
-            seen += Device(id, d.optString("name"), theirHouse, d.optBoolean("phone"), at)
-            val snap = d.optJSONObject("snapshot") ?: continue
+            val snap0 = d.optJSONObject("snapshot")
+            val names = snap0?.optJSONObject("sections")?.optJSONObject(LinkSync.PROFILES)?.optJSONArray("list")
+                ?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it)?.optString("name") } }.orEmpty()
+            seen += Device(id, d.optString("name"), theirHouse, d.optBoolean("phone"), at, names)
+            val snap = snap0 ?: continue
+            snapshots[id] = JSONObject(snap.toString())
             // Each house keeps its own favourites unless you've chosen to share them.
             if (!theirHouse.equals(house, true) && !shareFavourites) snap.optJSONObject("sections")?.remove(TvSync.FAVOURITES)
             changed += LinkSync.apply(store, snap)

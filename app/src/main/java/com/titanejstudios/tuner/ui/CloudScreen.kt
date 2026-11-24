@@ -41,6 +41,7 @@ import kotlinx.coroutines.delay
 fun CloudScreen(vm: TunerViewModel) {
     val cloud = vm.cloud
     var renaming by remember { mutableStateOf(false) }
+    var copyFrom by remember { mutableStateOf<com.titanejstudios.tuner.features.CloudSyncFeature.Device?>(null) }
     val first = remember { FocusRequester() }
     LaunchedEffect(cloud.signedIn) {
         delay(80)
@@ -142,9 +143,12 @@ fun CloudScreen(vm: TunerViewModel) {
                 val list = cloud.devices
                 items(list.size, key = { "dev" + list[it].id }) { i ->
                     val d = list[i]
-                    Text(
-                        (if (d.phone) "📱  " else "📺  ") + d.name + "  ·  " + d.house + "  ·  last seen " + fmt.format(java.util.Date(d.seenAt)),
-                        color = Color.White, fontSize = 15.sp,
+                    SettingRow(
+                        (if (d.phone) "📱  " else "📺  ") + d.name,
+                        subtitle = d.house + "  ·  last seen " + fmt.format(java.util.Date(d.seenAt)) +
+                            if (d.profiles.isEmpty()) "  ·  no profiles shared yet (needs the latest Flicker)" else "  ·  profiles: " + d.profiles.joinToString(", "),
+                        detail = if (d.profiles.isEmpty()) null else "Copy profiles",
+                        onClick = { if (d.profiles.isNotEmpty()) copyFrom = d },
                     )
                 }
                 item { Spacer(Modifier.height(10.dp)) }
@@ -152,6 +156,15 @@ fun CloudScreen(vm: TunerViewModel) {
             }
         }
         item { Spacer(Modifier.height(24.dp)) }
+    }
+
+    copyFrom?.let { d ->
+        MenuDialog(
+            title = "Copy profiles from ${d.name}?",
+            items = listOf(MenuItem("Copy them here", "and to every other device") { cloud.copyProfilesFrom(d) }),
+            onDismiss = { copyFrom = null },
+            subtitle = "This device's profiles become: " + d.profiles.joinToString(", ") + ". Profiles only on this device are removed.",
+        )
     }
 
     if (renaming) {

@@ -94,6 +94,7 @@ enum class HomeRow(val title: String) {
     TopPicks("Top picks for you"),
     Missed("Missed it?"),
     YouTube("New on your YouTube"),
+    YouTubeForYou("Recommended on YouTube"),
     Because("Because you watched"),
     Favourites("Favourites"),
     Recordings("Recordings"),
@@ -317,8 +318,29 @@ private fun unfinishedCard(vm: TunerViewModel, u: com.titanejstudios.tuner.Unfin
     )
 }
 
-/** A video from a channel you subscribe to on YouTube. */
-private fun youTubeCard(vm: TunerViewModel, v: com.titanejstudios.tuner.integrations.YouTube.Video): HomeCard = HomeCard(
+/** A YouTube video watched part way: carry on from where you stopped. */
+private fun youTubeResumeCard(vm: TunerViewModel, w: com.titanejstudios.tuner.features.YouTubeFeature.Watched): HomeCard {
+    val v = w.video
+    val left = ((w.length - w.position) / 60f).toInt().coerceAtLeast(1)
+    return HomeCard(
+        key = "ytr" + v.id,
+        tag = "YOUTUBE", tagBg = Color(0xE6FF0033), tagFg = Color.White,
+        title = v.title,
+        line1 = v.channel,
+        line2 = "$left min left",
+        image = v.thumb,
+        poster = false,
+        channel = null,
+        progress = if (w.length > 0f) (w.position / w.length).coerceIn(0f, 1f) else null,
+        progressColor = Color(0xFFFF3B30),
+        onClick = { vm.playYouTube(v) },
+        onLongClick = { vm.youtube.forget(v.id) },
+        hero = HeroInfo(v.title, v.channel + "  ·  $left min left  ·  hold OK to remove", null, null, v.thumb, label = "CARRY ON · YOUTUBE"),
+    )
+}
+
+/** A video from a channel you subscribe to on YouTube (or picked for you). */
+private fun youTubeCard(vm: TunerViewModel, v: com.titanejstudios.tuner.integrations.YouTube.Video, label: String = "NEW ON YOUR YOUTUBE"): HomeCard = HomeCard(
     key = "yt" + v.id,
     tag = "YOUTUBE", tagBg = Color(0xE6FF0033), tagFg = Color.White,
     title = v.title,
@@ -331,7 +353,7 @@ private fun youTubeCard(vm: TunerViewModel, v: com.titanejstudios.tuner.integrat
     progressColor = TunerColors.Accent,
     onClick = { vm.playYouTube(v) },
     onLongClick = null,
-    hero = HeroInfo(v.title, v.channel + "  ·  " + com.titanejstudios.tuner.integrations.YouTube.age(v.publishedAt), null, null, v.thumb, label = "NEW ON YOUR YOUTUBE"),
+    hero = HeroInfo(v.title, v.channel + "  ·  " + com.titanejstudios.tuner.integrations.YouTube.age(v.publishedAt), null, null, v.thumb, label = label),
 )
 
 /** Missed it? A programme from the last week you'd probably like, on catch-up. */
@@ -452,13 +474,14 @@ fun HomeScreen(vm: TunerViewModel) {
         minute, recent, favourites, allChannels, vm.sportNow, vm.topPicks, vm.plexItems, vm.plexRecent, vm.started, vm.activeProfile.id,
         vm.yourShows, vm.plexFeature.similar, vm.becauseFilms, vm.trending,
         vm.resume, vm.recordings, vm.followedSeries, vm.watchlist, vm.football.matches, vm.reminders,
-        vm.missed, vm.unfinished, vm.youtube.feed,
+        vm.missed, vm.unfinished, vm.youtube.feed, vm.youtube.history, vm.youtube.recommended,
     ) {
         buildMap {
             put(HomeRow.Continue, buildList {
                 vm.finishable.take(4).forEach { add(unfinishedCard(vm, it)) }
                 vm.myPlexItems.take(8).forEach { item -> add(plexItemCard(vm, item) { plexMenu = item }) }
                 if (vm.hasVod) vm.myResume.values.sortedByDescending { it.updatedAt }.take(8).forEach { add(resumeCard(vm, it)) }
+                if (vm.youTubeAllowed) vm.youtube.history.filter { it.unfinished }.take(4).forEach { add(youTubeResumeCard(vm, it)) }
                 recent.forEach { add(channelCard(vm, it, recent, now, followed)) }
             })
             put(HomeRow.Sport, vm.sportNow.map { channelCard(vm, it, vm.sportNow, now, followed) })
@@ -468,6 +491,7 @@ fun HomeScreen(vm: TunerViewModel) {
             put(HomeRow.YourShows, vm.yourShows.let { picks -> val chans = picks.map { it.channel }; picks.map { pk -> pickCard(vm, pk, chans, now) { pickMenu = pk } } })
             put(HomeRow.Missed, vm.missed.map { missedCard(vm, it) })
             if (!vm.activeProfile.kids) put(HomeRow.YouTube, vm.youtube.feed.take(20).map { youTubeCard(vm, it) })
+            if (vm.youTubeAllowed && !vm.youTubeApprovedOnly) put(HomeRow.YouTubeForYou, vm.youtube.recommended.take(20).map { youTubeCard(vm, it, "FOR YOU") })
             put(HomeRow.Because, buildList {
                 vm.plexFeature.similar.take(20).forEach { add(plexEntryCard(vm, it, "LIKE THIS")) }
                 if (vm.hasVod) vm.becauseFilms.forEach { m -> add(filmCard(vm, m)) }
@@ -1199,13 +1223,14 @@ private fun KidsHome(vm: TunerViewModel) {
     val channels = remember(vm.channels, vm.unlocked, vm.activeProfile) { vm.channelsFor(ALL) }
     // Carry on watching: only what this child started themselves, on channels they're allowed.
     val minute = vm.now / 60_000
-    val carryOn = remember(minute, channels, vm.started, vm.resume, vm.plexItems, vm.unfinished, vm.recents, vm.activeProfile.id) {
+    val carryOn = remember(minute, channels, vm.started, vm.resume, vm.plexItems, vm.unfinished, vm.recents, vm.activeProfile.id, vm.youtube.history) {
         val allowed = channels.map { it.id }.toSet()
         val recent = vm.channelsFor(RECENT).filter { it.id in allowed }.take(8)
         buildList {
             vm.finishable.filter { it.channelId in allowed }.take(4).forEach { add(unfinishedCard(vm, it)) }
             vm.myPlexItems.take(8).forEach { item -> add(plexItemCard(vm, item) {}) }
             if (vm.hasVod) vm.myResume.values.sortedByDescending { it.updatedAt }.take(8).forEach { add(resumeCard(vm, it)) }
+            if (vm.youTubeAllowed) vm.youtube.history.filter { it.unfinished }.take(4).forEach { add(youTubeResumeCard(vm, it)) }
             recent.forEach { add(channelCard(vm, it, recent, vm.now, emptySet())) }
         }
     }
@@ -1230,6 +1255,8 @@ private fun KidsHome(vm: TunerViewModel) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Hi ${vm.activeProfile.name}! 🧸", color = Color.White, fontSize = 34.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.width(20.dp))
+                PillButton("🎤  Say it", { vm.startVoiceSearch() }, compact = true)
+                Spacer(Modifier.width(10.dp))
                 if (vm.youTubeAllowed) PillButton("▶ YouTube", { vm.navigate(Screen.YouTube) }, compact = true)
                 if (ytKids && vm.youTubeAllowed) {
                     Spacer(Modifier.width(10.dp))

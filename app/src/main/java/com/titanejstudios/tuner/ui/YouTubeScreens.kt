@@ -114,6 +114,8 @@ fun YouTubePlayerScreen(vm: TunerViewModel) {
         poke()
     }
 
+    // Part-watched before: carry on from there.
+    val startAt = remember(video.id) { vm.youtube.resumeAt(video.id) }
     val view = remember(video.id) {
         YouTubePlayerView(context).apply {
             enableAutomaticInitialization = false
@@ -129,7 +131,7 @@ fun YouTubePlayerScreen(vm: TunerViewModel) {
             initialize(object : AbstractYouTubePlayerListener() {
                 override fun onReady(youTubePlayer: YouTubePlayer) {
                     player = youTubePlayer
-                    youTubePlayer.loadVideo(video.id, 0f)
+                    youTubePlayer.loadVideo(video.id, startAt)
                 }
 
                 override fun onStateChange(youTubePlayer: YouTubePlayer, state: PlayerConstants.PlayerState) {
@@ -169,6 +171,7 @@ fun YouTubePlayerScreen(vm: TunerViewModel) {
     DisposableEffect(view) {
         onDispose {
             vm.youTubePlaying(false)
+            vm.youTubeStopped(video, position, length)
             runCatching { view.release() }
         }
     }
@@ -216,6 +219,7 @@ fun YouTubePlayerScreen(vm: TunerViewModel) {
         if (!plainPage) AndroidView(factory = { view }, modifier = Modifier.fillMaxSize())
         else PlainYouTubePage(
             video.id,
+            startAt,
             onCreated = { web.value = it },
             onStatus = { cur, dur, paused ->
                 position = cur
@@ -293,6 +297,7 @@ fun YouTubePlayerScreen(vm: TunerViewModel) {
 @Composable
 private fun PlainYouTubePage(
     id: String,
+    startAt: Float,
     onCreated: (WebView) -> Unit,
     onStatus: (Float, Float, Boolean) -> Unit,
     onGiveUp: () -> Unit,
@@ -312,7 +317,7 @@ private fun PlainYouTubePage(
             webViewClient = android.webkit.WebViewClient()
             webChromeClient = android.webkit.WebChromeClient()
             loadUrl(
-                "https://www.youtube.com/embed/$id?autoplay=1&controls=0&rel=0&iv_load_policy=3&cc_load_policy=1&playsinline=1&origin=$referrer",
+                "https://www.youtube.com/embed/$id?autoplay=1&start=${startAt.toInt()}&controls=0&rel=0&iv_load_policy=3&cc_load_policy=1&playsinline=1&origin=$referrer",
                 mapOf("Referer" to "$referrer/"),
             )
             onCreated(this)
@@ -413,6 +418,15 @@ fun YouTubeScreen(vm: TunerViewModel) {
         if (yt.results.isNotEmpty()) {
             item(span = { GridItemSpan(maxLineSpan) }) { Header("Results for \"${yt.query}\"", narrow) }
             items(yt.results.size, key = { "r" + yt.results[it].id }) { i -> VideoCard(vm, yt.results[i], narrow) }
+        }
+        val carryOn = yt.history.filter { it.unfinished }.take(8)
+        if (carryOn.isNotEmpty() && yt.results.isEmpty()) {
+            item(span = { GridItemSpan(maxLineSpan) }) { Header("Carry on watching", narrow) }
+            items(carryOn.size, key = { "h" + carryOn[it].video.id }) { i -> VideoCard(vm, carryOn[i].video, narrow) }
+        }
+        if (yt.recommended.isNotEmpty() && yt.results.isEmpty()) {
+            item(span = { GridItemSpan(maxLineSpan) }) { Header("Recommended for you", narrow) }
+            items(yt.recommended.size, key = { "p" + yt.recommended[it].id }) { i -> VideoCard(vm, yt.recommended[i], narrow) }
         }
         if (yt.signedIn) {
             item(span = { GridItemSpan(maxLineSpan) }) {

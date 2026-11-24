@@ -42,6 +42,106 @@ class YouTubeFeature(private val store: Store, private val scope: CoroutineScope
     var feed by mutableStateOf(YouTube.fromJson(store.ytFeedOf(pid))); private set
     var loadingFeed by mutableStateOf(false); private set
 
+    /** One video watched here: where you got to, and how often. */
+    class Watched(val video: YouTube.Video, val at: Long, val position: Float, val length: Float, val plays: Int) {
+        /** Stopped part way (worth carrying on). */
+        val unfinished: Boolean get() = length > 60f && position > 20f && position < length - 30f
+    }
+
+    var history by mutableStateOf(loadHistory(startProfile)); private set
+    /** Videos picked for this profile from what it watches here. */
+    var recommended by mutableStateOf(YouTube.fromJson(store.ytRecsOf(startProfile))); private set
+    var loadingRecs by mutableStateOf(false); private set
+
+    private fun loadHistory(profileId: String): List<Watched> = runCatching {
+        val a = org.json.JSONArray(store.ytHistoryOf(profileId) ?: "[]")
+        (0 until a.length()).mapNotNull { i ->
+            val o = a.optJSONObject(i) ?: return@mapNotNull null
+            Watched(YouTube.videoFromJson(o.getJSONObject("v")), o.optLong("at"), o.optDouble("pos", 0.0).toFloat(), o.optDouble("len", 0.0).toFloat(), o.optInt("n", 1))
+        }
+    }.getOrDefault(emptyList())
+
+    private fun saveHistory() {
+        val a = org.json.JSONArray()
+        history.forEach { w ->
+            a.put(org.json.JSONObject().put("v", YouTube.videoJson(w.video)).put("at", w.at).put("pos", w.position.toDouble()).put("len", w.length.toDouble()).put("n", w.plays))
+        }
+        store.saveYtHistory(pid, a.toString())
+    }
+
+    /** A video was closed after [position] of [length] seconds. Trailers and quick looks aren't kept. */
+    fun watched(v: YouTube.Video, position: Float, length: Float) {
+        if (v.channel.isBlank() || position < 15f) return
+        val before = history.firstOrNull { it.video.id == v.id }
+        val w = Watched(v, System.currentTimeMillis(), position, length, (before?.plays ?: 0) + 1)
+        history = (listOf(w) + history.filter { it.video.id != v.id }).take(300)
+        saveHistory()
+        // Something new to go on: freshen the picks (soon, not on every video).
+        if (System.currentTimeMillis() - store.ytRecsAtOf(pid) > 30 * 60_000L) loadRecommended(force = true)
+    }
+
+    /** Where to start [id] (carry on part-watched videos). */
+    fun resumeAt(id: String): Float = history.firstOrNull { it.video.id == id }?.takeIf { it.unfinished }?.position?.minus(3f)?.coerceAtLeast(0f) ?: 0f
+
+    fun forget(id: String) {
+        history = history.filter { it.video.id != id }
+        saveHistory()
+    }
+
+    /**
+     * Picks from what this profile watches: the newest from the channels it watches most (that it
+     * hasn't seen), plus YouTube's results for its most-watched kinds of video. Every 6 hours.
+     */
+    fun loadRecommended(force: Boolean = false) {
+        if (loadingRecs || history.isEmpty()) return
+        if (!force && recommended.isNotEmpty() && System.currentTimeMillis() - store.ytRecsAtOf(pid) < 6 * 3_600_000L) return
+        val forProfile = pid
+        val seen = history.map { it.video.id }.toSet()
+        // Channels by how much they're watched (recent viewing counts more).
+        val now = System.currentTimeMillis()
+        val channelScore = HashMap<String, Double>()
+        val channelName = HashMap<String, String>()
+        for (w in history) {
+            val cid = w.video.channelId ?: continue
+            val ageDays = (now - w.at) / 86_400_000.0
+            channelScore[cid] = (channelScore[cid] ?: 0.0) + w.plays * (if (w.length > 0f) (w.position / w.length).coerceIn(0.2f, 1f) else 0.5f) / (1.0 + ageDays / 14.0)
+            channelName[cid] = w.video.channel
+        }
+        val topChannels = channelScore.entries.sortedByDescending { it.value }.take(8).map { it.key }
+        // A search on the latest few things watched, by their channel names and a title word or two.
+        val queries = history.take(12).map { it.video.channel }.groupingBy { it }.eachCount().entries.sortedByDescending { it.value }.take(2).map { it.key }
+        loadingRecs = true
+        scope.launch {
+            val r = withContext(Dispatchers.IO) {
+                runCatching {
+                    val token = runCatching { accessToken() }.getOrNull()
+                    val key = apiKey
+                    val fromChannels = YouTube.uploads(topChannels, 6, key, if (key == null) token else null)
+                    val fromSearch = queries.flatMap { q ->
+                        runCatching { YouTube.search(q, key, if (key == null) token else null) }.getOrDefault(emptyList())
+                            .filter { it.channelId == null || it.channelId !in topChannels }.take(6)
+                    }
+                    // Mix: two from the channels you watch, then one new find, and so on.
+                    val a = fromChannels.filter { it.id !in seen }.sortedByDescending { it.publishedAt }
+                    val b = fromSearch.filter { it.id !in seen }
+                    val out = ArrayList<YouTube.Video>()
+                    var i = 0
+                    var j = 0
+                    while (i < a.size || j < b.size) {
+                        repeat(2) { if (i < a.size) out += a[i++] }
+                        if (j < b.size) out += b[j++]
+                    }
+                    out.distinctBy { it.id }.take(40)
+                }
+            }
+            loadingRecs = false
+            r.onSuccess { list ->
+                store.saveYtRecs(forProfile, YouTube.toJson(list))
+                if (forProfile == pid) recommended = list
+            }.onFailure { AppLog.warn("YouTube recommendations failed", it) }
+        }
+    }
+
     /** Kids' approved channels: their newest videos. */
     var approvedFeed by mutableStateOf<List<YouTube.Video>>(emptyList()); private set
     var loadingApproved by mutableStateOf(false); private set
@@ -66,6 +166,8 @@ class YouTubeFeature(private val store: Store, private val scope: CoroutineScope
         signedIn = store.ytRefreshOf(pid) != null
         email = store.ytEmailOf(pid)
         feed = YouTube.fromJson(store.ytFeedOf(pid))
+        history = loadHistory(pid)
+        recommended = YouTube.fromJson(store.ytRecsOf(pid))
         results = emptyList()
         query = ""
     }

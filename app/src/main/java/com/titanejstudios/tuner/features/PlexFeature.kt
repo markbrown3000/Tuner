@@ -253,6 +253,11 @@ class PlexFeature(private val store: Store, private val scope: CoroutineScope) {
         store.plexKidsSections = kidsSections
     }
 
+    /** Kids' libraries changed on another device (synced with the profiles). */
+    fun reloadKids() {
+        kidsSections = store.plexKidsSections
+    }
+
     /** For search results and recently added: is this from a kids' library? */
     fun isKidsEntry(e: Plex.Entry): Boolean = e.sectionKey != null && (e.server.machineId + "/" + e.sectionKey) in kidsSections
 

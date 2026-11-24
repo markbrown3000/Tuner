@@ -30,7 +30,9 @@ object LinkSync {
         sections.put(
             PROFILES,
             JSONObject().put("at", store.syncStamp(PROFILES)).put("list", Store.profilesToJson(store.profiles))
-                .put("gone", JSONObject(store.profilesGone)),
+                .put("gone", JSONObject(store.profilesGone))
+                // Plex libraries kids may see (the same server gives the same ids on every device).
+                .put("plex_kids", JSONArray(store.plexKidsSections.toList())),
         )
         val favs = JSONObject()
         for (p in store.profiles) favs.put(p.id, JSONArray(store.favourites(p.id)))
@@ -57,6 +59,44 @@ object LinkSync {
         return JSONObject().put("app", "Flicker").put("v", 1).put("sections", sections)
     }
 
+    /**
+     * "Copy profiles from this device": this device's profiles (and their favourites) become an
+     * exact copy of [remote]'s, and count as the newest, so every other device follows.
+     */
+    fun copyProfiles(store: Store, remote: JSONObject): Boolean {
+        val sections = remote.optJSONObject("sections") ?: return false
+        val theirs = sections.optJSONObject(PROFILES)?.optJSONArray("list")?.let { Store.profilesFromJson(it) }.orEmpty()
+        if (theirs.isEmpty() || theirs.none { !it.kids }) return false
+        val mine = store.profiles
+        val out = ArrayList<com.titanejstudios.tuner.data.Profile>()
+        val used = HashSet<String>()
+        for (t in theirs) {
+            val local = mine.firstOrNull { it.id == t.id } ?: mine.firstOrNull { it.name.trim().equals(t.name.trim(), ignoreCase = true) }
+            val id = local?.id ?: t.id
+            if (used.add(id)) out += t.copy(id = id)
+        }
+        val now = System.currentTimeMillis()
+        val gone = HashMap(store.profilesGone)
+        for (p in mine) if (p.id !in used) gone[p.name.trim().lowercase()] = now
+        store.profiles = out
+        store.profilesGone = gone
+        store.setSyncStamp(PROFILES, now)
+        sections.optJSONObject(PROFILES)?.optJSONArray("plex_kids")?.let { a ->
+            if (a.length() > 0) store.plexKidsSections = (0 until a.length()).map { a.getString(it) }.toSet()
+        }
+        val favs = sections.optJSONObject(TvSync.FAVOURITES)?.optJSONObject("data")
+        if (favs != null) {
+            for (theirPid in favs.keys()) {
+                val name = theirs.firstOrNull { it.id == theirPid }?.name?.trim() ?: continue
+                val pid = out.firstOrNull { it.name.trim().equals(name, ignoreCase = true) }?.id ?: continue
+                val arr = favs.optJSONArray(theirPid) ?: continue
+                store.setFavourites(pid, (0 until arr.length()).map { arr.getString(it) })
+            }
+            store.setSyncStamp(TvSync.FAVOURITES, now)
+        }
+        return true
+    }
+
     /** Takes whatever is newer from another device's [remote] snapshot. Returns the sections that changed here. */
     fun apply(store: Store, remote: JSONObject): Set<String> {
         val sections = remote.optJSONObject("sections") ?: return emptySet()
@@ -67,6 +107,15 @@ object LinkSync {
         sections.optJSONObject(PROFILES)?.let { r ->
             val theirStamp = r.optLong("at")
             val mineStamp = store.syncStamp(PROFILES)
+            // Kids' Plex libraries: the newer device's choice, or theirs if none are chosen here.
+            r.optJSONArray("plex_kids")?.let { a ->
+                val theirKids = (0 until a.length()).map { a.getString(it) }.toSet()
+                val mineKids = store.plexKidsSections
+                if (theirKids.isNotEmpty() && theirKids != mineKids && (theirStamp > mineStamp || mineKids.isEmpty())) {
+                    store.plexKidsSections = theirKids
+                    changed += PROFILES
+                }
+            }
             val mine = store.profiles
             // A device that's never changed its profiles (just the starting "Everyone") takes the other's.
             val untouched = mineStamp == 0L && mine.size <= 1
