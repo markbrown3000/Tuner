@@ -297,18 +297,20 @@ fun MoviesScreen(vm: TunerViewModel) {
         categoryOf = { it.category },
         nameOf = { it.name },
         imageOf = { it.poster },
-        detailsOf = { m -> listOfNotNull(m.category, m.rating?.takeIf { it.isNotBlank() && it != "0" }?.let { "★ $it" }).joinToString("  ·  ") },
+        detailsOf = { m -> listOfNotNull(m.category, vm.ratingLabelFor(m.name, false, m.rating)).joinToString("  ·  ") },
         continueEntries = continueEntries,
         onReload = { vm.loadMovies(force = true) },
         switchLabel = "Series ›",
         onSwitch = { vm.navigate(com.titanejstudios.tuner.Screen.Series) },
         onResume = { vm.playResume(it) },
         tile = { m, mod ->
+            // Its IMDb rating, looked up the first time it's on screen.
+            LaunchedEffect(m.id) { vm.requestRatings(listOf(m.name), isSeries = false) }
             val r = vm.resume[m.id]
             PosterCard(
                 title = m.name,
                 image = m.poster,
-                caption = listOfNotNull(ratingLabel(m.rating), if (vm.inWatchlist(m.id)) "✓ My list" else null)
+                caption = listOfNotNull(vm.ratingLabelFor(m.name, false, m.rating), if (vm.inWatchlist(m.id)) "✓ My list" else null)
                     .joinToString("  ·  ").ifEmpty { null },
                 progress = r?.let { if (it.durationMs > 0) it.positionMs.toFloat() / it.durationMs else null },
                 onClick = { if (r != null) resumeAsk = m else vm.playMovie(m, fromStart = true) },
@@ -321,7 +323,7 @@ fun MoviesScreen(vm: TunerViewModel) {
         onPlex = if (vm.plexLinked) ({ vm.openPlexLibrary() }) else null,
         tintOn = vm.tintFromPicture,
         compact = compactLayout(vm),
-        phone = PhoneCatalogueInfo(vm, { it.id }, { it.rating }, isSeries = false),
+        phone = PhoneCatalogueInfo(vm, { it.id }, { vm.ratingValueFor(it.name, false, it.rating) }, { it.rating }, isSeries = false),
     )
     menuFor?.let { m ->
         MenuDialog(
@@ -364,17 +366,18 @@ fun SeriesScreen(vm: TunerViewModel) {
         categoryOf = { it.category },
         nameOf = { it.name },
         imageOf = { it.cover },
-        detailsOf = { s -> listOfNotNull(s.category, s.rating?.takeIf { it.isNotBlank() && it != "0" }?.let { "★ $it" }, s.plot).joinToString("  ·  ") },
+        detailsOf = { s -> listOfNotNull(s.category, vm.ratingLabelFor(s.name, true, s.rating), s.plot).joinToString("  ·  ") },
         continueEntries = continueEntries,
         onReload = { vm.loadSeries(force = true) },
         switchLabel = "Films ›",
         onSwitch = { vm.back() },
         onResume = { vm.playResume(it) },
         tile = { s, mod ->
+            LaunchedEffect(s.id) { vm.requestRatings(listOf(s.name), isSeries = true) }
             PosterCard(
                 title = s.name,
                 image = s.cover,
-                caption = listOfNotNull(ratingLabel(s.rating), if (vm.inWatchlist(s.id)) "✓ My list" else null)
+                caption = listOfNotNull(vm.ratingLabelFor(s.name, true, s.rating), if (vm.inWatchlist(s.id)) "✓ My list" else null)
                     .joinToString("  ·  ").ifEmpty { null },
                 progress = null,
                 onClick = { vm.openSeriesDetail(s) },
@@ -387,7 +390,7 @@ fun SeriesScreen(vm: TunerViewModel) {
         onPlex = if (vm.plexLinked) ({ vm.openPlexLibrary() }) else null,
         tintOn = vm.tintFromPicture,
         compact = compactLayout(vm),
-        phone = PhoneCatalogueInfo(vm, { it.id }, { it.rating }, isSeries = true),
+        phone = PhoneCatalogueInfo(vm, { it.id }, { vm.ratingValueFor(it.name, true, it.rating) }, { it.rating }, isSeries = true),
     )
     menuFor?.let { s ->
         MenuDialog(
@@ -590,7 +593,10 @@ internal fun downloadItems(vm: TunerViewModel, contentId: String, start: () -> U
 internal class PhoneCatalogueInfo<T>(
     val vm: TunerViewModel,
     val idOf: (T) -> String,
-    val ratingOf: (T) -> String?,
+    /** The best known rating out of 10 (IMDb, TMDB, or the provider's). */
+    val ratingValue: (T) -> Double,
+    /** The provider's own rating (to pick which titles to look up first). */
+    val providerRating: (T) -> String?,
     val isSeries: Boolean,
 )
 
@@ -627,7 +633,7 @@ private fun <T> PhoneCatalogue(
     val all = remember(items, hideAdult) { items.orEmpty().filter { !hideAdult || !isAdultTitle(nameOf(it), categoryOf(it)) } }
     val categories = remember(all) { all.map(categoryOf).distinct() }
     fun sorted(list: List<T>): List<T> = when (sort) {
-        "rating" -> list.sortedByDescending { ratingOf(info.ratingOf(it)) }
+        "rating" -> list.sortedByDescending { info.ratingValue(it) }
         "year" -> list.sortedByDescending { com.titanejstudios.tuner.integrations.Tmdb.cleanTitle(nameOf(it)).second ?: 0 }
         "az" -> list.sortedBy { com.titanejstudios.tuner.integrations.Tmdb.cleanTitle(nameOf(it)).first.lowercase() }
         else -> list.sortedByDescending { addedOrder(info.idOf(it)) }
@@ -686,7 +692,13 @@ private fun <T> PhoneCatalogue(
             else -> {
                 // Browse: rows.
                 val recent = remember(all) { all.sortedByDescending { addedOrder(info.idOf(it)) }.take(30) }
-                val top = remember(all) { all.filter { ratingOf(info.ratingOf(it)) >= 7.0 }.sortedByDescending { ratingOf(info.ratingOf(it)) }.take(30) }
+                // Top rated: real ratings (IMDb/TMDB) as they arrive – the provider's best-scored first in line.
+                LaunchedEffect(all) {
+                    val candidates = all.sortedByDescending { ratingOf(info.providerRating(it)) }.take(120) + recent
+                    vm.requestRatings(candidates.map(nameOf), info.isSeries)
+                }
+                val known = vm.vodRatings.size
+                val top = remember(all, known) { all.filter { info.ratingValue(it) >= 7.0 }.sortedByDescending { info.ratingValue(it) }.take(30) }
                 val byCategory = remember(all) { all.groupBy(categoryOf) }
                 LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp), contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 16.dp)) {
                     if (continueEntries.isNotEmpty()) {

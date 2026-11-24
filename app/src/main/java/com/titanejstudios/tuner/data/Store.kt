@@ -736,6 +736,10 @@ class Store(context: Context) {
     var ytSkipSponsors: Boolean
         get() = prefs.getBoolean("youtube_skip_sponsors", true)
         set(value) = prefs.edit().putBoolean("youtube_skip_sponsors", value).apply()
+    /** Film and series ratings looked up (IMDb via OMDb, or TMDB): JSON {key: [rating, source, when]}. */
+    var vodRatings: String?
+        get() = prefs.getString("vod_ratings", null)
+        set(value) = prefs.edit().putString("vod_ratings", value).apply()
     var hideAdult: Boolean
         get() = prefs.getBoolean("hide_adult", true)
         set(value) = prefs.edit().putBoolean("hide_adult", value).apply()

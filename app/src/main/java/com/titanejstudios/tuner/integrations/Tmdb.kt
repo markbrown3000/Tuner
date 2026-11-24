@@ -24,6 +24,10 @@ object Tmdb {
         val cast: List<String>,
         /** YouTube video id of the trailer, if there is one. */
         val trailerKey: String?,
+        /** IMDb's id ("tt0133093"), for its rating. */
+        val imdbId: String? = null,
+        /** How many people rated it on TMDB (a 10.0 from 2 votes means little). */
+        val votes: Int = 0,
     )
 
     private const val API = "https://api.themoviedb.org/3"
@@ -86,7 +90,7 @@ object Tmdb {
     }
 
     private fun details(apiKey: String, kind: String, id: Long): Info {
-        val o = get(apiKey, "$API/$kind/$id?append_to_response=credits,videos&language=en-GB")
+        val o = get(apiKey, "$API/$kind/$id?append_to_response=credits,videos,external_ids&language=en-GB")
         val date = o.optString("release_date").ifEmpty { o.optString("first_air_date") }
         val runtime = o.optInt("runtime", 0).takeIf { it > 0 }
             ?: o.optJSONArray("episode_run_time")?.optInt(0, 0)?.takeIf { it > 0 }
@@ -115,6 +119,8 @@ object Tmdb {
             genres = genres,
             cast = cast,
             trailerKey = trailer,
+            imdbId = (o.optString("imdb_id").takeIf { it.startsWith("tt") } ?: o.optJSONObject("external_ids")?.optString("imdb_id"))?.takeIf { it.startsWith("tt") },
+            votes = o.optInt("vote_count", 0),
         )
     }
 

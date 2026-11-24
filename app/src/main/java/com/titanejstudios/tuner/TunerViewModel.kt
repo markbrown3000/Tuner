@@ -72,6 +72,7 @@ import com.titanejstudios.tuner.data.Sports
 import com.titanejstudios.tuner.integrations.NasBackup
 import com.titanejstudios.tuner.integrations.OpenSubtitles
 import com.titanejstudios.tuner.integrations.Tmdb
+import com.titanejstudios.tuner.integrations.Omdb
 import com.titanejstudios.tuner.integrations.TvSync
 import com.titanejstudios.tuner.integrations.AppState
 import com.titanejstudios.tuner.integrations.HomeAssistantWebhook
@@ -498,6 +499,83 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         if (activeProfile.kids) return
         hideAdult = !hideAdult
         store.hideAdult = hideAdult
+    }
+
+    // ---------------- Proper ratings for films and series (IMDb, else TMDB) ----------------
+
+    /** A looked-up rating: [value] out of 10, from "IMDb" or "TMDB". */
+    class VodRating(val value: Double, val source: String)
+
+    /** "f:<name>" / "s:<name>" → its rating (or null: looked up, none found). */
+    val vodRatings = androidx.compose.runtime.mutableStateMapOf<String, VodRating?>()
+    private val ratingQueue = java.util.concurrent.LinkedBlockingDeque<Pair<String, Boolean>>()
+    private val ratingAsked = HashSet<String>()
+    private var ratingJob: Job? = null
+    private var ratingsSaveJob: Job? = null
+    private val ratingsLoaded = run {
+        runCatching {
+            val o = JSONObject(store.vodRatings ?: "{}")
+            val monthAgo = System.currentTimeMillis() - 30L * 86_400_000L
+            for (k in o.keys()) {
+                val a = o.optJSONArray(k) ?: continue
+                if (a.optLong(2) < monthAgo) continue
+                vodRatings[k] = if (a.optDouble(0, 0.0) > 0.0) VodRating(a.optDouble(0), a.optString(1)) else null
+                ratingAsked += k
+            }
+        }
+        true
+    }
+
+    private fun ratingKey(name: String, isSeries: Boolean) = (if (isSeries) "s:" else "f:") + name.trim()
+
+    /** The rating to show for a film or series ("IMDb 7.3"), asking for it in the background the first time. */
+    fun ratingLabelFor(name: String, isSeries: Boolean, providerRating: String?): String? {
+        val key = ratingKey(name, isSeries)
+        vodRatings[key]?.let { return (if (it.source == "IMDb") "IMDb " else "★ ") + String.format(Locale.UK, "%.1f", it.value) }
+        // Without a TMDB key, the provider's own number is all there is.
+        return if (tmdbKey == null) com.titanejstudios.tuner.ui.ratingLabel(providerRating) else null
+    }
+
+    /** The best known rating out of 10 (for sorting and "Top rated"). */
+    fun ratingValueFor(name: String, isSeries: Boolean, providerRating: String?): Double =
+        vodRatings[ratingKey(name, isSeries)]?.value
+            ?: if (tmdbKey == null) providerRating?.replace(',', '.')?.toDoubleOrNull() ?: 0.0 else 0.0
+
+    /** Look these titles' ratings up (newest asks first – what's on screen now). */
+    fun requestRatings(names: List<String>, isSeries: Boolean) {
+        val key = tmdbKey ?: return
+        for (n in names.asReversed()) {
+            val k = ratingKey(n, isSeries)
+            if (ratingAsked.add(k)) ratingQueue.addFirst(n to isSeries)
+        }
+        if (ratingJob?.isActive == true) return
+        val omdb = BuildConfig.OMDB_KEY.takeIf { it.isNotBlank() }
+        ratingJob = viewModelScope.launch(Dispatchers.IO) {
+            while (true) {
+                val (name, series) = ratingQueue.pollFirst() ?: break
+                val info = runCatching { Tmdb.lookup(key, name, series) }.getOrNull()
+                val imdb = if (omdb != null && info?.imdbId != null) runCatching { Omdb.imdbRating(omdb, info.imdbId) }.getOrNull() else null
+                val r = when {
+                    imdb != null && imdb > 0.0 -> VodRating(imdb, "IMDb")
+                    // TMDB's own score, once enough people have rated it.
+                    info?.rating != null && info.votes >= 20 -> VodRating(info.rating, "TMDB")
+                    else -> null
+                }
+                withContext(Dispatchers.Main) { vodRatings[ratingKey(name, series)] = r }
+                saveRatingsSoon()
+            }
+        }
+    }
+
+    private fun saveRatingsSoon() {
+        if (ratingsSaveJob?.isActive == true) return
+        ratingsSaveJob = viewModelScope.launch {
+            delay(5_000)
+            val o = JSONObject()
+            val t = System.currentTimeMillis()
+            for ((k, v) in vodRatings.toMap()) o.put(k, org.json.JSONArray().put(v?.value ?: 0.0).put(v?.source ?: "").put(t))
+            store.vodRatings = o.toString()
+        }
     }
 
     /** Pull down to refresh (phones): playlists and guide on Home and the guide, the list on Films & TV. */

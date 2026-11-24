@@ -28,6 +28,8 @@ val googleClientId: String = builtInKey("TUNER_GOOGLE_CLIENT_ID", "google_client
 val googleClientSecret: String = builtInKey("TUNER_GOOGLE_CLIENT_SECRET", "google_client_secret")
 // YouTube Data API key (search). GitHub secret YOUTUBE_KEY.
 val youtubeKey: String = builtInKey("TUNER_YOUTUBE_KEY", "youtube_key")
+// OMDb (IMDb ratings) – the OMDB_KEY secret, or omdb_key=… in keys.properties.
+val omdbKey: String = builtInKey("TUNER_OMDB_KEY", "omdb_key")
 
 fun versionCodeFor(v: String): Int {
     val p = v.split('.', '-').mapNotNull { it.toIntOrNull() } + listOf(0, 0, 0)
@@ -48,6 +50,7 @@ android {
         buildConfigField("String", "GOOGLE_CLIENT_ID", "\"$googleClientId\"")
         buildConfigField("String", "GOOGLE_CLIENT_SECRET", "\"$googleClientSecret\"")
         buildConfigField("String", "YOUTUBE_KEY", "\"$youtubeKey\"")
+        buildConfigField("String", "OMDB_KEY", "\"$omdbKey\"")
     }
 
     signingConfigs {

@@ -526,3 +526,10 @@ In the same Google Cloud project as Google Drive sync:
 3. **Google Auth Platform › Data access › Add or remove scopes**: add `.../auth/youtube.readonly` and **Save**. It's a "sensitive" permission, so Google shows "Google hasn't verified this app" when you sign in – press **Advanced › Go to Flicker** (fine for your own family; up to 100 people can sign in like this).
 
 Searches use about 100 of the project's 10,000 free daily units each (roughly 100 searches a day); playing videos uses none, and the subscriptions row uses about one unit per channel every few hours.
+
+## IMDb ratings (optional)
+
+Films and series show their real rating – **IMDb 7.3** – instead of the provider's own numbers (which are often missing or a flat 10.0). Flicker finds each title on TMDB (your TMDB key), then asks OMDb for its IMDb rating; without an OMDb key it shows TMDB's score (★ 7.1) instead. Ratings are remembered for a month.
+
+1. Go to **omdbapi.com › API Key**, choose **FREE (1,000 daily limit)**, enter your email, and click the link in the email to turn the key on.
+2. Add it as a GitHub secret called `OMDB_KEY` (or `omdb_key=…` in `keys.properties`), and make a new release.
