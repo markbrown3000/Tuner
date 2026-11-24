@@ -7,9 +7,10 @@ import java.net.URL
 import java.net.URLEncoder
 
 /**
- * Google sign-in for TVs (type a short code on your phone) and the hidden "app data" folder in
- * your own Google Drive. Flicker can only see its own files there – nothing else in your Drive –
- * and they count against your Drive storage, not anyone else's.
+ * Google sign-in for TVs (type a short code on your phone) and one small file in a "Flicker"
+ * folder in your own Google Drive. The permission (drive.file) only lets Flicker see files it
+ * made itself – nothing else in your Drive – and they count against your own Drive storage.
+ * (TV sign-in turns down the hidden "app data" folder permission, so it's an ordinary folder.)
  */
 class GoogleDrive(private val clientId: String, private val clientSecret: String) {
 
@@ -105,10 +106,21 @@ class GoogleDrive(private val clientId: String, private val clientSecret: String
 
     /** The sync file's id and contents, or null if there isn't one yet. */
     fun read(access: String): Pair<String, String>? {
-        val q = URLEncoder.encode("name='$FILE'", "UTF-8")
-        val list = JSONObject(get("https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&q=$q&fields=files(id,modifiedTime)&pageSize=5", access))
+        val q = URLEncoder.encode("name='$FILE' and trashed=false", "UTF-8")
+        val list = JSONObject(get("https://www.googleapis.com/drive/v3/files?q=$q&fields=files(id,modifiedTime)&orderBy=modifiedTime%20desc&pageSize=5", access))
         val id = list.optJSONArray("files")?.optJSONObject(0)?.optString("id")?.takeIf { it.isNotBlank() } ?: return null
         return id to get("https://www.googleapis.com/drive/v3/files/$id?alt=media", access)
+    }
+
+    /** The "Flicker" folder in My Drive (made the first time). */
+    private fun folder(access: String): String {
+        val q = URLEncoder.encode("name='$FOLDER' and mimeType='application/vnd.google-apps.folder' and trashed=false", "UTF-8")
+        JSONObject(get("https://www.googleapis.com/drive/v3/files?q=$q&fields=files(id)&pageSize=1", access))
+            .optJSONArray("files")?.optJSONObject(0)?.optString("id")?.takeIf { it.isNotBlank() }?.let { return it }
+        val meta = JSONObject().put("name", FOLDER).put("mimeType", "application/vnd.google-apps.folder").toString()
+        val (code, body) = send("https://www.googleapis.com/drive/v3/files?fields=id", "POST", access, "application/json; charset=UTF-8", meta.toByteArray())
+        if (code !in 200..299) throw IllegalStateException("Google Drive said $code: ${body.take(120)}")
+        return JSONObject(body).getString("id")
     }
 
     /** Saves the sync file (creating it the first time). Returns its id. */
@@ -119,7 +131,8 @@ class GoogleDrive(private val clientId: String, private val clientSecret: String
             if (code != 404) throw IllegalStateException("Google Drive said $code: ${body.take(120)}")
         }
         val boundary = "flicker" + System.currentTimeMillis()
-        val meta = JSONObject().put("name", FILE).put("parents", org.json.JSONArray().put("appDataFolder")).toString()
+        val meta = JSONObject().put("name", FILE).put("description", "Flicker keeps your devices in step with this file – please don't delete it.")
+            .put("parents", org.json.JSONArray().put(folder(access))).toString()
         val multipart = "--$boundary\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n$meta\r\n" +
             "--$boundary\r\nContent-Type: application/json\r\n\r\n$text\r\n--$boundary--"
         val (code, body) = send(
@@ -179,7 +192,8 @@ class GoogleDrive(private val clientId: String, private val clientSecret: String
     class Unauthorised : Exception("Google needs a fresh sign-in token")
 
     companion object {
-        const val SCOPE = "https://www.googleapis.com/auth/drive.appdata"
+        const val SCOPE = "https://www.googleapis.com/auth/drive.file"
         const val FILE = "flicker-sync.json"
+        const val FOLDER = "Flicker"
     }
 }

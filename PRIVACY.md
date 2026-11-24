@@ -10,13 +10,13 @@ Flicker stores your settings on your own device: playlists and logins you add, f
 
 ## Sync between houses (Google Drive)
 
-If you choose to sign in with Google (Settings › Sync between houses), Flicker asks for one permission: **its own hidden app folder in your Google Drive** (`drive.appdata`). Flicker cannot see or change any of your other Drive files.
+If you choose to sign in with Google (Settings › Sync between houses), Flicker asks for one permission: **only the files Flicker creates in your Google Drive** (`drive.file`). Flicker cannot see or change any of your other Drive files.
 
-In that folder Flicker keeps one small file so your devices stay in step: where you got to in films and episodes, My list, followed series, your football teams, learned intros, favourites, and the names of your devices and houses. Because resume points include the address of the stream, this file can contain your IPTV login. It is stored in your own Google account and only Flicker on devices signed in to that account can read it.
+Flicker makes a "Flicker" folder in your Drive and keeps one small file there (flicker-sync.json) so your devices stay in step: where you got to in films and episodes, My list, followed series, your football teams, learned intros, favourites, and the names of your devices and houses. Because resume points include the address of the stream, this file can contain your IPTV login. It is stored in your own Google account and only Flicker on devices signed in to that account can read it.
 
 Flicker also receives your Google email address, only to show which account you're signed in with.
 
-You can stop at any time with Settings › Sync between houses › Sign out, and remove the data from Google Drive (drive.google.com › Settings › Manage apps › Flicker › Delete hidden app data) or by removing Flicker's access at myaccount.google.com/permissions.
+You can stop at any time with Settings › Sync between houses › Sign out, and remove the data by deleting the "Flicker" folder from your Google Drive, or by removing Flicker's access at myaccount.google.com/permissions.
 
 ## Other services Flicker talks to
 

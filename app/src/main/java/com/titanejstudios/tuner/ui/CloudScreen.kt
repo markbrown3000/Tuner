@@ -57,8 +57,8 @@ fun CloudScreen(vm: TunerViewModel) {
             Text("☁ Sync between houses", fontSize = if (narrow) 26.sp else 32.sp, fontWeight = FontWeight.Bold, color = TunerColors.TextPrimary)
             Text(
                 "Sign in every device to the same Google account – at home and at other houses. Where you got to in films and episodes, " +
-                    "My list, followed series, your teams and learned intros stay in step. It's kept in a hidden Flicker folder in that " +
-                    "account's own Google Drive (a few KB), which nothing else can see.",
+                    "My list, followed series, your teams and learned intros stay in step. It's one small file (a few KB) in a " +
+                    "\"Flicker\" folder in that account's own Google Drive – Flicker can only see files it made itself.",
                 color = TunerColors.TextSecondary, fontSize = 14.sp,
             )
             Spacer(Modifier.height(8.dp))

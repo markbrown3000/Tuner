@@ -19,7 +19,7 @@ import org.json.JSONObject
 
 /**
  * Sync between houses: every device signed in to the same Google account shares one small file
- * in that account's own Google Drive (a hidden folder only Flicker can see). Each device writes
+ * in a "Flicker" folder in that account's own Google Drive (Flicker can only see files it made). Each device writes
  * its lists there and takes what's newer from the others – where you got to in films and
  * episodes, My list, followed series, your teams, learned intros, and (if you like) favourites.
  */
