@@ -1475,6 +1475,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
 
     fun onAppStarted() {
         inForeground = true
+        onScreensaverEnded()
         checkUsual()
         if (link.linked) {
             link.start()
@@ -3957,7 +3958,35 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     /** Any button on the remote (or the phone remote, or Home Assistant) counts as someone watching. */
     fun onUserActivity() {
         lastUserActivity = System.currentTimeMillis()
-        saverOn = false
+        if (saverOn) {
+            saverOn = false
+            askWhoIsWatching()
+        }
+    }
+
+    /** The TV's own screensaver (or the screen going off) came on: ask who's watching when it ends. */
+    private var askProfileOnReturn = false
+
+    fun onScreensaverStarted() {
+        // Phones lock their screen all the time – only TVs ask.
+        if (!isPhone) askProfileOnReturn = true
+    }
+
+    fun onScreensaverEnded() {
+        if (!askProfileOnReturn) return
+        askProfileOnReturn = false
+        askWhoIsWatching()
+    }
+
+    /** After any screensaver, with more than one profile: pick who's watching again. */
+    private fun askWhoIsWatching() {
+        if (profiles.size < 2) return
+        if (screen == Screen.ProfilePicker || screen == Screen.ProfileEdit || screen == Screen.SourceEdit) return
+        // Someone's actually watching (the screensaver only came on over a paused or empty screen).
+        if (screen == Screen.Player && playback.isPlaying) return
+        if (mode is PlayMode.Vod) saveResume(syncHome = true)
+        stopPlayback()
+        resetTo(Screen.ProfilePicker)
     }
 
     fun toggleTintFromPicture() {
@@ -3991,6 +4020,11 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     /** OK on the screensaver: watch what's showing. */
     fun playSaverSlide() {
         saverOn = false
+        // More than one profile: choose who's watching first (that comes before playing anything).
+        if (profiles.size > 1) {
+            askWhoIsWatching()
+            return
+        }
         saverCurrent?.play?.invoke()
     }
 
@@ -4195,7 +4229,11 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
 
     /** The video won't play inside other apps (its owner's choice): open it in the YouTube app instead. */
     fun youTubeFailed(id: String, reason: String) {
-        AppLog.warn("YouTube video $id wouldn't play here ($reason) – opening the YouTube app")
+        AppLog.warn("YouTube video $id wouldn't play here ($reason)")
+    }
+
+    /** Only when you ask: the YouTube app has its own "Who's watching?" and sign-in. */
+    fun watchInYouTubeApp(id: String) {
         if (screen == Screen.YouTubePlayer) back()
         openInYouTubeApp(id)
     }

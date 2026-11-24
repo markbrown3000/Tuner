@@ -1,6 +1,7 @@
 package com.titanejstudios.tuner.ui
 
 import android.view.ViewGroup
+import android.webkit.WebView
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -87,15 +88,28 @@ fun YouTubePlayerScreen(vm: TunerViewModel) {
         showBar = true
         barToken++
     }
+    // Plan B: YouTube's own embed page, loaded directly with Flicker named as the referrer.
+    var plainPage by remember(video.id) { mutableStateOf(false) }
+    // Neither way worked: say why, and offer the YouTube app (only if you ask – it has its own sign-in).
+    var failed by remember(video.id) { mutableStateOf<String?>(null) }
+    val web = remember(video.id) { mutableStateOf<WebView?>(null) }
+    fun js(code: String) {
+        web.value?.evaluateJavascript("(function(){var v=document.querySelector('video');if(!v)return '';$code})()", null)
+    }
     fun toggle() {
+        if (plainPage) {
+            js("if(v.paused)v.play();else v.pause();return '';")
+            poke()
+            return
+        }
         val p = player ?: return
         if (playing) p.pause() else p.play()
         poke()
     }
     fun skip(seconds: Float) {
-        val p = player ?: return
         val to = (position + seconds).coerceIn(0f, if (length > 0f) length - 1f else Float.MAX_VALUE)
-        p.seekTo(to)
+        if (plainPage) js("v.currentTime=$to;return '';")
+        else (player ?: return).seekTo(to)
         position = to
         poke()
     }
@@ -133,6 +147,19 @@ fun YouTubePlayerScreen(vm: TunerViewModel) {
 
                 override fun onError(youTubePlayer: YouTubePlayer, error: PlayerConstants.PlayerError) {
                     vm.youTubeFailed(video.id, error.name)
+                    when {
+                        plainPage || failed != null -> Unit
+                        // The owner doesn't allow other apps, or it's gone: no point trying again.
+                        error == PlayerConstants.PlayerError.VIDEO_NOT_PLAYABLE_IN_EMBEDDED_PLAYER ->
+                            failed = "The video's owner only lets it play on YouTube itself."
+                        error == PlayerConstants.PlayerError.VIDEO_NOT_FOUND ->
+                            failed = "This video has been removed or made private."
+                        else -> {
+                            player = null
+                            playing = false
+                            plainPage = true
+                        }
+                    }
                 }
             }, true, options)
         }
@@ -152,6 +179,7 @@ fun YouTubePlayerScreen(vm: TunerViewModel) {
         Modifier.fillMaxSize().background(Color.Black)
             .focusRequester(focus)
             .onPreviewKeyEvent { e ->
+                if (failed != null) return@onPreviewKeyEvent false
                 val code = e.nativeKeyEvent.keyCode
                 val down = e.type == KeyEventType.KeyDown
                 val up = e.type == KeyEventType.KeyUp
@@ -178,7 +206,41 @@ fun YouTubePlayerScreen(vm: TunerViewModel) {
             }
             .focusable(),
     ) {
-        AndroidView(factory = { view }, modifier = Modifier.fillMaxSize())
+        if (!plainPage) AndroidView(factory = { view }, modifier = Modifier.fillMaxSize())
+        else PlainYouTubePage(
+            video.id,
+            onCreated = { web.value = it },
+            onStatus = { cur, dur, paused ->
+                position = cur
+                if (dur > 0f) length = dur
+                playing = !paused
+                if (dur > 0f && cur >= dur - 0.5f && paused) vm.back()
+            },
+            onGiveUp = {
+                vm.youTubeFailed(video.id, "embed page didn't load")
+                if (failed == null) failed = "YouTube wouldn't play it inside Flicker."
+            },
+        )
+        failed?.let { why ->
+            val openFocus = remember { FocusRequester() }
+            LaunchedEffect(Unit) {
+                delay(100)
+                runCatching { openFocus.requestFocus() }
+            }
+            Column(
+                Modifier.align(Alignment.Center).background(Color(0xF0101418), RoundedCornerShape(18.dp)).padding(28.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(video.title, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Spacer(Modifier.height(6.dp))
+                Text(why, color = Color(0xFFCCCCCC), fontSize = 15.sp)
+                Spacer(Modifier.height(16.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    PillButton("Open in the YouTube app", { vm.watchInYouTubeApp(video.id) }, Modifier.focusRequester(openFocus))
+                    PillButton("Back", { vm.back() })
+                }
+            }
+        }
         // Phones: tap to pause or play, double-tap a side to skip 10 seconds.
         if (vm.isPhone) {
             Box(
@@ -190,7 +252,7 @@ fun YouTubePlayerScreen(vm: TunerViewModel) {
                 }
             )
         }
-        if (showBar || !playing) {
+        if (failed == null && (showBar || !playing)) {
             Column(
                 Modifier.align(Alignment.BottomStart).fillMaxWidth()
                     .background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xE6000000))))
@@ -213,6 +275,63 @@ fun YouTubePlayerScreen(vm: TunerViewModel) {
             }
         }
     }
+}
+
+/**
+ * YouTube's embed page loaded straight into a WebView, sending Flicker's app ID as the referrer
+ * (what YouTube asks of apps). Flicker drives the page's video with a little JavaScript.
+ */
+@android.annotation.SuppressLint("SetJavaScriptEnabled")
+@Composable
+private fun PlainYouTubePage(
+    id: String,
+    onCreated: (WebView) -> Unit,
+    onStatus: (Float, Float, Boolean) -> Unit,
+    onGiveUp: () -> Unit,
+) {
+    val context = LocalContext.current
+    val referrer = "https://" + context.packageName
+    val page = remember(id) {
+        WebView(context).apply {
+            settings.javaScriptEnabled = true
+            settings.domStorageEnabled = true
+            settings.mediaPlaybackRequiresUserGesture = false
+            setBackgroundColor(android.graphics.Color.BLACK)
+            isFocusable = false
+            isFocusableInTouchMode = false
+            descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
+            keepScreenOn = true
+            webViewClient = android.webkit.WebViewClient()
+            webChromeClient = android.webkit.WebChromeClient()
+            loadUrl(
+                "https://www.youtube.com/embed/$id?autoplay=1&controls=0&rel=0&iv_load_policy=3&cc_load_policy=1&playsinline=1&origin=$referrer",
+                mapOf("Referer" to "$referrer/"),
+            )
+            onCreated(this)
+        }
+    }
+    DisposableEffect(page) { onDispose { runCatching { page.destroy() } } }
+    LaunchedEffect(page) {
+        var seen = false
+        var waited = 0
+        while (true) {
+            delay(1_000)
+            waited++
+            val result = kotlinx.coroutines.CompletableDeferred<String>()
+            page.evaluateJavascript(
+                "(function(){var v=document.querySelector('video');if(!v)return '';if(!v.dataset.f){v.dataset.f=1;v.play();}return v.currentTime+','+(v.duration||0)+','+v.paused;})()"
+            ) { result.complete(it ?: "") }
+            val parts = result.await().trim('"').split(',')
+            if (parts.size == 3) {
+                seen = true
+                onStatus(parts[0].toFloatOrNull() ?: 0f, parts[1].toFloatOrNull() ?: 0f, parts[2] == "true")
+            } else if (!seen && waited >= 15) {
+                onGiveUp()
+                return@LaunchedEffect
+            }
+        }
+    }
+    AndroidView(factory = { page }, modifier = Modifier.fillMaxSize())
 }
 
 // ---------------- The YouTube section ----------------

@@ -82,6 +82,13 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         if (savedInstanceState == null) vm.handleIntent(intent)
         addOnNewIntentListener { vm.handleIntent(it) }
+        // The TV's screensaver starting or the screen going off: ask who's watching afterwards.
+        val filter = android.content.IntentFilter().apply {
+            addAction(android.content.Intent.ACTION_DREAMING_STARTED)
+            addAction(android.content.Intent.ACTION_DREAMING_STOPPED)
+            addAction(android.content.Intent.ACTION_SCREEN_OFF)
+        }
+        androidx.core.content.ContextCompat.registerReceiver(this, screensaverReceiver, filter, androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED)
         addOnPictureInPictureModeChangedListener { info -> vm.inPip = info.isInPictureInPictureMode }
         // Buttons pressed on the phone remote arrive here as real key presses.
         lifecycleScope.launch {
@@ -105,6 +112,20 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    private val screensaverReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: android.content.Context, intent: android.content.Intent) {
+            when (intent.action) {
+                android.content.Intent.ACTION_DREAMING_STOPPED -> vm.onScreensaverEnded()
+                else -> vm.onScreensaverStarted()
+            }
+        }
+    }
+
+    override fun onDestroy() {
+        runCatching { unregisterReceiver(screensaverReceiver) }
+        super.onDestroy()
     }
 
     override fun onStart() {
