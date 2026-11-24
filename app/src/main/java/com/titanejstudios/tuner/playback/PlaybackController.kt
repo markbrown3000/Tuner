@@ -148,6 +148,40 @@ class PlaybackController(private val context: Context) {
     private var altIndex = 0
     private val stallHandler = Handler(Looper.getMainLooper())
     private val stallCheck = Runnable { onStalled() }
+    /** Freezes on this channel visit (not reset by a few seconds of picture, unlike [retries]). */
+    private var stalls = 0
+    private var stuckSince = 0L
+    private var lastPosition = -1L
+    /**
+     * Live TV watchdog, every 2 seconds: "buffering" (or holding for the start-up cushion), or a
+     * picture whose position hasn't moved, for 8 seconds counts as frozen.
+     */
+    private val watchdog = object : Runnable {
+        override fun run() {
+            val p = player
+            val userPaused = !p.playWhenReady && !priming
+            if (url == null || !live || ts != null || userPaused || p.playbackState == Player.STATE_IDLE) {
+                stuckSince = 0L
+                lastPosition = -1L
+            } else {
+                val now = SystemClock.uptimeMillis()
+                val pos = p.currentPosition
+                val stuck = p.playbackState == Player.STATE_BUFFERING || priming ||
+                    (p.playbackState == Player.STATE_READY && pos == lastPosition)
+                lastPosition = pos
+                if (!stuck) {
+                    stuckSince = 0L
+                } else if (stuckSince == 0L) {
+                    stuckSince = now
+                } else if (now - stuckSince >= STALL_MS) {
+                    stuckSince = 0L
+                    lastPosition = -1L
+                    onStalled()
+                }
+            }
+            stallHandler.postDelayed(this, 2_000)
+        }
+    }
 
     // Start-up cushion: hold a flaky channel paused until a few seconds are buffered.
     private var streamKey: String? = null
@@ -255,8 +289,7 @@ class PlaybackController(private val context: Context) {
                 }
                 isBuffering = state == Player.STATE_BUFFERING || priming
                 stallHandler.removeCallbacks(stallCheck)
-                // A live stream stuck "buffering" for 12s usually means the server has stalled.
-                if (isBuffering && live && ts == null && url != null) stallHandler.postDelayed(stallCheck, STALL_MS)
+                // Frozen streams are caught by the watchdog (it also covers the start-up cushion).
                 if (state == Player.STATE_ENDED && url != null) {
                     val session = ts
                     when {
@@ -298,6 +331,11 @@ class PlaybackController(private val context: Context) {
         stallHandler.removeCallbacks(stallCheck)
         this.alternates = alternates.filter { it != url }.distinct()
         altIndex = 0
+        stalls = 0
+        stuckSince = 0L
+        lastPosition = -1L
+        stallHandler.removeCallbacks(watchdog)
+        if (live) stallHandler.postDelayed(watchdog, 2_000)
         stopTimeshift()
         this.url = url
         this.live = live
@@ -488,11 +526,13 @@ class PlaybackController(private val context: Context) {
     /** Live picture frozen on "buffering": reconnect, and after a few goes try a backup link. */
     private fun onStalled() {
         val u = url ?: return
-        if (!live || ts != null || player.playbackState != Player.STATE_BUFFERING || !player.playWhenReady) return
-        AppLog.info("Stream stalled, reconnecting: ${short(u)}")
+        if (!live || ts != null) return
+        endPriming()
+        stalls++
+        AppLog.info("Stream frozen ($stalls), reconnecting: ${short(u)}")
         reportTrouble()
-        // Frozen twice: try a backup rather than keep waiting.
-        if (retries >= 1 && tryAlternate()) return
+        // Frozen twice on this channel: try a backup rather than keep waiting.
+        if (stalls >= 2 && tryAlternate()) return
         scheduleReconnect()
     }
 
@@ -500,6 +540,8 @@ class PlaybackController(private val context: Context) {
     private fun tryAlternate(): Boolean {
         if (altIndex >= alternates.size) return false
         val next = alternates[altIndex++]
+        // The backup gets its own chances before the next one is tried.
+        stalls = 0
         AppLog.info("Switching to backup link ${altIndex}/${alternates.size}: ${short(next)}")
         if (live) reportTrouble()
         url = next
@@ -853,6 +895,7 @@ class PlaybackController(private val context: Context) {
         boost.release()
         nightMode.release()
         handler.removeCallbacksAndMessages(null)
+        stallHandler.removeCallbacks(watchdog)
         stallHandler.removeCallbacks(stallCheck)
         stopTimeshift()
         session?.release()

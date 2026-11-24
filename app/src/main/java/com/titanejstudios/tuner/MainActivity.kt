@@ -253,9 +253,9 @@ private fun TunerApp(vm: TunerViewModel) {
                     items = buildList {
                         c.copies.forEach { e ->
                             val where = listOfNotNull(e.library, e.year).joinToString(" · ").ifEmpty { "Plex" }
-                            add(MenuItem("Plex – $where", if (vm.plexServerCount > 1) e.server.name else null) { vm.choosePlexCopy(e) })
+                            add(MenuItem("Plex – $where", if (vm.plexServerCount > 1) e.server.name else null) { vm.choosePlexCopy(c, e) })
                         }
-                        if (c.iptv != null) add(MenuItem("Your IPTV provider") { vm.choosePlexCopy(null) })
+                        if (c.iptv != null) add(MenuItem("Your IPTV provider") { vm.choosePlexCopy(c, null) })
                     },
                     onDismiss = { vm.cancelPlexCopyChoice() },
                 )

@@ -3316,9 +3316,11 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     }
 
 
-    /** Plays the copy picked ([copy] null = the IPTV copy). */
-    fun choosePlexCopy(copy: com.titanejstudios.tuner.integrations.Plex.Entry?) {
-        val c = plexCopyChoice ?: return
+    /**
+     * Plays the copy picked ([copy] null = the IPTV copy). The choice is passed in, because the
+     * menu closes (clearing [plexCopyChoice]) before it says which item was picked.
+     */
+    fun choosePlexCopy(c: PlexCopyChoice, copy: com.titanejstudios.tuner.integrations.Plex.Entry?) {
         plexCopyChoice = null
         if (copy != null) playPlexEntry(copy, c.fromStart, chosen = true, fallback = c.iptv?.let { m -> { playMovie(m, c.fromStart, viaPlex = false) } })
         else c.iptv?.let { playMovie(it, c.fromStart, viaPlex = false) }
