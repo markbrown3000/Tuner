@@ -261,6 +261,20 @@ private fun TunerApp(vm: TunerViewModel) {
                     onDismiss = { vm.cancelPlexCopyChoice() },
                 )
             }
+            if (vm.cloudPrompt && vm.screen == Screen.Home && vm.initialLoadDone) {
+                MenuDialog(
+                    title = "Sync between houses?",
+                    subtitle = "Sign in with Google once and this device keeps films, episodes, My list and your teams in step " +
+                        "with your other TVs and phones – at home and at other houses. It takes a minute: you type a code on your phone.",
+                    items = listOf(
+                        MenuItem("☁ Set it up now") { vm.acceptCloudPrompt() },
+                        MenuItem("Not now", "it's in Settings when you want it") {
+                            vm.showNotice("You can set it up any time: Settings › Sync between houses")
+                        },
+                    ),
+                    onDismiss = { vm.dismissCloudPrompt() },
+                )
+            }
             vm.tvChoice?.let { what ->
                 MenuDialog(
                     title = "Watch on which TV?",

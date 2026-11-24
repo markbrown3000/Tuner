@@ -711,6 +711,10 @@ class Store(context: Context) {
     var cloudShareFavourites: Boolean
         get() = prefs.getBoolean("cloud_share_favs", false)
         set(value) = prefs.edit().putBoolean("cloud_share_favs", value).apply()
+    /** The "Set up sync between houses?" question has been asked on this device. */
+    var cloudPrompted: Boolean
+        get() = prefs.getBoolean("cloud_prompted", false)
+        set(value) = prefs.edit().putBoolean("cloud_prompted", value).apply()
     var cloudSyncedAt: Long
         get() = prefs.getLong("cloud_synced_at", 0L)
         set(value) = prefs.edit().putLong("cloud_synced_at", value).apply()

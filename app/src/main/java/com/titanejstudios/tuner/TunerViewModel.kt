@@ -625,6 +625,8 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     private val upgradeTold = HashSet<String>()
     /** The Christmas TV planner's programmes (null until loaded). */
     var festive by mutableStateOf<List<FestiveItem>?>(null); private set
+    /** Ask once per device: "Set up sync between houses?" (shown on Home). */
+    var cloudPrompt by mutableStateOf(false); private set
     /** What this profile has started watching (its own Continue watching). */
     var started by mutableStateOf(store.started(store.activeProfileId)); private set
     /** Missed it? Programmes from the last week you'd probably like, ready on catch-up. */
@@ -1085,6 +1087,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
 
     /** Opens where you left off – Home, the TV Guide on your last category and channel, or the last channel. */
     private fun handleStartup() {
+        if (cloud.available && !cloud.signedIn && !store.cloudPrompted && !activeProfile.kids) cloudPrompt = true
         if (startupHandled || allChannels.isEmpty() || pendingLink != null) return
         if (screen == Screen.ProfilePicker) return
         startupHandled = true
@@ -4857,6 +4860,18 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
 
     fun cancelTvChoice() {
         tvChoice = null
+    }
+
+    fun acceptCloudPrompt() {
+        cloudPrompt = false
+        store.cloudPrompted = true
+        navigate(Screen.Cloud)
+        cloud.signIn()
+    }
+
+    fun dismissCloudPrompt() {
+        cloudPrompt = false
+        store.cloudPrompted = true
     }
 
     fun linkShowCode() = link.showCode()
