@@ -79,6 +79,26 @@ object WhatsOn {
     )
     private val plusOne = Regex("(?i)\\s*\\+\\s*1(?![0-9])")
 
+    /** Channels in another language or for another country (by their group, tag or name). */
+    private val worldGroup = Regex(
+        "(?i)\\b(asian|asia|bollywood|desi|indian?|hindi|punjabi|tamil|telugu|malayalam|kannada|marathi|gujarati|bengali|bangla|urdu|" +
+            "pakistan|arabic|arab|african?|nollywood|turk|turkish|kurd|persian|farsi|polish|polska|romania|russian|ukrain|albania|greek|" +
+            "portug|brazil|latino|spanish|french|german|italian|dutch|nordic|swedish|norwegian|danish|finnish|ex-?yu|balkan|" +
+            "chinese|japan|korean|filipino|pinoy|thai|vietnam|somali|caribbean|hebrew)\\b"
+    )
+    private val worldName = Regex(
+        "(?i)^\\W*(zee|star (plus|gold|bharat|life|jalsha|vijay|pravah|maa|utsav)|colors|sony (sab|max|tv|aath|yay|pal|wah|marathi)|" +
+            "b4u|&tv|and tv|&pictures|aaj tak|abp|ndtv|ptc|ary|geo|hum|express news|samaa|dunya|bol |mbc|rotana|al jazeera arabic|" +
+            "zing|9x|mastii|sangeet|dharm|aastha|sanskar|ishara|dangal|shemaroo|bflix|ptv|channel 44|kalaignar|sun tv|ktv|asianet|" +
+            "rishtey|zindagi|sahara|news18|republic|times now|india today|dd )(?![a-z])"
+    )
+
+    /** Another country's or language's channel ("Tidy" hides them, apart from your favourites). */
+    fun isWorld(c: Channel): Boolean {
+        Languages.tagOf(c)?.let { if (!it.english) return true }
+        return worldGroup.containsMatchIn(c.group) || worldName.containsMatchIn(c.name)
+    }
+
     /** Shopping, adult and radio channels – hidden from What's On unless you ask for everything. */
     fun isClutter(c: Channel): Boolean = clutterName.containsMatchIn(c.name) || clutterName.containsMatchIn(c.group)
 
@@ -135,6 +155,8 @@ object WhatsOn {
         for (c in channels) {
             if (favouritesOnly && c.id !in favourites) continue
             if (tidy && isClutter(c)) continue
+            // Tidy also keeps to your own country's channels (favourites always stay).
+            if (tidy && c.id !in favourites && isWorld(c)) continue
             // A +1 channel's programmes show as "Also on … +1" on the main channel instead.
             if (tidy && isPlusOne(c) && baseKey(c) in baseKeys) continue
             val list = epg[c.id] ?: continue

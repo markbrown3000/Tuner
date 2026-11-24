@@ -30,6 +30,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
@@ -123,7 +124,7 @@ fun WhatsOnScreen(vm: TunerViewModel) {
         }
         Column(Modifier.fillMaxSize().padding(horizontal = if (narrow) 12.dp else 44.dp, vertical = if (narrow) 10.dp else 18.dp)) {
             TopNav(vm, Screen.WhatsOn)
-            if (!narrow) WhatsOnStrip(vm, shown, shownFilm, Modifier.fillMaxWidth().height(104.dp))
+            if (!narrow) WhatsOnStrip(vm, shown, shownFilm, Modifier.fillMaxWidth().height(112.dp).clipToBounds())
             // One row of controls.
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically, contentPadding = PaddingValues(vertical = 6.dp)) {
                 item(key = "now") { PillButton("Now", { vm.whatsOnNow() }, Modifier.focusRequester(first), selected = vm.whatsOnMinute == null, compact = true) }
@@ -152,7 +153,7 @@ fun WhatsOnScreen(vm: TunerViewModel) {
                     if (vm.epg.isEmpty()) "No TV guide yet – it loads after the channels" else "Nothing found for that – try another time or kind"
                 )
                 timeline -> WhatsOnTimeline(vm, main, restorer, onFocus, onTile) { open(it) }
-                else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp), contentPadding = PaddingValues(bottom = 24.dp)) {
+                else -> LazyColumn(Modifier.clipToBounds(), verticalArrangement = Arrangement.spacedBy(4.dp), contentPadding = PaddingValues(bottom = 24.dp)) {
                     fun row(title: String, list: List<WhatsOn.Entry>) {
                         if (list.isEmpty()) return
                         item(key = "h-$title") { WhatsOnSection(title) }
@@ -283,7 +284,7 @@ private fun WhatsOnStrip(vm: TunerViewModel, e: WhatsOn.Entry?, film: com.titane
                 badgesFor(e, vm.now).forEach { (t, c) -> Badge(t, c) }
                 e.reason?.let { Text(it.uppercase(), color = Color(0xFFFFB648), fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) }
             }
-            Text(p.title, color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(p.title, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis, lineHeight = 26.sp)
             Text(
                 listOfNotNull(
                     e.channel.name, "${hhmm(p.start)} – ${hhmm(p.stop)}", detailLine(e, film),
@@ -291,7 +292,7 @@ private fun WhatsOnStrip(vm: TunerViewModel, e: WhatsOn.Entry?, film: com.titane
                 ).joinToString("  ·  "),
                 color = Color(0xFFD4DDF5), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
-            Text(p.desc ?: film?.overview ?: "", color = Color(0xFFBFC9E8), fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(p.desc ?: film?.overview ?: "", color = Color(0xFFBFC9E8), fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis, lineHeight = 16.sp)
         }
         if (vm.whatsOnPreview && vm.mode != null) {
             MiniPreview(vm, Modifier.align(Alignment.TopEnd).fillMaxHeight().aspectRatio(16f / 9f))
@@ -391,7 +392,7 @@ private fun WhatsOnTimeline(
     androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize()) {
         val logoW = 110.dp
         val barW = maxWidth - logoW - 12.dp
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp), contentPadding = PaddingValues(bottom = 24.dp)) {
+        LazyColumn(Modifier.clipToBounds(), verticalArrangement = Arrangement.spacedBy(4.dp), contentPadding = PaddingValues(bottom = 24.dp)) {
             // Times along the top.
             item(key = "times") {
                 Row(Modifier.padding(start = logoW + 12.dp)) {
