@@ -15,6 +15,7 @@ object LinkSync {
     const val INTROS = "intros"
     const val TEAMS = "teams"
     const val STARTED = "started"
+    const val PROFILES = "profiles"
     private const val DONE = "done"
 
     /** Remembers that [contentId] was finished (keeps the newest 200). */
@@ -26,6 +27,11 @@ object LinkSync {
     /** This device's lists, for another device to pull. */
     fun snapshot(store: Store): JSONObject {
         val sections = JSONObject()
+        sections.put(
+            PROFILES,
+            JSONObject().put("at", store.syncStamp(PROFILES)).put("list", Store.profilesToJson(store.profiles))
+                .put("gone", JSONObject(store.profilesGone)),
+        )
         val favs = JSONObject()
         for (p in store.profiles) favs.put(p.id, JSONArray(store.favourites(p.id)))
         sections.put(TvSync.FAVOURITES, JSONObject().put("at", store.syncStamp(TvSync.FAVOURITES)).put("data", favs))
@@ -56,23 +62,69 @@ object LinkSync {
         val sections = remote.optJSONObject("sections") ?: return emptySet()
         val changed = HashSet<String>()
 
+        // Profiles (first, so favourites below can find them). Matched by id, else by name.
+        val theirProfiles = sections.optJSONObject(PROFILES)?.optJSONArray("list")?.let { Store.profilesFromJson(it) }.orEmpty()
+        sections.optJSONObject(PROFILES)?.let { r ->
+            val theirStamp = r.optLong("at")
+            val mineStamp = store.syncStamp(PROFILES)
+            val mine = store.profiles
+            // A device that's never changed its profiles (just the starting "Everyone") takes the other's.
+            val untouched = mineStamp == 0L && mine.size <= 1
+            if (theirStamp > mineStamp || (untouched && theirProfiles.isNotEmpty())) {
+                val gone = HashMap(store.profilesGone)
+                r.optJSONObject("gone")?.let { o -> for (k in o.keys()) if (o.optLong(k) > (gone[k] ?: 0L)) gone[k] = o.optLong(k) }
+                val out = ArrayList<com.titanejstudios.tuner.data.Profile>()
+                val used = HashSet<String>()
+                for (t in theirProfiles) {
+                    val local = mine.firstOrNull { it.id == t.id } ?: mine.firstOrNull { it.name.trim().equals(t.name.trim(), ignoreCase = true) }
+                    val id = local?.id ?: t.id
+                    if (!used.add(id)) continue
+                    out += t.copy(id = id)
+                }
+                // Profiles only here: kept, unless the other device deleted one of that name since.
+                for (p in mine) {
+                    if (p.id in used) continue
+                    if (out.any { it.name.trim().equals(p.name.trim(), ignoreCase = true) }) continue
+                    val deletedAt = gone[p.name.trim().lowercase()] ?: 0L
+                    if (deletedAt > mineStamp) continue
+                    out += p
+                }
+                // Always at least one grown-up profile.
+                if (out.isNotEmpty() && out.any { !it.kids } && out != mine) {
+                    store.profiles = out
+                    changed += PROFILES
+                }
+                store.profilesGone = gone
+                store.setSyncStamp(PROFILES, maxOf(theirStamp, mineStamp))
+            }
+        }
+
         // Favourites: only for profiles this device has (profile ids match after "Copy to another TV").
         sections.optJSONObject(TvSync.FAVOURITES)?.let { r ->
             val data = r.optJSONObject("data") ?: JSONObject()
             val theirStamp = r.optLong("at")
             val mine = store.syncStamp(TvSync.FAVOURITES)
             val hereEmpty = store.profiles.all { store.favourites(it.id).isEmpty() }
-            if (theirStamp > mine || (mine == 0L && hereEmpty && data.length() > 0)) {
-                val ids = store.profiles.map { it.id }.toSet()
+            val newer = theirStamp > mine || (mine == 0L && hereEmpty && data.length() > 0)
+            run {
+                val here = store.profiles
+                val ids = here.map { it.id }.toSet()
                 var any = false
-                for (pid in data.keys()) {
-                    if (pid !in ids) continue
-                    val arr = data.optJSONArray(pid) ?: continue
+                for (theirPid in data.keys()) {
+                    // Profile ids differ between devices that made their profiles separately: match by name.
+                    val pid = if (theirPid in ids) theirPid else {
+                        val name = theirProfiles.firstOrNull { it.id == theirPid }?.name?.trim() ?: continue
+                        here.firstOrNull { it.name.trim().equals(name, ignoreCase = true) }?.id ?: continue
+                    }
+                    // Older lists only fill a profile that has none here yet (one just imported).
+                    if (!newer && store.favourites(pid).isNotEmpty()) continue
+                    val arr = data.optJSONArray(theirPid) ?: continue
+                    if (!newer && arr.length() == 0) continue
                     store.setFavourites(pid, (0 until arr.length()).map { arr.getString(it) })
                     any = true
                 }
                 if (any) {
-                    store.setSyncStamp(TvSync.FAVOURITES, theirStamp)
+                    if (newer) store.setSyncStamp(TvSync.FAVOURITES, theirStamp)
                     changed += TvSync.FAVOURITES
                 }
             }

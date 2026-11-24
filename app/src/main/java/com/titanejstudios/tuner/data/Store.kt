@@ -210,41 +210,24 @@ class Store(context: Context) {
     // ---------------- Profiles ----------------
 
     var profiles: List<Profile>
-        get() = try {
-            val arr = JSONArray(prefs.getString("profiles", "[]"))
-            val list = (0 until arr.length()).map { i ->
-                val o = arr.getJSONObject(i)
-                val groups = o.optJSONArray("groups")
-                Profile(
-                    id = o.getString("id"),
-                    name = o.optString("name"),
-                    kids = o.optBoolean("kids"),
-                    allowedGroups = if (groups == null) emptySet() else (0 until groups.length()).map { groups.getString(it) }.toSet(),
-                    dailyLimitMinutes = o.optInt("limit"),
-                    bedtimeMinutes = o.optInt("bedtime", -1),
-                    colour = o.optInt("colour", -1),
-                    icon = o.optString("icon"),
-                    youtube = o.optBoolean("yt", true),
-                    ytApprovedOnly = o.optBoolean("yt_only"),
-                    ytChannels = o.optJSONArray("yt_ch")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList(),
-                )
-            }
-            list.ifEmpty { listOf(Profile(MAIN_PROFILE, "Everyone")) }
+        get() = (try {
+            profilesFromJson(JSONArray(prefs.getString("profiles", "[]")))
         } catch (e: Exception) {
-            listOf(Profile(MAIN_PROFILE, "Everyone"))
-        }
+            emptyList()
+        }).ifEmpty { listOf(Profile(MAIN_PROFILE, "Everyone")) }
         set(value) {
-            val arr = JSONArray()
-            value.forEach {
-                arr.put(
-                    JSONObject().put("id", it.id).put("name", it.name).put("kids", it.kids)
-                        .put("groups", JSONArray(it.allowedGroups.toList())).put("limit", it.dailyLimitMinutes)
-                        .put("bedtime", it.bedtimeMinutes).put("colour", it.colour).put("icon", it.icon).put("yt", it.youtube)
-                        .put("yt_only", it.ytApprovedOnly).put("yt_ch", JSONArray(it.ytChannels))
-                )
-            }
-            prefs.edit().putString("profiles", arr.toString()).apply()
+            prefs.edit().putString("profiles", profilesToJson(value).toString()).apply()
         }
+
+    /** Profiles deleted here (lower-case name → when), so other devices delete them too. */
+    var profilesGone: Map<String, Long>
+        get() = try {
+            val o = JSONObject(prefs.getString("profiles_gone", "{}") ?: "{}")
+            o.keys().asSequence().associateWith { o.optLong(it) }
+        } catch (e: Exception) {
+            emptyMap()
+        }
+        set(value) = prefs.edit().putString("profiles_gone", JSONObject(value).toString()).apply()
 
     var activeProfileId: String
         get() = prefs.getString("active_profile", MAIN_PROFILE) ?: MAIN_PROFILE
@@ -927,6 +910,37 @@ class Store(context: Context) {
 
     companion object {
         const val MAIN_PROFILE = "main"
+
+        fun profilesToJson(list: List<Profile>): JSONArray {
+            val arr = JSONArray()
+            list.forEach {
+                arr.put(
+                    JSONObject().put("id", it.id).put("name", it.name).put("kids", it.kids)
+                        .put("groups", JSONArray(it.allowedGroups.toList())).put("limit", it.dailyLimitMinutes)
+                        .put("bedtime", it.bedtimeMinutes).put("colour", it.colour).put("icon", it.icon).put("yt", it.youtube)
+                        .put("yt_only", it.ytApprovedOnly).put("yt_ch", JSONArray(it.ytChannels))
+                )
+            }
+            return arr
+        }
+
+        fun profilesFromJson(arr: JSONArray): List<Profile> = (0 until arr.length()).mapNotNull { i ->
+            val o = arr.optJSONObject(i) ?: return@mapNotNull null
+            val groups = o.optJSONArray("groups")
+            Profile(
+                id = o.optString("id").ifBlank { return@mapNotNull null },
+                name = o.optString("name"),
+                kids = o.optBoolean("kids"),
+                allowedGroups = if (groups == null) emptySet() else (0 until groups.length()).map { groups.getString(it) }.toSet(),
+                dailyLimitMinutes = o.optInt("limit"),
+                bedtimeMinutes = o.optInt("bedtime", -1),
+                colour = o.optInt("colour", -1),
+                icon = o.optString("icon"),
+                youtube = o.optBoolean("yt", true),
+                ytApprovedOnly = o.optBoolean("yt_only"),
+                ytChannels = o.optJSONArray("yt_ch")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList(),
+            )
+        }
         const val DEFAULT_UPDATE_REPO = "markbrown3000/Tuner"
         private val RECORDING_LOCK = Any()
     }

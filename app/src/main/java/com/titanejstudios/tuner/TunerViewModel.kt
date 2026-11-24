@@ -1811,6 +1811,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         if (i >= 0) list[i] = p else list += p
         profiles = list
         store.profiles = list
+        profilesChanged()
         if (p.id == activeProfile.id) {
             activeProfile = p
             recomputeVisible()
@@ -1829,6 +1830,8 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         }
         profiles = profiles.filter { it.id != p.id }
         store.profiles = profiles
+        store.profilesGone = store.profilesGone + (p.name.trim().lowercase() to System.currentTimeMillis())
+        profilesChanged()
         if (activeProfile.id == p.id) switchProfile(profiles.first())
     }
 
@@ -4640,10 +4643,30 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         return allChannels.firstOrNull { com.titanejstudios.tuner.data.ChannelMerge.key(it.name) == key }
     }
 
+    /** Profiles were added, edited or deleted here: tell the other devices and houses. */
+    private fun profilesChanged() {
+        store.setSyncStamp(com.titanejstudios.tuner.integrations.LinkSync.PROFILES, System.currentTimeMillis())
+        link.tellOthers()
+        cloud.syncSoon()
+    }
+
     private fun applyLinkChanges(changed: Set<String>) {
+        if (com.titanejstudios.tuner.integrations.LinkSync.PROFILES in changed) {
+            profiles = store.profiles
+            val now = profiles.firstOrNull { it.id == activeProfile.id }
+            when {
+                now == null -> switchProfile(profiles.firstOrNull { !it.kids } ?: profiles.first())
+                now != activeProfile -> {
+                    activeProfile = now
+                    recomputeVisible()
+                    refreshYouTube()
+                }
+            }
+            AppLog.info("Profiles synced from another device: " + profiles.joinToString { it.name })
+        }
         if (com.titanejstudios.tuner.integrations.LinkSync.INTROS in changed) introEnds = store.introEnds
         val lists = changed - com.titanejstudios.tuner.integrations.LinkSync.INTROS - com.titanejstudios.tuner.integrations.LinkSync.TEAMS -
-            com.titanejstudios.tuner.integrations.LinkSync.STARTED
+            com.titanejstudios.tuner.integrations.LinkSync.STARTED - com.titanejstudios.tuner.integrations.LinkSync.PROFILES
         if (lists.isNotEmpty()) applySyncedChanges(lists)
         if (com.titanejstudios.tuner.integrations.LinkSync.STARTED in changed) started = store.started(activeProfile.id)
         if (com.titanejstudios.tuner.integrations.LinkSync.TEAMS in changed) {

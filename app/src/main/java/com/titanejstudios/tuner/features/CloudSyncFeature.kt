@@ -155,6 +155,11 @@ class CloudSyncFeature(
     /** Something changed here (stopped a film, changed My list…): sync in a moment. */
     fun syncSoon(delayMs: Long = 8_000L) {
         if (!signedIn || !available) return
+        // Never stop a sync half way (that showed "Couldn't sync: … was cancelled"): go again after it.
+        if (syncing) {
+            syncAgain = true
+            return
+        }
         syncJob?.cancel()
         syncJob = scope.launch {
             delay(delayMs)
@@ -164,8 +169,13 @@ class CloudSyncFeature(
 
     fun syncNow() = syncSoon(0L)
 
+    private var syncAgain = false
+
     private suspend fun syncOnce() {
-        if (syncing) return
+        if (syncing) {
+            syncAgain = true
+            return
+        }
         syncing = true
         try {
             val (changed, others) = withContext(Dispatchers.IO) { roundTrip() }
@@ -184,11 +194,18 @@ class CloudSyncFeature(
             // Signed in without the Drive box ticked: start again so it can be ticked.
             signOut()
             status = GoogleDrive.NO_DRIVE
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            // Signed out or closed while syncing – not a problem worth showing.
+            throw e
         } catch (e: Exception) {
             status = "Couldn't sync: ${e.message ?: e.javaClass.simpleName}"
             AppLog.warn("Google Drive sync failed", e)
         } finally {
             syncing = false
+            if (syncAgain) {
+                syncAgain = false
+                syncSoon(3_000L)
+            }
         }
     }
 
