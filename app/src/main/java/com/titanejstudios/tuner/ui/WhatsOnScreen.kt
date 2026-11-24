@@ -151,13 +151,20 @@ fun WhatsOnScreen(vm: TunerViewModel) {
                 soon.isEmpty() && main.isEmpty() -> CenterMessage(
                     if (vm.epg.isEmpty()) "No TV guide yet – it loads after the channels" else "Nothing found for that – try another time or kind"
                 )
-                timeline -> WhatsOnTimeline(vm, main, restorer, onFocus, onTile) { open(it) }
+                timeline -> WhatsOnTimeline(vm, main, restorer, first, onFocus, onTile) { open(it) }
                 else -> LazyColumn(Modifier.clipToBounds(), verticalArrangement = Arrangement.spacedBy(4.dp), contentPadding = PaddingValues(bottom = 24.dp)) {
+                    var firstRow: String? = null
                     fun row(title: String, list: List<WhatsOn.Entry>) {
                         if (list.isEmpty()) return
+                        val top = firstRow == null
+                        if (top) firstRow = title
                         item(key = "h-$title") { WhatsOnSection(title) }
                         item(key = "r-$title") {
-                            LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(vertical = 6.dp, horizontal = 4.dp)) {
+                            LazyRow(
+                                // ▲ from the top row: back up to the buttons (Now, ◀ ▶, Day…).
+                                modifier = if (top) Modifier.upTo(first) else Modifier,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(vertical = 6.dp, horizontal = 4.dp),
+                            ) {
                                 items(list.size, key = { list[it].channel.id + "|" + list[it].programme.start }) { i ->
                                     val e = list[i]
                                     WhatsOnTile(vm, e, restorer, narrow, onFocused = { onFocus(e) }, onClick = { onTile(e) }, onLongClick = { open(e) })
@@ -177,7 +184,10 @@ fun WhatsOnScreen(vm: TunerViewModel) {
                         item(key = "h-grid") { WhatsOnSection("${vm.whatsOnGenre} $at · for you") }
                         val chunks = main.chunked(per)
                         items(chunks.size, key = { "g$it" }) { r ->
-                            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.padding(vertical = 6.dp, horizontal = 4.dp)) {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                modifier = Modifier.padding(vertical = 6.dp, horizontal = 4.dp).then(if (r == 0 && soon.isEmpty()) Modifier.upTo(first) else Modifier),
+                            ) {
                                 chunks[r].forEach { e ->
                                     WhatsOnTile(vm, e, restorer, narrow, onFocused = { onFocus(e) }, onClick = { onTile(e) }, onLongClick = { open(e) })
                                 }
@@ -225,6 +235,15 @@ fun WhatsOnScreen(vm: TunerViewModel) {
         }
         MenuDialog(p.title, items, onDismiss = { menuFor = null }, subtitle = "${ch.name} · ${dayLabel(p.start)} ${hhmm(p.start)} – ${hhmm(p.stop)}" + (p.desc?.let { "\n$it" } ?: ""))
     }
+}
+
+/**
+ * ▲ inside this goes to [target] (the row of buttons) when nothing above it in here can take the
+ * focus – lazy rows inside lazy lists don't always find their way up on their own.
+ */
+private fun Modifier.upTo(target: FocusRequester): Modifier = this.onPreviewKeyEvent { e ->
+    if (e.type != androidx.compose.ui.input.key.KeyEventType.KeyDown || e.nativeKeyEvent.keyCode != android.view.KeyEvent.KEYCODE_DPAD_UP) return@onPreviewKeyEvent false
+    runCatching { target.requestFocus() }.isSuccess
 }
 
 /** The best picture for a show: the guide's own, a film's backdrop, or a TV show's from TMDB. */
@@ -294,7 +313,7 @@ private fun WhatsOnStrip(vm: TunerViewModel, e: WhatsOn.Entry?, film: com.titane
             Text(p.desc ?: film?.overview ?: "", color = Color(0xFFBFC9E8), fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis, lineHeight = 16.sp)
         }
         if (vm.whatsOnPreview && vm.mode != null) {
-            MiniPreview(vm, Modifier.align(Alignment.TopEnd).fillMaxHeight().aspectRatio(16f / 9f))
+            MiniPreview(vm, Modifier.align(Alignment.TopEnd).fillMaxHeight().aspectRatio(16f / 9f), focusable = false)
         }
     }
 }
@@ -380,6 +399,7 @@ private fun WhatsOnTimeline(
     vm: TunerViewModel,
     entries: List<WhatsOn.Entry>,
     restorer: FocusRestorer,
+    up: FocusRequester,
     onFocus: (WhatsOn.Entry) -> Unit,
     onClick: (WhatsOn.Entry) -> Unit,
     onMenu: (WhatsOn.Entry) -> Unit,
@@ -403,7 +423,7 @@ private fun WhatsOnTimeline(
             items(chans.size, key = { "t" + chans[it].id }) { i ->
                 val c = chans[i]
                 val progs = vm.programmesFor(c.id).filter { it.stop > from && it.start < to }
-                Row(Modifier.height(48.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.height(48.dp).then(if (i == 0) Modifier.upTo(up) else Modifier), verticalAlignment = Alignment.CenterVertically) {
                     ChannelLogo(c.logo, c.name, Modifier.width(logoW).fillMaxHeight().padding(4.dp))
                     Spacer(Modifier.width(12.dp))
                     Box(Modifier.width(barW).fillMaxHeight()) {

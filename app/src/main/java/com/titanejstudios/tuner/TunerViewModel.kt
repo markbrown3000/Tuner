@@ -182,6 +182,15 @@ class PlexCopyChoice(
     val iptv: VodItem?,
 )
 
+/** A film on live TV you joined part way, that you also have on Plex or in your provider's films. */
+class StartOverOffer(
+    val channelId: String,
+    val programme: Programme,
+    val title: String,
+    val plex: List<com.titanejstudios.tuner.integrations.Plex.Entry>,
+    val film: VodItem?,
+)
+
 /** A place recordings can be saved (internal storage or a USB drive). */
 class StorageOption(val path: String, val label: String, val freeBytes: Long)
 
@@ -1377,7 +1386,10 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     }
 
     private fun refreshHomeFeed() {
-        val chans = allowedAll
+        // Picks come from your own country's channels (no shopping, religious, adult or radio
+        // either) – unless it's a channel you've watched or made a favourite.
+        val mine = (recents + favourites).toHashSet()
+        val chans = allowedAll.filter { c -> c.id in mine || (!WhatsOn.isClutter(c) && !WhatsOn.isWorld(c)) }
         val guide = epg
         val rec = recents
         val favs = favourites
@@ -1612,6 +1624,8 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         if (!force && current is PlayMode.Live && current.channel.id == channel.id && playback.isActive) return
         upgradeJob?.cancel()
         qualityBack = null
+        startOver = null
+        startOverChoosing = false
         if (current is PlayMode.Live && current.channel.id != channel.id) previousChannel = current.channel
         if (current is PlayMode.Vod) saveResume(syncHome = true)
         mode = PlayMode.Live(channel)
@@ -3827,6 +3841,75 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
 
     fun cancelPlexCopyChoice() {
         plexCopyChoice = null
+    }
+
+    // ---------------- Joined a film part way? Watch it from the start ----------------
+
+    /** "Watch from the beginning?" showing over live TV. */
+    var startOver by mutableStateOf<StartOverOffer?>(null); private set
+    /** …and they said yes: where to watch it. */
+    var startOverChoosing by mutableStateOf(false); private set
+    private val startOverAsked = HashSet<String>()
+    private var startOverJob: Job? = null
+
+    /**
+     * Watching a film on live TV that started a while ago: if it's on your Plex or in your
+     * provider's films too, offer to watch it from the beginning (once per showing).
+     */
+    fun checkStartOver() {
+        val m = mode as? PlayMode.Live ?: return
+        if (screen != Screen.Player) return
+        val t = System.currentTimeMillis()
+        val p = nowNext(m.channel.id, t).first ?: return
+        if (Genres.of(p.category, p.title, m.channel.group) != "Film") return
+        // Only worth asking if a good part's been missed and a good part is left.
+        if (t - p.start < 4 * 60_000L || p.stop - t < 20 * 60_000L) return
+        if (!startOverAsked.add(m.channel.id + "|" + p.start)) return
+        startOverJob?.cancel()
+        startOverJob = viewModelScope.launch {
+            delay(3_000)
+            val (title, year) = FilmName.parse(p.title)
+            val kids = activeProfile.kids
+            val plex = if (!plexLinked) emptyList() else withTimeoutOrNull(6_000) { plexFeature.copiesOf(title, year) }.orEmpty()
+                .filter { !kids || plexFeature.isKidsEntry(it) }
+            val plain = { s: String -> s.lowercase().replace(Regex("^(the|a|an) "), "").replace(Regex("[^\\p{L}\\p{N}]"), "") }
+            val want = plain(title)
+            val film = if (kids || want.isEmpty()) null else withContext(Dispatchers.Default) {
+                val matches = movies.orEmpty().filter { plain(FilmName.parse(it.name).first) == want }
+                matches.firstOrNull { year != null && FilmName.parse(it.name).second == year } ?: matches.firstOrNull()
+            }
+            if (plex.isEmpty() && film == null) return@launch
+            // Still watching it?
+            if ((mode as? PlayMode.Live)?.channel?.id != m.channel.id || screen != Screen.Player) return@launch
+            startOverChoosing = false
+            startOver = StartOverOffer(m.channel.id, p, title, plex, film)
+            AppLog.info("Joined ${p.title} part way – it's on " + listOfNotNull(if (plex.isNotEmpty()) "Plex" else null, film?.let { "the provider's films" }).joinToString(" and "))
+            // Gone again after half a minute if it's ignored.
+            delay(30_000)
+            if (!startOverChoosing && startOver?.programme === p) startOver = null
+        }
+    }
+
+    fun acceptStartOver() {
+        val o = startOver ?: return
+        // Only one place: straight there.
+        if (o.plex.size + (if (o.film != null) 1 else 0) == 1) {
+            playStartOver(o, o.plex.firstOrNull())
+            return
+        }
+        startOverChoosing = true
+    }
+
+    fun dismissStartOver() {
+        startOver = null
+        startOverChoosing = false
+    }
+
+    /** Plays the film from the start: the Plex copy picked, or ([plex] null) the provider's. */
+    fun playStartOver(o: StartOverOffer, plex: com.titanejstudios.tuner.integrations.Plex.Entry?) {
+        dismissStartOver()
+        if (plex != null) playPlexEntry(plex, fromStart = true, chosen = true, fallback = o.film?.let { f -> { playMovie(f, true, viaPlex = false) } })
+        else o.film?.let { playMovie(it, true, viaPlex = false) }
     }
 
 

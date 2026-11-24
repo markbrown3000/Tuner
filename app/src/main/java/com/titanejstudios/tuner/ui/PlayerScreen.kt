@@ -292,6 +292,12 @@ fun PlayerScreen(vm: TunerViewModel) {
                         overlay = Overlay.Options
                     }
                 } else if (e.type == KeyEventType.KeyUp) {
+                    // "Watch from the beginning?" showing: OK says yes.
+                    if (okDown && !okLong && vm.startOver != null && !vm.startOverChoosing) {
+                        okDown = false
+                        vm.acceptStartOver()
+                        return true
+                    }
                     // "Better quality is back" showing: OK switches to it.
                     if (okDown && !okLong && vm.qualityBack != null) {
                         okDown = false
@@ -542,6 +548,33 @@ fun PlayerScreen(vm: TunerViewModel) {
                 }
             }
 
+            // Joined a film part way, and it's on Plex or in the provider's films.
+            val liveChannelId = (vm.mode as? PlayMode.Live)?.channel?.id
+            LaunchedEffect(liveChannelId, vm.now / 60_000) { if (liveChannelId != null) vm.checkStartOver() }
+            vm.startOver?.takeIf { !vm.startOverChoosing }?.let { o ->
+                val where = listOfNotNull(if (o.plex.isNotEmpty()) "Plex" else null, if (o.film != null) "your films" else null).joinToString(" and ")
+                Row(
+                    Modifier.align(Alignment.TopCenter).padding(top = (if (vm.isPhone) 70.dp else 40.dp) + (if (vm.qualityBack != null) 90.dp else 0.dp))
+                        .clip(RoundedCornerShape(14.dp)).background(Color(0xF0142A4F))
+                        .tvClickable({ vm.acceptStartOver() })
+                        .padding(horizontal = 18.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("⏮", color = Color(0xFFFFD54F), fontSize = 22.sp)
+                    Spacer(Modifier.width(10.dp))
+                    Column {
+                        Text("Watch ${o.title} from the beginning?", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            "It's on $where  ·  " + (if (vm.isPhone) "tap for yes" else "OK for yes  ·  carry on watching to ignore"),
+                            color = Color(0xFFD4DDF5), fontSize = 13.sp,
+                        )
+                    }
+                    if (vm.isPhone) {
+                        Spacer(Modifier.width(12.dp))
+                        Text("✕", color = Color.White, fontSize = 18.sp, modifier = Modifier.tvClickable({ vm.dismissStartOver() }).padding(6.dp))
+                    }
+                }
+            }
             vm.qualityBack?.let { better ->
                 Row(
                     Modifier.align(Alignment.TopCenter).padding(top = if (vm.isPhone) 70.dp else 40.dp)

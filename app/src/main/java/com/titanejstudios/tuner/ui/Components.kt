@@ -770,8 +770,15 @@ object SubtitleLook {
 
 /** Small live preview (Channels and Guide screens). OK goes back to full screen. */
 @Composable
-fun MiniPreview(vm: TunerViewModel, modifier: Modifier = Modifier) {
+fun MiniPreview(vm: TunerViewModel, modifier: Modifier = Modifier, focusable: Boolean = true) {
     if (vm.mode == null) return
+    // Just the picture (What's On: the remote shouldn't stop on it on the way up to the buttons).
+    if (!focusable) {
+        Box(modifier.clip(RoundedCornerShape(10.dp)).background(Color.Black)) {
+            VideoSurface(vm.playback.player, Modifier.fillMaxSize(), showSubtitles = false)
+        }
+        return
+    }
     FocusSurface(
         onClick = { vm.navigate(Screen.Player) },
         baseColor = Color.Black,

@@ -7,7 +7,7 @@ object HomeFeed {
     class Pick(val channel: Channel, val programme: Programme, val reason: String? = null)
 
     private val filler = Regex(
-        "^(to be announced|tba|tbc|no information|no info|off air|close|closedown|programmes? start.*|" +
+        "^(to be announced|tba|tbc|no information|no info|off air|close|closedown|programmes? start.*|movie|film|feature film|movie tba|film tba|" +
             "info(mercial)?s?|teleshopping|regional programmes?|this channel.*|.*not available.*)$",
         RegexOption.IGNORE_CASE,
     )

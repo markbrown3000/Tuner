@@ -5,7 +5,7 @@ import java.util.Calendar
 /** Recommendations from what a profile has learned to like ([Taste]). */
 object Recommend {
     private val filler = Regex(
-        "^(to be announced|tba|tbc|no information|no info|off air|close|closedown|teleshopping|regional programmes?|.*not available.*)$",
+        "^(to be announced|tba|tbc|no information|no info|off air|close|closedown|teleshopping|regional programmes?|movie|film|feature film|movie tba|film tba|.*not available.*)$",
         RegexOption.IGNORE_CASE,
     )
 

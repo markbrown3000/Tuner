@@ -75,7 +75,9 @@ object WhatsOn {
     )
 
     private val clutterName = Regex(
-        "(?i)(\\bqvc\\b|ideal world|jewellery|\\bgems\\b|\\btjc\\b|shop|teleshopping|\\bxxx\\b|adult|babestation|\\bradio\\b|\\bfm\\b|18\\s*\\+|\\bpay ?per ?view\\b|\\bppv\\b)"
+        "(?i)(\\bqvc\\b|ideal world|jewellery|\\bgems\\b|\\btjc\\b|shop|teleshopping|\\bxxx\\b|adult|babestation|\\bradio\\b|\\bfm\\b|18\\s*\\+|\\bpay ?per ?view\\b|\\bppv\\b|" +
+            // Religious channels.
+            "love ?world|\\bgod tv\\b|gospel|christian|daystar|\\btbn\\b|revelation tv|islam channel|peace tv|\\bchurch\\b|\\bewtn\\b|hope channel|\\bfaith\\b|ummah|\\biqra\\b|sangat|\\bkirk\\b)"
     )
     private val plusOne = Regex("(?i)\\s*\\+\\s*1(?![0-9])")
 
@@ -87,7 +89,7 @@ object WhatsOn {
             "chinese|japan|korean|filipino|pinoy|thai|vietnam|somali|caribbean|hebrew)\\b"
     )
     private val worldName = Regex(
-        "(?i)^\\W*(zee|star (plus|gold|bharat|life|jalsha|vijay|pravah|maa|utsav)|colors|sony (sab|max|tv|aath|yay|pal|wah|marathi)|" +
+        "(?i)^\\W*(zee|star (plus|gold|bharat|life|jalsha|vijay|pravah|maa|utsav)|utsav|colors|sony (sab|max|tv|aath|yay|pal|wah|marathi)|" +
             "b4u|&tv|and tv|&pictures|aaj tak|abp|ndtv|ptc|ary|geo|hum|express news|samaa|dunya|bol |mbc|rotana|al jazeera arabic|" +
             "zing|9x|mastii|sangeet|dharm|aastha|sanskar|ishara|dangal|shemaroo|bflix|ptv|channel 44|kalaignar|sun tv|ktv|asianet|" +
             "rishtey|zindagi|sahara|news18|republic|times now|india today|dd )(?![a-z])"

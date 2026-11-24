@@ -284,6 +284,22 @@ private fun TunerApp(vm: TunerViewModel) {
             if (vm.filmInfoOpen) FilmInfoDialog(vm)
             if (vm.stillWatchingAsk) StillWatchingDialog(vm)
             vm.updateOffer?.let { UpdateDialog(vm, it) }
+            // Joined a film part way and said yes: where to watch it from the beginning.
+            vm.startOver?.takeIf { vm.startOverChoosing }?.let { o ->
+                MenuDialog(
+                    title = "Watch ${o.title} from the beginning",
+                    subtitle = "Where would you like to watch it?",
+                    items = buildList {
+                        o.plex.forEach { e ->
+                            val where = listOfNotNull(e.library, e.year).joinToString(" · ").ifEmpty { "Plex" }
+                            add(MenuItem("Plex – $where", if (vm.plexServerCount > 1) e.server.name else null) { vm.playStartOver(o, e) })
+                        }
+                        if (o.film != null) add(MenuItem("Your IPTV provider's films") { vm.playStartOver(o, null) })
+                        add(MenuItem("Keep watching live") { vm.dismissStartOver() })
+                    },
+                    onDismiss = { vm.dismissStartOver() },
+                )
+            }
             vm.plexCopyChoice?.let { c ->
                 MenuDialog(
                     title = "Which copy of ${c.title}?",
