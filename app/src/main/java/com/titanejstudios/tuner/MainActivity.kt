@@ -216,6 +216,8 @@ private fun TunerApp(vm: TunerViewModel) {
 
         Column(Modifier.fillMaxSize().then(if (phone && !watching) Modifier.background(TunerColors.BackgroundBottom).safeDrawingPadding() else Modifier)) {
         Box(Modifier.weight(1f).fillMaxWidth()) {
+            // Phones: pull down to refresh on Home, the guide and Films & TV.
+            com.titanejstudios.tuner.ui.PhonePullRefresh(vm, phone && !watching && vm.screen in PullScreens) {
             when (vm.screen) {
                 Screen.Home -> HomeScreen(vm)
                 Screen.Channels -> ChannelsScreen(vm)
@@ -261,8 +263,12 @@ private fun TunerApp(vm: TunerViewModel) {
                 Screen.YouTube -> com.titanejstudios.tuner.ui.YouTubeScreen(vm)
                 Screen.YouTubePlayer -> com.titanejstudios.tuner.ui.YouTubePlayerScreen(vm)
                 Screen.YouTubeList -> com.titanejstudios.tuner.ui.YouTubeListScreen(vm)
+                Screen.More -> com.titanejstudios.tuner.ui.PhoneMoreScreen(vm)
+            }
             }
         }
+        // Phones: what's playing carries on in a mini player above the menu bar.
+        if (phone && !watching && vm.mode != null) com.titanejstudios.tuner.ui.MiniPlayerBar(vm)
         if (phone && !watching && vm.screen in PhoneTabs) PhoneBottomBar(vm)
         }
 
@@ -327,8 +333,11 @@ private fun TunerApp(vm: TunerViewModel) {
 /** Screens that show the phone's bottom menu bar. */
 private val PhoneTabs = setOf(
     Screen.Home, Screen.Channels, Screen.Guide, Screen.Movies, Screen.Series, Screen.PlexLibrary, Screen.Search,
-    Screen.Settings, Screen.Sports, Screen.WhatsOn, Screen.Recordings, Screen.Catchup, Screen.Apps,
+    Screen.Settings, Screen.Sports, Screen.WhatsOn, Screen.Recordings, Screen.Catchup, Screen.Apps, Screen.More,
+    Screen.YouTube, Screen.YouTubeList, Screen.Downloads,
 )
+
+private val PullScreens = setOf(Screen.Home, Screen.Channels, Screen.Guide, Screen.Movies, Screen.Series)
 
 /** Phones: Home, TV Guide, Films & TV, Search and More along the bottom. */
 @Composable
@@ -342,15 +351,17 @@ private fun PhoneBottomBar(vm: TunerViewModel) {
         Triple("🏠", "Home", Screen.Home),
         Triple("📺", "TV Guide", Screen.Channels),
         Triple("🎬", if (films == Screen.Catchup) "Catch-up" else "Films & TV", films),
-        Triple("🔍", "Search", Screen.Search),
-        Triple("☰", "More", Screen.Settings),
-    )
+        Triple("▶", "YouTube", Screen.YouTube),
+        Triple("☰", "More", Screen.More),
+    ).filter { it.third != Screen.YouTube || vm.youTubeAllowed }
     androidx.compose.foundation.layout.Row(
         Modifier.fillMaxWidth().height(64.dp).background(TunerColors.Panel),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         items.forEach { (icon, label, target) ->
-            val on = vm.screen == target || (target == Screen.Movies && vm.screen == Screen.Series) || (target == Screen.Channels && vm.screen == Screen.Guide)
+            val on = vm.screen == target || (target == Screen.Movies && vm.screen == Screen.Series) || (target == Screen.Channels && vm.screen == Screen.Guide) ||
+                (target == Screen.YouTube && vm.screen == Screen.YouTubeList) ||
+                (target == Screen.More && vm.screen in setOf(Screen.Settings, Screen.Search, Screen.WhatsOn, Screen.Catchup, Screen.Sports, Screen.Recordings, Screen.Apps, Screen.Downloads))
             androidx.compose.foundation.layout.Column(
                 Modifier.weight(1f).fillMaxSize().clickable {
                     when (target) {

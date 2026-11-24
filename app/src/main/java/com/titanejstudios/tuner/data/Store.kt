@@ -736,6 +736,9 @@ class Store(context: Context) {
     var ytSkipSponsors: Boolean
         get() = prefs.getBoolean("youtube_skip_sponsors", true)
         set(value) = prefs.edit().putBoolean("youtube_skip_sponsors", value).apply()
+    var hideAdult: Boolean
+        get() = prefs.getBoolean("hide_adult", true)
+        set(value) = prefs.edit().putBoolean("hide_adult", value).apply()
     var ytCaptions: Boolean
         get() = prefs.getBoolean("youtube_captions", false)
         set(value) = prefs.edit().putBoolean("youtube_captions", value).apply()

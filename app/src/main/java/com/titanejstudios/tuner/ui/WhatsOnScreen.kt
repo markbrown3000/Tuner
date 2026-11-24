@@ -145,7 +145,6 @@ fun WhatsOnScreen(vm: TunerViewModel) {
                 item(key = "tidy") { PillButton("🧹", { vm.toggleWhatsOnTidy() }, selected = vm.whatsOnTidy, compact = true) }
                 item(key = "timeline") { PillButton("🕒 Timeline", { timeline = !timeline }, selected = timeline, compact = true) }
                 if (!narrow) item(key = "preview") { PillButton("📺", { vm.toggleWhatsOnPreview() }, selected = vm.whatsOnPreview, compact = true) }
-                if (vm.catchupChannels.isNotEmpty()) item(key = "catchup") { PillButton("⏪ Catch-up", { vm.navigate(Screen.Catchup) }, compact = true) }
             }
             when {
                 result == null -> CenterMessage("⟳  Looking through the guide…")

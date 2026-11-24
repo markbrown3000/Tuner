@@ -774,6 +774,7 @@ private fun PhoneHomeBody(
                 vm.usualOffer?.let { u -> item { PillButton("★  Your usual: ${u.name}", { vm.playUsual() }, compact = true, selected = true) } }
                 if (vm.matchDay == null) vm.nextTeamFixture?.let { f -> item { PillButton(fixturePill(f), { vm.navigate(Screen.Teams) }, compact = true) } }
                 if (vm.christmasSeason) item { PillButton("🎄 Christmas TV", { vm.navigate(Screen.Christmas) }, compact = true) }
+                if (vm.link.linked && !vm.activeProfile.kids) item { PillButton("📺 TV remote", { vm.navigate(Screen.Remote) }, compact = true) }
                 item { PillButton("▶ YouTube", { vm.navigate(Screen.YouTube) }, compact = true) }
                 vm.lastChannel?.takeIf { it.id != vm.usualOffer?.id }?.let { last -> item { PillButton("▶  ${last.name}", { vm.play(last, allChannels) }, compact = true) } }
                 if (vm.link.linked) item { PillButton("📺 TV remote", { vm.navigate(Screen.Remote) }, compact = true) }

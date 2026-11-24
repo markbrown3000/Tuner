@@ -107,7 +107,7 @@ enum class Screen {
     Home, Channels, Guide, Player, Search, Movies, Series, SeriesDetail, Settings, SourceEdit, Manage,
     ProfilePicker, ProfileEdit, PhoneSetup, EpgMap, Recordings, MultiView, Sports, Apps, Log,
     WhatsOn, Stats, ShareTv, Catchup, Categories, Plex, Football, Update, SelfTest, PlexLibrary, PlexShow, HomeRows, Languages, Recommendations, Vpn,
-    Link, Downloads, Teams, Remote, Christmas, Cloud, YouTube, YouTubePlayer, YouTubeList,
+    Link, Downloads, Teams, Remote, Christmas, Cloud, YouTube, YouTubePlayer, YouTubeList, More,
 }
 
 const val FAVOURITES = "★ Favourites"
@@ -239,9 +239,13 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         val left = stack.removeAt(stack.size - 1)
         if (Screen.Settings !in stack) grownUpSettings = false
         when (left) {
+            // Phones: leaving the player keeps it going in the mini player along the bottom.
             Screen.Player -> when (mode) {
-                is PlayMode.Vod -> { saveResume(syncHome = true); stopPlayback() }
-                is PlayMode.CatchupPlay, is PlayMode.RecordingPlay -> stopPlayback()
+                is PlayMode.Vod -> {
+                    saveResume(syncHome = true)
+                    if (!isPhone) stopPlayback()
+                }
+                is PlayMode.CatchupPlay, is PlayMode.RecordingPlay -> if (!isPhone) stopPlayback()
                 else -> Unit
             }
             Screen.MultiView -> {
@@ -270,7 +274,9 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
 
     /** Live TV keeps playing in the preview on Channels/Guide; anything else stops it. */
     private fun afterNavigation() {
-        if (mode != null && screen !in setOf(Screen.Player, Screen.Channels, Screen.Guide, Screen.Home, Screen.WhatsOn)) {
+        // (Phones keep playing in the mini player – except where something else plays.)
+        val phoneMini = isPhone && screen !in setOf(Screen.MultiView, Screen.YouTubePlayer, Screen.Downloads)
+        if (mode != null && !phoneMini && screen !in setOf(Screen.Player, Screen.Channels, Screen.Guide, Screen.Home, Screen.WhatsOn)) {
             if (mode is PlayMode.Vod) saveResume(syncHome = true)
             stopPlayback()
         }
@@ -471,6 +477,62 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
                 playYouTube(v)
             }
         }
+    }
+
+    // ---------------- Phones ----------------
+
+    /** The mini player along the bottom of a phone: what's playing. */
+    val miniTitle: String?
+        get() = when (val m = mode) {
+            is PlayMode.Live -> m.channel.name + (nowNext(m.channel.id, now).first?.let { " · " + it.title } ?: "")
+            is PlayMode.CatchupPlay -> m.programme.title
+            is PlayMode.Vod -> listOfNotNull(m.title, m.subtitle).joinToString(" · ")
+            is PlayMode.RecordingPlay -> m.recording.title
+            null -> null
+        }
+
+    /** Films & TV on a phone: hide adult titles (always, for kids). */
+    var hideAdult by mutableStateOf(store.hideAdult); private set
+
+    fun toggleHideAdult() {
+        if (activeProfile.kids) return
+        hideAdult = !hideAdult
+        store.hideAdult = hideAdult
+    }
+
+    /** Pull down to refresh (phones): playlists and guide on Home and the guide, the list on Films & TV. */
+    var pullRefreshing by mutableStateOf(false); private set
+
+    fun pullRefresh() {
+        if (pullRefreshing) return
+        pullRefreshing = true
+        when (screen) {
+            Screen.Movies -> loadMovies(force = true)
+            Screen.Series -> loadSeries(force = true)
+            else -> {
+                refresh()
+                refreshYouTube(force = true)
+            }
+        }
+        viewModelScope.launch {
+            delay(1_200)
+            var waited = 0
+            while ((status != null || vodUpdating) && waited < 90) {
+                delay(1_000)
+                waited++
+            }
+            pullRefreshing = false
+        }
+    }
+
+    /** Phone mini player's 📺: carry on with this on the TV. */
+    fun sendPlayingToTv() {
+        val what = sendable() ?: run {
+            showNotice("This can't be sent to the TV")
+            return
+        }
+        if (mode is PlayMode.Vod) saveResume(syncHome = true)
+        watchOnTv(what)
     }
 
     /** The hold-OK menu on a YouTube video. */
@@ -3280,6 +3342,9 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
      * Channels with catch-up. Looks at every copy (the 720p copy often has catch-up when the 1080p
      * one doesn't), then combines copies as the TV Guide does.
      */
+    /** Any channel with catch-up (for the Catch-up tab along the top). */
+    val hasCatchupChannels: Boolean get() = channels.any { it.hasCatchup }
+
     val catchupChannels: List<Channel>
         get() {
             val withCatchup = channels.filter { it.hasCatchup && isAllowed(it) }

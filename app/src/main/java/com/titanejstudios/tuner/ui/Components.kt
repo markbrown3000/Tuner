@@ -798,6 +798,7 @@ fun TopNav(vm: TunerViewModel, current: Screen, modifier: Modifier = Modifier) {
         add("Home" to Screen.Home)
         add("TV Guide" to Screen.Channels)
         add("What's On" to Screen.WhatsOn)
+        if (vm.hasCatchupChannels) add("Catch-up" to Screen.Catchup)
         add("Sports" to Screen.Sports)
         if (!vm.activeProfile.kids) add("Recordings" to Screen.Recordings)
         if (vm.hasVod) add("Films & TV" to Screen.Movies)

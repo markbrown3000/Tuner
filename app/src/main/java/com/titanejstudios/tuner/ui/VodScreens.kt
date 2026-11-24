@@ -1,6 +1,7 @@
 package com.titanejstudios.tuner.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.foundation.layout.Arrangement
@@ -48,6 +49,24 @@ import com.titanejstudios.tuner.data.Episode
 import com.titanejstudios.tuner.data.ResumeEntry
 import kotlinx.coroutines.delay
 
+/** "★ 6.5" from a provider's rating ("6.5", "3.497", "0" → none). */
+internal fun ratingLabel(raw: String?): String? {
+    val r = raw?.trim()?.replace(',', '.')?.toDoubleOrNull() ?: return null
+    if (r <= 0.0) return null
+    // Some panels use 0–5 stars; most use 0–10.
+    return "★ " + String.format(java.util.Locale.UK, "%.1f", r)
+}
+
+private fun ratingOf(raw: String?): Double = raw?.trim()?.replace(',', '.')?.toDoubleOrNull() ?: 0.0
+
+/** The provider's number for an item ("…/m12345" → 12345): bigger is newer, so it sorts by recently added. */
+private fun addedOrder(id: String): Long = id.substringAfterLast('/').trimStart('m', 's').toLongOrNull() ?: 0L
+
+private val adultWords = Regex("(?i)\\b(xxx|porn|erotic|erotica|adult|18\\+|sex|nude|naked|playboy|hentai|upskirt|uncensored|softcore|hardcore)\\b")
+
+/** Adult titles (by name or category) – hidden on phones unless you turn it off, always for kids. */
+internal fun isAdultTitle(name: String, category: String): Boolean = adultWords.containsMatchIn(name) || adultWords.containsMatchIn(category)
+
 private const val CONTINUE = "▶ Continue watching"
 private const val MY_LIST = "★ My list"
 private const val ALL_ITEMS = "All"
@@ -70,30 +89,34 @@ internal fun PosterCard(
         shape = RoundedCornerShape(10.dp),
         modifier = modifier,
     ) { focused ->
+        // "#1 Cheerleader Camp - 2010" → "#1 Cheerleader Camp", with 2010 underneath.
+        val (clean, year) = remember(title) { com.titanejstudios.tuner.integrations.Tmdb.cleanTitle(title).let { (t, y) -> t.trim('"', '\'', ' ').ifBlank { title } to y } }
         Column(Modifier.fillMaxWidth().padding(if (focused) 4.dp else 0.dp)) {
             Box(
-                Modifier.fillMaxWidth().aspectRatio(2f / 3f).clip(RoundedCornerShape(8.dp)).background(Color(0xFF0B0E12)),
+                Modifier.fillMaxWidth().aspectRatio(2f / 3f).clip(RoundedCornerShape(8.dp))
+                    .background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color(0xFF26335C), Color(0xFF0B0E12)))),
                 contentAlignment = Alignment.Center,
             ) {
+                // A title card underneath: it shows if there's no poster, or the poster won't load.
+                Text(clean, color = Color(0xFFDDE4FA), fontSize = 16.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, maxLines = 4, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(10.dp))
                 if (image != null) {
                     AsyncImage(model = image, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-                } else {
-                    Text(title, color = TunerColors.TextSecondary, fontSize = 16.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(10.dp))
                 }
                 if (progress != null) {
                     ProgressBar(progress, Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(6.dp))
                 }
             }
             Text(
-                title,
+                clean,
                 color = Color.White,
                 fontSize = 14.sp,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 6.dp),
             )
-            if (caption != null) {
-                Text(caption, color = if (focused) Color.White else TunerColors.TextSecondary, fontSize = 12.sp, modifier = Modifier.padding(start = 6.dp, bottom = 6.dp))
+            val line = listOfNotNull(year?.toString(), caption).joinToString("  ·  ")
+            if (line.isNotEmpty()) {
+                Text(line, color = if (focused) Color.White else TunerColors.TextSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 6.dp, bottom = 6.dp))
             }
         }
     }
@@ -125,7 +148,13 @@ private fun <T> CatalogueScreen(
     tintOn: Boolean = true,
     /** Phone held upright: categories as chips along the top. */
     compact: Boolean = false,
+    /** Phones: the Netflix-style layout (rows, tabs, search, sort). */
+    phone: PhoneCatalogueInfo<T>? = null,
 ) {
+    if (compact && phone != null) {
+        PhoneCatalogue(phone, title, items, status, categoryOf, nameOf, continueEntries, onReload, onSwitch, tile, onResume, myList, updating, onPlex)
+        return
+    }
     var focusedItem by remember { mutableStateOf<T?>(null) }
     var category by remember { mutableStateOf(if (continueEntries.isNotEmpty()) CONTINUE else ALL_ITEMS) }
     val categories = remember(items, continueEntries.isNotEmpty(), myList.isNotEmpty()) {
@@ -279,7 +308,7 @@ fun MoviesScreen(vm: TunerViewModel) {
             PosterCard(
                 title = m.name,
                 image = m.poster,
-                caption = listOfNotNull(m.rating?.let { "★ $it" }, if (vm.inWatchlist(m.id)) "✓ My list" else null)
+                caption = listOfNotNull(ratingLabel(m.rating), if (vm.inWatchlist(m.id)) "✓ My list" else null)
                     .joinToString("  ·  ").ifEmpty { null },
                 progress = r?.let { if (it.durationMs > 0) it.positionMs.toFloat() / it.durationMs else null },
                 onClick = { if (r != null) resumeAsk = m else vm.playMovie(m, fromStart = true) },
@@ -292,6 +321,7 @@ fun MoviesScreen(vm: TunerViewModel) {
         onPlex = if (vm.plexLinked) ({ vm.openPlexLibrary() }) else null,
         tintOn = vm.tintFromPicture,
         compact = compactLayout(vm),
+        phone = PhoneCatalogueInfo(vm, { it.id }, { it.rating }, isSeries = false),
     )
     menuFor?.let { m ->
         MenuDialog(
@@ -344,7 +374,7 @@ fun SeriesScreen(vm: TunerViewModel) {
             PosterCard(
                 title = s.name,
                 image = s.cover,
-                caption = listOfNotNull(s.rating?.let { "★ $it" }, if (vm.inWatchlist(s.id)) "✓ My list" else null)
+                caption = listOfNotNull(ratingLabel(s.rating), if (vm.inWatchlist(s.id)) "✓ My list" else null)
                     .joinToString("  ·  ").ifEmpty { null },
                 progress = null,
                 onClick = { vm.openSeriesDetail(s) },
@@ -357,6 +387,7 @@ fun SeriesScreen(vm: TunerViewModel) {
         onPlex = if (vm.plexLinked) ({ vm.openPlexLibrary() }) else null,
         tintOn = vm.tintFromPicture,
         compact = compactLayout(vm),
+        phone = PhoneCatalogueInfo(vm, { it.id }, { it.rating }, isSeries = true),
     )
     menuFor?.let { s ->
         MenuDialog(
@@ -553,3 +584,170 @@ internal fun downloadItems(vm: TunerViewModel, contentId: String, start: () -> U
         else -> listOf(MenuItem("⬇ Downloading…", "cancel") { vm.removeDownload(contentId) })
     }
 }
+
+
+/** What the phone layout needs to know about each item. */
+internal class PhoneCatalogueInfo<T>(
+    val vm: TunerViewModel,
+    val idOf: (T) -> String,
+    val ratingOf: (T) -> String?,
+    val isSeries: Boolean,
+)
+
+private const val BROWSE = "Browse"
+
+/**
+ * Phones: Films | Series | Plex tabs, a search box, then rows like Netflix – Carry on watching,
+ * My list, Recently added, Top rated and one per category ("See all ›" opens a grid with sorting).
+ */
+@Composable
+private fun <T> PhoneCatalogue(
+    info: PhoneCatalogueInfo<T>,
+    title: String,
+    items: List<T>?,
+    status: String?,
+    categoryOf: (T) -> String,
+    nameOf: (T) -> String,
+    continueEntries: List<ResumeEntry>,
+    onReload: () -> Unit,
+    onSwitch: () -> Unit,
+    tile: @Composable (T, Modifier) -> Unit,
+    onResume: (ResumeEntry) -> Unit,
+    myList: List<T>,
+    updating: Boolean,
+    onPlex: (() -> Unit)?,
+) {
+    val vm = info.vm
+    var category by remember { mutableStateOf(BROWSE) }
+    var sort by remember { mutableStateOf("new") }
+    var query by remember { mutableStateOf("") }
+    var searching by remember { mutableStateOf(false) }
+    var menu by remember { mutableStateOf(false) }
+    val hideAdult = vm.hideAdult || vm.activeProfile.kids
+    val all = remember(items, hideAdult) { items.orEmpty().filter { !hideAdult || !isAdultTitle(nameOf(it), categoryOf(it)) } }
+    val categories = remember(all) { all.map(categoryOf).distinct() }
+    fun sorted(list: List<T>): List<T> = when (sort) {
+        "rating" -> list.sortedByDescending { ratingOf(info.ratingOf(it)) }
+        "year" -> list.sortedByDescending { com.titanejstudios.tuner.integrations.Tmdb.cleanTitle(nameOf(it)).second ?: 0 }
+        "az" -> list.sortedBy { com.titanejstudios.tuner.integrations.Tmdb.cleanTitle(nameOf(it)).first.lowercase() }
+        else -> list.sortedByDescending { addedOrder(info.idOf(it)) }
+    }
+    val grid: List<T>? = remember(all, category, sort, query) {
+        when {
+            query.isNotBlank() -> sorted(all.filter { nameOf(it).contains(query.trim(), ignoreCase = true) })
+            category == BROWSE -> null
+            category == ALL_ITEMS -> sorted(all)
+            else -> sorted(all.filter { categoryOf(it) == category })
+        }
+    }
+    Column(Modifier.fillMaxSize().background(TunerColors.BackgroundBottom).padding(horizontal = 10.dp, vertical = 8.dp)) {
+        // Films | Series | Plex, 🔍 and ⋯
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.weight(1f).horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                PillButton("Films", { if (info.isSeries) onSwitch() }, selected = !info.isSeries, compact = true)
+                PillButton("Series", { if (!info.isSeries) onSwitch() }, selected = info.isSeries, compact = true)
+                if (onPlex != null) PillButton("Plex", onPlex, compact = true)
+            }
+            PillButton("🔍", { searching = true }, selected = query.isNotBlank(), compact = true)
+            Spacer(Modifier.width(6.dp))
+            PillButton("⋯", { menu = true }, compact = true)
+        }
+        if (updating) Text("⟳ Updating the list…", color = TunerColors.TextSecondary, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
+        Spacer(Modifier.height(8.dp))
+        when {
+            items == null || status != null -> CenterMessage(status ?: "Loading…")
+            all.isEmpty() -> CenterMessage("Nothing here – your provider may not include $title.")
+            grid != null -> {
+                // A category (or search results): chips, sorting and a grid.
+                Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    PillButton(if (query.isNotBlank()) "✕ \"$query\"" else "‹ All", {
+                        query = ""
+                        category = BROWSE
+                    }, compact = true)
+                    listOf("new" to "Recently added", "rating" to "Rating", "year" to "Year", "az" to "A–Z").forEach { (k, label) ->
+                        PillButton(label, { sort = k }, selected = sort == k, compact = true)
+                    }
+                }
+                if (query.isBlank()) {
+                    Spacer(Modifier.height(6.dp))
+                    CategoryChips(listOf(ALL_ITEMS) + categories, category) { category = it }
+                }
+                Spacer(Modifier.height(8.dp))
+                if (grid.isEmpty()) CenterMessage("Nothing found")
+                else LazyVerticalGrid(
+                    columns = GridCells.Adaptive(104.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.weight(1f),
+                ) {
+                    items(grid.size) { i -> tile(grid[i], Modifier) }
+                }
+            }
+            else -> {
+                // Browse: rows.
+                val recent = remember(all) { all.sortedByDescending { addedOrder(info.idOf(it)) }.take(30) }
+                val top = remember(all) { all.filter { ratingOf(info.ratingOf(it)) >= 7.0 }.sortedByDescending { ratingOf(info.ratingOf(it)) }.take(30) }
+                val byCategory = remember(all) { all.groupBy(categoryOf) }
+                LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp), contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 16.dp)) {
+                    if (continueEntries.isNotEmpty()) {
+                        item(key = "h-cont") { RowTitle("Carry on watching", null) }
+                        item(key = "r-cont") {
+                            LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                items(continueEntries, key = { it.contentId }) { e ->
+                                    PosterCard(
+                                        title = e.title, image = e.poster,
+                                        caption = e.subtitle ?: "${clock(e.positionMs)} of ${clock(e.durationMs)}",
+                                        progress = if (e.durationMs > 0) e.positionMs.toFloat() / e.durationMs else null,
+                                        onClick = { onResume(e) }, modifier = Modifier.width(112.dp),
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    fun row(name: String, list: List<T>, seeAll: (() -> Unit)?) {
+                        if (list.isEmpty()) return
+                        item(key = "h-$name") { RowTitle(name, seeAll) }
+                        item(key = "r-$name") {
+                            LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                items(list.size) { i -> tile(list[i], Modifier.width(112.dp)) }
+                            }
+                        }
+                    }
+                    row("★ My list", myList, null)
+                    row("Recently added", recent) { sort = "new"; category = ALL_ITEMS }
+                    row("Top rated", top) { sort = "rating"; category = ALL_ITEMS }
+                    for (c in categories.take(20)) {
+                        row(c, byCategory[c].orEmpty().sortedByDescending { addedOrder(info.idOf(it)) }.take(20)) { category = c }
+                    }
+                }
+            }
+        }
+    }
+    if (searching) {
+        TextInputDialog(title = "Search $title", initial = query, label = "Title", onDismiss = { searching = false }) {
+            searching = false
+            query = it.trim()
+        }
+    }
+    if (menu) {
+        MenuDialog(
+            title,
+            buildList {
+                add(MenuItem("↻ Reload the list") { onReload() })
+                if (!vm.activeProfile.kids) add(MenuItem(if (vm.hideAdult) "Show adult titles" else "Hide adult titles", if (vm.hideAdult) "hidden now" else "shown now") { vm.toggleHideAdult() })
+            },
+            onDismiss = { menu = false },
+        )
+    }
+}
+
+@Composable
+private fun RowTitle(text: String, seeAll: (() -> Unit)?) {
+    Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(text, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        if (seeAll != null) Text("See all ›", color = TunerColors.Accent, fontSize = 14.sp, modifier = Modifier.clickableNoFocus(seeAll).padding(6.dp))
+    }
+}
+
+/** A tap target for phones (no TV focus). */
+private fun Modifier.clickableNoFocus(onClick: () -> Unit): Modifier = this.clickable(onClick = onClick)
