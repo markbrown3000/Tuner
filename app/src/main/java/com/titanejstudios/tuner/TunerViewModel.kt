@@ -4436,8 +4436,12 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     // ---------------- "Are you still watching?" (5.4) ----------------
 
     /** Any button on the remote (or the phone remote, or Home Assistant) counts as someone watching. */
+    /** When a button was last pressed (the player shows its notes for a few seconds after). */
+    var buttonPressedAt by androidx.compose.runtime.mutableLongStateOf(0L); private set
+
     fun onUserActivity() {
         lastUserActivity = System.currentTimeMillis()
+        buttonPressedAt = lastUserActivity
         if (saverOn) {
             saverOn = false
             askWhoIsWatching()

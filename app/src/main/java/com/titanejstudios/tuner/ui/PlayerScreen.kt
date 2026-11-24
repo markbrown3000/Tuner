@@ -512,7 +512,24 @@ fun PlayerScreen(vm: TunerViewModel) {
                 }
             }
 
-            if (isLive && (playback.isPaused || playback.timeshiftActive)) {
+            // Paused: the note stays. Timeshifted: it shows for a few seconds after a button press,
+            // then just a small "−0:28" in the corner so it isn't in the way of the programme.
+            var noteUntil by remember { mutableLongStateOf(0L) }
+            LaunchedEffect(vm.buttonPressedAt, playback.timeshiftActive) { noteUntil = System.currentTimeMillis() + 5_000 }
+            val noteVisible = playback.isPaused || vm.now < noteUntil || System.currentTimeMillis() < noteUntil
+            var tick by remember { mutableLongStateOf(0L) }
+            LaunchedEffect(noteUntil) {
+                kotlinx.coroutines.delay((noteUntil - System.currentTimeMillis()).coerceAtLeast(0L) + 50)
+                tick = System.currentTimeMillis()
+            }
+            if (isLive && playback.timeshiftActive && !playback.isPaused && !noteVisible && tick >= 0L && behind > 1_000) {
+                Text(
+                    "⏱ −${clock(behind)}", color = Color(0xCCFFFFFF), fontSize = 14.sp,
+                    modifier = Modifier.align(Alignment.TopEnd).padding(top = 24.dp, end = 28.dp)
+                        .clip(RoundedCornerShape(8.dp)).background(Color(0x66000000)).padding(horizontal = 8.dp, vertical = 3.dp),
+                )
+            }
+            if (isLive && (playback.isPaused || playback.timeshiftActive) && noteVisible) {
                 Box(Modifier.align(Alignment.TopCenter).padding(top = 32.dp)) {
                     val behindText = if (behind > 1_000) "  ·  ${clock(behind)} behind live" else ""
                     Chip(
