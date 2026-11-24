@@ -395,7 +395,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         remote = this,
     )
     /** YouTube: search, your subscriptions, and the player (trailers too). */
-    val youtube = com.titanejstudios.tuner.features.YouTubeFeature(store, viewModelScope)
+    val youtube = com.titanejstudios.tuner.features.YouTubeFeature(store, viewModelScope, store.activeProfileId)
     /** The YouTube video on screen. */
     var ytVideo by mutableStateOf<com.titanejstudios.tuner.integrations.YouTube.Video?>(null); private set
     /** Sync between houses through your own Google Drive. */
@@ -1724,6 +1724,8 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
             trackStats(flush = true)
             activeProfile = p
             store.activeProfileId = p.id
+            youtube.useProfile(p.id)
+            if (!p.kids) youtube.loadFeed()
             favourites = store.favourites(p.id)
             favouriteSet = favourites.toSet()
             taste = Taste.fromJson(store.taste(p.id))

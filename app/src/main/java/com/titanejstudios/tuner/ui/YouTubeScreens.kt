@@ -366,10 +366,20 @@ fun YouTubeScreen(vm: TunerViewModel) {
                     PillButton(if (yt.query.isBlank()) "🔍 Search YouTube" else "🔍 ${yt.query}", { typing = true }, Modifier.focusRequester(first), compact = true)
                     if (!kids) {
                         when {
-                            yt.signedIn -> PillButton(if (yt.loadingFeed) "Updating…" else "↻ Subscriptions", { yt.loadFeed(force = true) }, compact = true)
+                            yt.signedIn -> {
+                                PillButton(if (yt.loadingFeed) "Updating…" else "↻ Subscriptions", { yt.loadFeed(force = true) }, compact = true)
+                                PillButton("Sign out", { yt.signOut() }, compact = true)
+                            }
                             yt.canSignIn && code == null -> PillButton("Sign in to YouTube", { yt.signIn() }, compact = true)
                         }
                     }
+                }
+                if (!kids) {
+                    Text(
+                        if (yt.signedIn) "${vm.activeProfile.name}'s YouTube" + (yt.email?.let { " · $it" } ?: "")
+                        else "Each profile signs in to their own YouTube",
+                        color = TunerColors.TextSecondary, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp),
+                    )
                 }
                 yt.status?.let { Text(it, color = if (it.startsWith("✓")) TunerColors.Accent else TunerColors.Gold, fontSize = 14.sp, modifier = Modifier.padding(top = 6.dp)) }
                 if (!yt.canSearch && !yt.signedIn) {

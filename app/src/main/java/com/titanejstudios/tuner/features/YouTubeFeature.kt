@@ -19,7 +19,10 @@ import kotlinx.coroutines.withContext
  * YouTube in Flicker: search (with the built-in API key, or your sign-in) and – once you've signed
  * in to YouTube on this device – the latest videos from the channels you subscribe to.
  */
-class YouTubeFeature(private val store: Store, private val scope: CoroutineScope) {
+class YouTubeFeature(private val store: Store, private val scope: CoroutineScope, startProfile: String) {
+    /** Each profile has its own YouTube sign-in and subscriptions. */
+    private var pid = startProfile
+
     private val google = GoogleDrive(BuildConfig.GOOGLE_CLIENT_ID, BuildConfig.GOOGLE_CLIENT_SECRET)
     private val apiKey: String? = BuildConfig.YOUTUBE_KEY.takeIf { it.isNotBlank() }
 
@@ -28,19 +31,34 @@ class YouTubeFeature(private val store: Store, private val scope: CoroutineScope
     /** Signing in is possible (the Google sign-in is set up). */
     val canSignIn: Boolean get() = google.configured
 
-    var signedIn by mutableStateOf(store.ytRefresh != null); private set
-    var email by mutableStateOf(store.ytEmail); private set
+    var signedIn by mutableStateOf(store.ytRefreshOf(pid) != null); private set
+    var email by mutableStateOf(store.ytEmailOf(pid)); private set
     var code by mutableStateOf<GoogleDrive.DeviceCode?>(null); private set
     var status by mutableStateOf<String?>(null); private set
 
     var query by mutableStateOf(""); private set
     var results by mutableStateOf<List<YouTube.Video>>(emptyList()); private set
     var searching by mutableStateOf(false); private set
-    var feed by mutableStateOf(YouTube.fromJson(store.ytFeed)); private set
+    var feed by mutableStateOf(YouTube.fromJson(store.ytFeedOf(pid))); private set
     var loadingFeed by mutableStateOf(false); private set
 
     private var access: GoogleDrive.Tokens? = null
     private var signInJob: Job? = null
+
+    /** Another profile is watching now: their own YouTube (or none). */
+    fun useProfile(profileId: String) {
+        if (profileId == pid) return
+        signInJob?.cancel()
+        pid = profileId
+        access = null
+        code = null
+        status = null
+        signedIn = store.ytRefreshOf(pid) != null
+        email = store.ytEmailOf(pid)
+        feed = YouTube.fromJson(store.ytFeedOf(pid))
+        results = emptyList()
+        query = ""
+    }
 
     // ---------------- Signing in ----------------
 
@@ -75,8 +93,8 @@ class YouTubeFeature(private val store: Store, private val scope: CoroutineScope
                     is GoogleDrive.Poll.Done -> {
                         code = null
                         access = r.tokens
-                        store.ytRefresh = r.tokens.refresh
-                        store.ytEmail = r.tokens.email
+                        store.saveYtRefresh(pid, r.tokens.refresh)
+                        store.saveYtEmail(pid, r.tokens.email)
                         email = r.tokens.email
                         signedIn = r.tokens.refresh != null
                         status = "✓ Signed in to YouTube" + (r.tokens.email?.let { " as $it" } ?: "")
@@ -97,21 +115,21 @@ class YouTubeFeature(private val store: Store, private val scope: CoroutineScope
     }
 
     fun signOut() {
-        val r = store.ytRefresh
-        store.ytRefresh = null
-        store.ytEmail = null
-        store.ytFeed = null
+        val r = store.ytRefreshOf(pid)
+        store.saveYtRefresh(pid, null)
+        store.saveYtEmail(pid, null)
+        store.saveYtFeed(pid, null)
         access = null
         signedIn = false
         email = null
         feed = emptyList()
-        status = "Signed out of YouTube on this device"
+        status = "Signed out of YouTube on this profile"
         if (r != null) scope.launch(Dispatchers.IO) { google.revoke(r) }
     }
 
     private fun accessToken(): String? {
         access?.takeIf { it.expiresAt > System.currentTimeMillis() }?.let { return it.access }
-        val refresh = store.ytRefresh ?: return null
+        val refresh = store.ytRefreshOf(pid) ?: return null
         val t = google.refresh(refresh)
         access = t
         return t.access
@@ -150,8 +168,9 @@ class YouTubeFeature(private val store: Store, private val scope: CoroutineScope
     /** Your subscriptions' newest videos (every 3 hours, or now when [force]). */
     fun loadFeed(force: Boolean = false) {
         if (!signedIn || loadingFeed) return
-        if (!force && feed.isNotEmpty() && System.currentTimeMillis() - store.ytFeedAt < 3 * 3_600_000L) return
+        if (!force && feed.isNotEmpty() && System.currentTimeMillis() - store.ytFeedAtOf(pid) < 3 * 3_600_000L) return
         loadingFeed = true
+        val forProfile = pid
         scope.launch {
             val r = withContext(Dispatchers.IO) {
                 runCatching {
@@ -165,9 +184,14 @@ class YouTubeFeature(private val store: Store, private val scope: CoroutineScope
                 }
             }
             loadingFeed = false
+            // Someone else picked their profile meanwhile: keep it for the profile it was for.
+            if (forProfile != pid) {
+                r.onSuccess { store.saveYtFeed(forProfile, YouTube.toJson(it.take(120))) }
+                return@launch
+            }
             r.onSuccess {
                 feed = it
-                store.ytFeed = YouTube.toJson(it.take(120))
+                store.saveYtFeed(pid, YouTube.toJson(it.take(120)))
             }.onFailure {
                 if (it is GoogleDrive.SignedOut) {
                     signOut()

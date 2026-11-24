@@ -720,16 +720,26 @@ class Store(context: Context) {
         set(value) = prefs.edit().putLong("cloud_synced_at", value).apply()
 
     // ---- YouTube (sign-in kept on each device, never in backups) ----
-    var ytRefresh: String?
-        get() = prefs.getString("yt_refresh", null)
-        set(value) = prefs.edit().putString("yt_refresh", value).apply()
-    var ytEmail: String?
-        get() = prefs.getString("yt_email", null)
-        set(value) = prefs.edit().putString("yt_email", value).apply()
-    var ytFeed: String?
-        get() = prefs.getString("yt_feed", null)
-        set(value) = prefs.edit().putString("yt_feed", value).putLong("yt_feed_at", System.currentTimeMillis()).apply()
-    val ytFeedAt: Long get() = prefs.getLong("yt_feed_at", 0L)
+    // YouTube sign-ins are per profile. (The first, from before that, belongs to the main profile.)
+    private fun ytKey(name: String, profileId: String): String {
+        if (profileId == MAIN_PROFILE && !prefs.contains("${name}_$profileId") && prefs.contains(name)) {
+            when (name) {
+                "yt_feed_at" -> prefs.edit().putLong("${name}_$profileId", prefs.getLong(name, 0L)).remove(name).apply()
+                else -> prefs.edit().putString("${name}_$profileId", prefs.getString(name, null)).remove(name).apply()
+            }
+        }
+        return "${name}_$profileId"
+    }
+    fun ytRefreshOf(profileId: String): String? = prefs.getString(ytKey("yt_refresh", profileId), null)
+    fun saveYtRefresh(profileId: String, value: String?) = prefs.edit().putString(ytKey("yt_refresh", profileId), value).apply()
+    fun ytEmailOf(profileId: String): String? = prefs.getString(ytKey("yt_email", profileId), null)
+    fun saveYtEmail(profileId: String, value: String?) = prefs.edit().putString(ytKey("yt_email", profileId), value).apply()
+    fun ytFeedOf(profileId: String): String? = prefs.getString(ytKey("yt_feed", profileId), null)
+    fun saveYtFeed(profileId: String, value: String?) {
+        val at = ytKey("yt_feed_at", profileId)
+        prefs.edit().putString(ytKey("yt_feed", profileId), value).putLong(at, System.currentTimeMillis()).apply()
+    }
+    fun ytFeedAtOf(profileId: String): Long = prefs.getLong(ytKey("yt_feed_at", profileId), 0L)
 
     // ---- Downloads (phones) ----
     var downloadsJson: String

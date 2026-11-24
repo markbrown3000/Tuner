@@ -1197,8 +1197,20 @@ fun AppTile(vm: TunerViewModel, app: TvApp, modifier: Modifier, dimmed: Boolean 
 @Composable
 private fun KidsHome(vm: TunerViewModel) {
     val channels = remember(vm.channels, vm.unlocked, vm.activeProfile) { vm.channelsFor(ALL) }
+    // Carry on watching: only what this child started themselves, on channels they're allowed.
+    val minute = vm.now / 60_000
+    val carryOn = remember(minute, channels, vm.started, vm.resume, vm.plexItems, vm.unfinished, vm.recents, vm.activeProfile.id) {
+        val allowed = channels.map { it.id }.toSet()
+        val recent = vm.channelsFor(RECENT).filter { it.id in allowed }.take(8)
+        buildList {
+            vm.finishable.filter { it.channelId in allowed }.take(4).forEach { add(unfinishedCard(vm, it)) }
+            vm.myPlexItems.take(8).forEach { item -> add(plexItemCard(vm, item) {}) }
+            if (vm.hasVod) vm.myResume.values.sortedByDescending { it.updatedAt }.take(8).forEach { add(resumeCard(vm, it)) }
+            recent.forEach { add(channelCard(vm, it, recent, vm.now, emptySet())) }
+        }
+    }
     val first = remember { FocusRequester() }
-    LaunchedEffect(channels.isNotEmpty()) {
+    LaunchedEffect(channels.isNotEmpty(), carryOn.isNotEmpty()) {
         delay(80)
         runCatching { first.requestFocus() }
     }
@@ -1229,6 +1241,24 @@ private fun KidsHome(vm: TunerViewModel) {
                     verticalArrangement = Arrangement.spacedBy(18.dp),
                     contentPadding = PaddingValues(8.dp),
                 ) {
+                    if (carryOn.isNotEmpty()) {
+                        item(key = "carry-on", span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
+                            Column {
+                                Text("Carry on watching", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                                Spacer(Modifier.height(10.dp))
+                                androidx.compose.foundation.lazy.LazyRow(
+                                    horizontalArrangement = Arrangement.spacedBy(18.dp),
+                                    contentPadding = PaddingValues(vertical = 8.dp),
+                                ) {
+                                    items(carryOn.size, key = { carryOn[it].key }) { i ->
+                                        HomeTile(carryOn[i], if (i == 0) Modifier.focusRequester(first) else Modifier, onFocus = {})
+                                    }
+                                }
+                                Spacer(Modifier.height(10.dp))
+                                Text("Your channels", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
                     items(channels.size, key = { channels[it].id }) { i ->
                         val c = channels[i]
                         ChannelTile(
@@ -1236,7 +1266,7 @@ private fun KidsHome(vm: TunerViewModel) {
                             channel = c,
                             onClick = { vm.play(c, channels) },
                             onFocused = {},
-                            modifier = (if (i == 0) Modifier.focusRequester(first) else Modifier).size(width = 270.dp, height = 160.dp),
+                            modifier = (if (i == 0 && carryOn.isEmpty()) Modifier.focusRequester(first) else Modifier).size(width = 270.dp, height = 160.dp),
                         )
                     }
                 }
