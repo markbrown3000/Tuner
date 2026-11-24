@@ -1,5 +1,8 @@
 package com.titanejstudios.tuner.ui
 
+import com.titanejstudios.tuner.R
+import androidx.compose.ui.res.painterResource
+import androidx.compose.foundation.Image
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloatAsState
@@ -93,10 +96,8 @@ fun StartUpScreen(status: String?) {
         contentAlignment = Alignment.Center,
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            Box(Modifier.size(110.dp).clip(RoundedCornerShape(28.dp)).background(TunerColors.Accent), contentAlignment = Alignment.Center) {
-                Text("📺", fontSize = 52.sp)
-            }
-            Text("Tuner", color = Color.White, fontSize = 40.sp, fontWeight = FontWeight.ExtraBold)
+            Image(painterResource(R.drawable.logo_icon), contentDescription = "Flicker", modifier = Modifier.size(120.dp))
+            Text("Flicker", color = Color.White, fontSize = 40.sp, fontWeight = FontWeight.ExtraBold)
             Spacer(Modifier.height(4.dp))
             Box(Modifier.width(200.dp).height(4.dp).clip(RoundedCornerShape(2.dp)).background(Color(0x26FFFFFF))) {
                 val pulse = androidx.compose.animation.core.rememberInfiniteTransition(label = "load")

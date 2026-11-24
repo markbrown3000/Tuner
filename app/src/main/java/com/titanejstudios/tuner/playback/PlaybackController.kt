@@ -66,7 +66,13 @@ class PlaybackController(private val context: Context) {
     var nightModeOn = false
         set(value) {
             field = value
-            nightMode.apply(player.audioSessionId, value)
+            nightMode.apply(player.audioSessionId, value, speechOn)
+        }
+    /** Clearer speech: voices lifted over music and effects. */
+    var speechOn = false
+        set(value) {
+            field = value
+            nightMode.apply(player.audioSessionId, nightModeOn, value)
         }
     val nightModeSupported: Boolean get() = nightMode.supported
 
@@ -220,7 +226,7 @@ class PlaybackController(private val context: Context) {
         p.addListener(object : Player.Listener {
             override fun onAudioSessionIdChanged(audioSessionId: Int) {
                 if (p === player) {
-                    nightMode.apply(audioSessionId, nightModeOn)
+                    nightMode.apply(audioSessionId, nightModeOn, speechOn)
                     boost.apply(audioSessionId, VolumeLevels.boostMb(volumeDb))
                 }
             }
@@ -423,7 +429,7 @@ class PlaybackController(private val context: Context) {
         player = sb
         sb.volume = VolumeLevels.linear(volumeDb)
         session?.player = sb
-        nightMode.apply(sb.audioSessionId, nightModeOn)
+        nightMode.apply(sb.audioSessionId, nightModeOn, speechOn)
         boost.apply(sb.audioSessionId, VolumeLevels.boostMb(volumeDb))
         videoFrameRate = sb.videoFormat?.frameRate?.takeIf { it > 0f } ?: videoFrameRate
         standby = old

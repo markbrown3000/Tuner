@@ -469,6 +469,24 @@ class Store(context: Context) {
     var footballTeams: Set<String>
         get() = getList("football_teams").toSet()
         set(value) = putList("football_teams", value)
+    /** Followed team name → its football-data.org id (for their fixtures). */
+    var footballTeamIds: Map<String, String>
+        get() = stringMap("football_team_ids")
+        set(value) = setStringMap("football_team_ids", value)
+    /** Teams you can pick from (cached for a week). */
+    var footballTeamList: String?
+        get() = prefs.getString("football_team_list", null)
+        set(value) = prefs.edit().putString("football_team_list", value).putLong("football_team_list_at", System.currentTimeMillis()).apply()
+    val footballTeamListAt: Long get() = prefs.getLong("football_team_list_at", 0L)
+    /** Your teams' coming fixtures (raw JSON, cached for a few hours). */
+    var footballFixtures: String?
+        get() = prefs.getString("football_fixtures", null)
+        set(value) = prefs.edit().putString("football_fixtures", value).putLong("football_fixtures_at", System.currentTimeMillis()).apply()
+    val footballFixturesAt: Long get() = prefs.getLong("football_fixtures_at", 0L)
+    /** Fixtures already announced ("Newcastle play today at 5:30 on…"). */
+    var teamAnnounced: Set<String>
+        get() = prefs.getStringSet("team_announced", emptySet())?.toSet() ?: emptySet()
+        set(value) = prefs.edit().putStringSet("team_announced", value).apply()
 
     /** App updates from a GitHub repo's releases ("owner/repo"). */
     /** GitHub repo checked for updates ("owner/repo"). Defaults to Tuner's own repo; "" = turned off. */
@@ -499,6 +517,14 @@ class Store(context: Context) {
     var nightMode: Boolean
         get() = prefs.getBoolean("night_mode", false)
         set(value) = prefs.edit().putBoolean("night_mode", value).apply()
+    /** Clearer speech: voices lifted over music and effects. */
+    var clearSpeech: Boolean
+        get() = prefs.getBoolean("clear_speech", false)
+        set(value) = prefs.edit().putBoolean("clear_speech", value).apply()
+    /** Text size across Flicker: 100, 115 or 130 (%). Kept per device (a phone and a TV differ). */
+    var textScale: Int
+        get() = prefs.getInt("text_scale", 100)
+        set(value) = prefs.edit().putInt("text_scale", value).apply()
     var frameRateMatch: Boolean
         get() = prefs.getBoolean("frame_rate_match", false)
         set(value) = prefs.edit().putBoolean("frame_rate_match", value).apply()
@@ -648,6 +674,56 @@ class Store(context: Context) {
         get() = prefs.getString("device_mode", "") ?: ""
         set(value) = prefs.edit().putString("device_mode", value).apply()
 
+    // ---- Linked devices (send to TV, carry on where you left off) ----
+    /** Shared by every linked device in the house; copying settings to another TV links it too. */
+    var linkKey: String?
+        get() = prefs.getString("link_key", null)?.takeIf { it.isNotBlank() }
+        set(value) = prefs.edit().putString("link_key", value).apply()
+    /** This device's own id (never copied, so two devices never share one). */
+    val linkDeviceId: String
+        get() = prefs.getString("link_device_id", null) ?: java.util.UUID.randomUUID().toString().take(12)
+            .also { prefs.edit().putString("link_device_id", it).apply() }
+    /** What other devices call this one ("Living room TV", "Mark's phone"); "" = the device's own name. */
+    var linkName: String
+        get() = prefs.getString("link_name", "") ?: ""
+        set(value) = prefs.edit().putString("link_name", value).apply()
+
+    /** Films and episodes finished (content id → when), so a linked device's older resume point doesn't bring them back. */
+    var resumeDone: Map<String, String>
+        get() = stringMap("resume_done")
+        set(value) = setStringMap("resume_done", value)
+
+    // ---- Downloads (phones) ----
+    var downloadsJson: String
+        get() = prefs.getString("downloads", "[]") ?: "[]"
+        set(value) = prefs.edit().putString("downloads", value).apply()
+    var downloadWifiOnly: Boolean
+        get() = prefs.getBoolean("download_wifi_only", true)
+        set(value) = prefs.edit().putBoolean("download_wifi_only", value).apply()
+
+    // ---- Your usual channel ----
+    /** Watch time by day type and hour, per profile (see Habits). */
+    fun habits(profileId: String): String = prefs.getString("habits_$profileId", "{}") ?: "{}"
+    fun setHabits(profileId: String, json: String) = prefs.edit().putString("habits_$profileId", json).apply()
+    var offerUsualChannel: Boolean
+        get() = prefs.getBoolean("offer_usual", true)
+        set(value) = prefs.edit().putBoolean("offer_usual", value).apply()
+
+    /** Little pictures while scrubbing IPTV films and catch-up (needs a second connection to the provider). */
+    var scrubPreviewsIptv: Boolean
+        get() = prefs.getBoolean("scrub_previews_iptv", false)
+        set(value) = prefs.edit().putBoolean("scrub_previews_iptv", value).apply()
+
+    /** Programmes you switched off half-way (offered on catch-up to finish). JSON list. */
+    var unfinishedJson: String
+        get() = prefs.getString("unfinished", "[]") ?: "[]"
+        set(value) = prefs.edit().putString("unfinished", value).apply()
+
+    /** What the home-screen widget shows: favourites with now and next. */
+    var widgetSnapshot: String
+        get() = prefs.getString("widget_now", "[]") ?: "[]"
+        set(value) = prefs.edit().putString("widget_now", value).apply()
+
     // ---- Built-in VPN (kept on this TV only: the files hold your VPN key) ----
     var vpnServers: String?
         get() = prefs.getString("vpn_servers", null)
@@ -718,7 +794,7 @@ class Store(context: Context) {
 
     // ---------------- Backup & restore ----------------
 
-    private val notBackedUp = listOf("preview_channel_id", "watch_next_ids", "last_refresh_", "usage_", "bonus_", "schema", "dead_channels", "health_checked_at", "recordings", "watch_stats", "live_tab_rows", "plex_client_id", "flaky_streams", "db_tidy_at", "new_eps_checked_at", "crash_reported_at", "sport_auto_done", "sync_stamp_", "synced_at", "nas_backup_at", "update_checked_at", "update_dismissed", "vpn_", "device_mode")
+    private val notBackedUp = listOf("preview_channel_id", "watch_next_ids", "last_refresh_", "usage_", "bonus_", "schema", "dead_channels", "health_checked_at", "recordings", "watch_stats", "live_tab_rows", "plex_client_id", "flaky_streams", "db_tidy_at", "new_eps_checked_at", "crash_reported_at", "sport_auto_done", "sync_stamp_", "synced_at", "nas_backup_at", "update_checked_at", "update_dismissed", "vpn_", "device_mode", "link_device_id", "link_name", "downloads", "habits_", "widget_now", "football_team_list", "football_fixtures", "team_announced", "text_scale")
 
     /** Every setting as JSON (playlists, profiles, favourites, PIN, reminders, guide fixes…). */
     fun exportBackup(): String {
@@ -744,7 +820,8 @@ class Store(context: Context) {
     /** Restores a backup made by [exportBackup]. Throws if it isn't one. */
     fun importBackup(json: String) {
         val root = JSONObject(json)
-        if (root.optString("app") != "Tuner") throw IllegalArgumentException("That isn't a Tuner backup")
+        // Backups still say "Tuner" inside (the app's old name) so older versions can read them too.
+        if (root.optString("app") !in setOf("Tuner", "Flicker")) throw IllegalArgumentException("That isn't a Flicker backup")
         val values = root.getJSONObject("settings")
         val e = prefs.edit()
         val keys = values.keys()

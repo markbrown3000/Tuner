@@ -230,6 +230,7 @@ fun GuideScreen(vm: TunerViewModel) {
             add(MenuItem("Watch live") { vm.play(ch, list) })
             if (p != null && p.start <= t && vm.canCatchup(ch, p)) {
                 add(MenuItem(if (p.stop > t) "Watch from the start" else "Watch (catch-up)") { vm.playCatchup(ch, p, list) })
+                if (vm.isPhone && vm.link.linked) add(MenuItem("📺 Watch it on the TV") { vm.watchOnTv(vm.catchupJson(ch, p)) })
             }
             if (p != null) {
                 add(MenuItem("👍 More like this") { vm.rateProgramme(ch, p, like = true) })

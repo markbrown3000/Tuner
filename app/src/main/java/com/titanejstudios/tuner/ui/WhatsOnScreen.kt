@@ -224,8 +224,8 @@ fun StatsScreen(vm: TunerViewModel) {
             profilePills()
         }
         Text(
-            if (vm.isPhone) "Time spent watching in Tuner on this phone over the last 7 days."
-            else "Time spent watching in Tuner on this TV over the last 7 days.",
+            if (vm.isPhone) "Time spent watching in Flicker on this phone over the last 7 days."
+            else "Time spent watching in Flicker on this TV over the last 7 days.",
             color = TunerColors.TextSecondary, fontSize = 15.sp,
         )
         Spacer(Modifier.height(16.dp))

@@ -106,9 +106,9 @@ fun SettingsScreen(vm: TunerViewModel) {
             }
             item {
                 SettingRow(
-                    "Update when Tuner starts",
+                    "Update when Flicker starts",
                     subtitle = if (vm.refreshOnStart) "If the saved copy is over 12 hours old (as well as overnight)"
-                    else "Overnight only – Tuner opens straight onto the saved channels",
+                    else "Overnight only – Flicker opens straight onto the saved channels",
                     detail = if (vm.refreshOnStart) "On" else "Off",
                     onClick = { vm.toggleRefreshOnStart() },
                 )
@@ -141,7 +141,7 @@ fun SettingsScreen(vm: TunerViewModel) {
             item { SettingRow("Add a profile", subtitle = "Each profile has its own favourites; kids profiles can have limits", onClick = { vm.startAddProfile() }) }
             item {
                 SettingRow(
-                    "When Tuner opens",
+                    "When Flicker opens",
                     subtitle = "Home, the TV Guide on the category and channel you left, or straight into the last channel",
                     detail = vm.startScreenLabel,
                     onClick = { vm.cycleStartScreen() },
@@ -157,10 +157,78 @@ fun SettingsScreen(vm: TunerViewModel) {
                 )
             }
 
+            if (vm.isPhone) item {
+                SettingRow(
+                    "📺 TV remote",
+                    subtitle = "Control a linked TV from this phone: buttons, and its channels with what's on",
+                    detail = if (vm.link.linked) null else "Link first",
+                    onClick = { vm.navigate(Screen.Remote) },
+                )
+            }
+
+            if (vm.isPhone) item {
+                SettingRow(
+                    "⬇ Downloads",
+                    subtitle = "Films and episodes saved on this phone to watch offline",
+                    detail = vm.downloads.size.takeIf { it > 0 }?.toString(),
+                    onClick = { vm.navigate(Screen.Downloads) },
+                )
+            }
+
+            item {
+                SettingRow(
+                    "🔗 Linked devices",
+                    subtitle = "Send what's playing to another TV or phone, and carry on where you left off",
+                    detail = when {
+                        !vm.link.linked -> "Not linked"
+                        vm.link.peers.isNotEmpty() -> "${vm.link.peers.size} found"
+                        else -> "Linked"
+                    },
+                    onClick = { vm.navigate(Screen.Link) },
+                )
+            }
+
+            item {
+                SettingRow(
+                    "Text size",
+                    subtitle = "Bigger text everywhere in Flicker, on this device",
+                    detail = vm.textScaleLabel,
+                    onClick = { vm.cycleTextScale() },
+                )
+            }
+
+            item {
+                SettingRow(
+                    "🗣 Clearer speech",
+                    subtitle = "Lifts voices over music and effects, and turns down rumble – also in the player's ⋮ menu",
+                    detail = if (vm.clearSpeech) "On" else "Off",
+                    onClick = { vm.toggleClearSpeech() },
+                )
+            }
+
+            item {
+                SettingRow(
+                    "Preview pictures when skipping (IPTV)",
+                    subtitle = "Little pictures as you scrub through IPTV films and catch-up. Needs a second connection – " +
+                        "turn it off if your provider allows only one. Always on for Plex, downloads and recordings.",
+                    detail = if (vm.scrubPreviewsIptv) "On" else "Off",
+                    onClick = { vm.toggleScrubPreviews() },
+                )
+            }
+
+            item {
+                SettingRow(
+                    "Offer my usual channel",
+                    subtitle = "When you open Flicker at a time you usually watch something (the news at 6, say), Home offers it",
+                    detail = if (vm.offerUsual) "On" else "Off",
+                    onClick = { vm.toggleOfferUsual() },
+                )
+            }
+
             item {
                 SettingRow(
                     "VPN",
-                    subtitle = "Tuner's own VPN (Surfshark and other WireGuard providers) – only Tuner's streams use it",
+                    subtitle = "Flicker's own VPN (Surfshark and other WireGuard providers) – only Flicker's streams use it",
                     detail = when {
                         vm.vpn.connected -> "🔒 Connected"
                         vm.vpn.enabled -> "On – not connected"
@@ -173,7 +241,7 @@ fun SettingsScreen(vm: TunerViewModel) {
             item {
                 SettingRow(
                     "Recommendations",
-                    subtitle = "What Tuner has learned you like – and a reset if it gets it wrong",
+                    subtitle = "What Flicker has learned you like – and a reset if it gets it wrong",
                     detail = if (vm.learnTaste) "Learning" else "Off",
                     onClick = { vm.navigate(Screen.Recommendations) },
                 )
@@ -199,7 +267,7 @@ fun SettingsScreen(vm: TunerViewModel) {
 
             item {
                 SettingRow(
-                    "Open Tuner when the TV turns on",
+                    "Open Flicker when the TV turns on",
                     subtitle = if (vm.openOnBoot && !vm.canOpenOnBoot) "Needs \"Display over other apps\" allowed – press to set it"
                     else "After the TV fully restarts (not when it wakes from standby)",
                     detail = if (vm.openOnBoot) "On" else "Off",
@@ -244,7 +312,7 @@ fun SettingsScreen(vm: TunerViewModel) {
             item {
                 SettingRow(
                     "Audio passthrough (Dolby to soundbar/amp)",
-                    subtitle = "Leave off if the picture freezes while sound carries on · applies after reopening Tuner",
+                    subtitle = "Leave off if the picture freezes while sound carries on · applies after reopening Flicker",
                     detail = if (vm.audioPassthrough) "On" else "Off",
                     onClick = { vm.toggleAudioPassthrough() },
                 )
@@ -252,7 +320,7 @@ fun SettingsScreen(vm: TunerViewModel) {
             item {
                 SettingRow(
                     "Stream compatibility mode",
-                    subtitle = "Only for channels that never start · applies after reopening Tuner",
+                    subtitle = "Only for channels that never start · applies after reopening Flicker",
                     detail = if (vm.streamCompatibility) "On" else "Off",
                     onClick = { vm.toggleStreamCompatibility() },
                 )
@@ -347,8 +415,16 @@ fun SettingsScreen(vm: TunerViewModel) {
             item { SectionTitle("Plex, scores & updates") }
             item {
                 SettingRow(
+                    "⚽ My teams",
+                    subtitle = "Pick your teams to see their next fixtures and which channel shows each one",
+                    detail = vm.footballTeams.sorted().joinToString(", ").ifEmpty { "Pick" },
+                    onClick = { vm.navigate(Screen.Teams) },
+                )
+            }
+            item {
+                SettingRow(
                     "Your teams' matches",
-                    subtitle = "Follow teams on the Football screen – Tuner finds their matches in the guide, pops up 5 minutes before kick-off (sport recordings run 30 min over)",
+                    subtitle = "Flicker finds your teams' matches in the guide and pops up 5 minutes before kick-off (sport recordings run 30 min over)",
                     detail = vm.sportFollowLabel,
                     onClick = { vm.cycleSportFollow() },
                 )
@@ -381,7 +457,7 @@ fun SettingsScreen(vm: TunerViewModel) {
             }
             item {
                 SettingRow(
-                    "Update Tuner",
+                    "Update Flicker",
                     subtitle = "Install a new version from your computer's browser, or from GitHub · this is ${vm.installedVersion}",
                     onClick = { vm.openUpdates() },
                 )
@@ -399,15 +475,15 @@ fun SettingsScreen(vm: TunerViewModel) {
             item {
                 SettingRow(
                     "Voice",
-                    subtitle = "Say \"Hey Google, play BBC One on Tuner\" – or use tuner://play links from Home Assistant",
-                    onClick = { vm.showNotice("Try: \"Hey Google, play Sky Sports Main Event on Tuner\"") },
+                    subtitle = "Say \"Hey Google, play BBC One on Flicker\" – or use tuner://play links from Home Assistant",
+                    onClick = { vm.showNotice("Try: \"Hey Google, play Sky Sports Main Event on Flicker\"") },
                 )
             }
             if (!vm.isPhone) item {
                 SettingRow(
                     "Screensaver",
-                    subtitle = "Clock + what's on now on your favourites. Choose \"Tuner – what's on\" in the TV's screensaver settings (see README)",
-                    onClick = { vm.showNotice("Pick \"Tuner – what's on\" in the TV's screensaver / ambient settings") },
+                    subtitle = "Clock + what's on now on your favourites. Choose \"Flicker – what's on\" in the TV's screensaver settings (see README)",
+                    onClick = { vm.showNotice("Pick \"Flicker – what's on\" in the TV's screensaver / ambient settings") },
                 )
             }
 
@@ -416,7 +492,7 @@ fun SettingsScreen(vm: TunerViewModel) {
             if (!vm.isPhone) item {
                 SettingRow(
                     "Phone remote",
-                    subtitle = "Control Tuner from your phone's browser – buttons, channel list, what's on",
+                    subtitle = "Control Flicker from your phone's browser – buttons, channel list, what's on",
                     detail = if (vm.remoteEnabled) "On" else "Off",
                     onClick = { vm.toggleRemote() },
                 )
@@ -433,7 +509,7 @@ fun SettingsScreen(vm: TunerViewModel) {
                         Column {
                             Text("Scan to open the remote, then add it to your home screen.", color = TunerColors.TextPrimary, fontSize = 16.sp)
                             Text(url, color = TunerColors.Accent, fontSize = 16.sp)
-                            Text("Works while Tuner is open, on the same Wi-Fi.", color = TunerColors.TextSecondary, fontSize = 14.sp)
+                            Text("Works while Flicker is open, on the same Wi-Fi.", color = TunerColors.TextSecondary, fontSize = 14.sp)
                         }
                     }
                 }
@@ -493,7 +569,7 @@ fun SettingsScreen(vm: TunerViewModel) {
             item {
                 SettingRow(
                     if (vm.pin == null) "Set a parental PIN" else "Change PIN",
-                    subtitle = "Locked groups need the PIN once each time Tuner is opened",
+                    subtitle = "Locked groups need the PIN once each time Flicker is opened",
                     onClick = { vm.changePin() },
                 )
             }
@@ -529,7 +605,7 @@ fun SettingsScreen(vm: TunerViewModel) {
                 item {
                     SettingRow(
                         "Keep a copy on the TV too",
-                        subtitle = "Off saves space on the TV, but those recordings then play from Plex (or another app), not Tuner",
+                        subtitle = "Off saves space on the TV, but those recordings then play from Plex (or another app), not Flicker",
                         detail = if (vm.nasKeepLocal) "On" else "Off",
                         onClick = { vm.toggleNasKeepLocal() },
                     )
@@ -557,13 +633,13 @@ fun SettingsScreen(vm: TunerViewModel) {
             item { SectionTitle("This TV") }
             item { SettingRow("Watch time", subtitle = "What each profile watched this week", onClick = { vm.openStats() }) }
             item { SettingRow(if (vm.isPhone) "Copy to another device" else "Copy to another TV", subtitle = if (vm.isPhone) "Send playlists, favourites and settings to a TV or phone on the same Wi-Fi" else "Send playlists, favourites and settings to a TV on the same Wi-Fi", onClick = { vm.startShareSend() }) }
-            item { SettingRow(if (vm.isPhone) "Copy from another device" else "Copy from another TV", subtitle = if (vm.isPhone) "Get everything from a TV or phone running Tuner" else "Get everything from another TV running Tuner", onClick = { vm.startShareReceive() }) }
+            item { SettingRow(if (vm.isPhone) "Copy from another device" else "Copy from another TV", subtitle = if (vm.isPhone) "Get everything from a TV or phone running Flicker" else "Get everything from another TV running Flicker", onClick = { vm.startShareReceive() }) }
 
             item { SectionTitle("Help") }
             item {
                 SettingRow(
                     "Check everything",
-                    subtitle = if (vm.isPhone) "Tries each part of Tuner on this phone and says what works and what doesn't" else "Tries each part of Tuner on this TV and says what works and what doesn't",
+                    subtitle = if (vm.isPhone) "Tries each part of Flicker on this phone and says what works and what doesn't" else "Tries each part of Flicker on this TV and says what works and what doesn't",
                     onClick = { vm.openSelfTest() },
                 )
             }
@@ -621,7 +697,7 @@ fun SettingsScreen(vm: TunerViewModel) {
             item {
                 SettingRow(
                     "Nightly backup to the network drive",
-                    subtitle = "Keeps the last 7 in \"Tuner backups\" – press to back up now",
+                    subtitle = "Keeps the last 7 in \"Flicker backups\" – press to back up now",
                     detail = vm.nasBackupLabel,
                     onClick = { vm.backupToNasNow() },
                 )
@@ -664,7 +740,7 @@ fun SettingsScreen(vm: TunerViewModel) {
             item { SectionTitle("About") }
             item {
                 SettingRow(
-                    "Tuner ${vm.installedVersion}",
+                    "Flicker ${vm.installedVersion}",
                     subtitle = "Titan EJ Studios · ${vm.allChannels.size} channels loaded" + (if (vm.safeMode) " · safe mode" else ""),
                     onClick = {},
                 )
@@ -761,7 +837,7 @@ fun SettingsScreen(vm: TunerViewModel) {
     confirmDelete?.let { s ->
         MenuDialog(
             title = "Delete \"${s.name}\"?",
-            subtitle = "Its channels and guide are removed from Tuner. Your favourites list is kept.",
+            subtitle = "Its channels and guide are removed from Flicker. Your favourites list is kept.",
             items = listOf(
                 MenuItem("Cancel") {},
                 MenuItem("Delete") { vm.deleteSource(s) },

@@ -1,5 +1,11 @@
 package com.titanejstudios.tuner.ui
 
+import com.titanejstudios.tuner.playback.ScrubPreview
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.ui.graphics.asImageBitmap
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.activity.compose.BackHandler
@@ -61,7 +67,7 @@ import com.titanejstudios.tuner.data.Programme
 import kotlinx.coroutines.delay
 import android.view.KeyEvent as AndroidKey
 
-private enum class Overlay { None, Channels, Options, Audio, Subtitles, MiniGuide, Favourites, Sleep, LipSync, Versions }
+private enum class Overlay { None, Channels, Options, Audio, Subtitles, MiniGuide, Favourites, Sleep, LipSync, Versions, Send }
 
 @Composable
 fun PlayerScreen(vm: TunerViewModel) {
@@ -152,6 +158,30 @@ fun PlayerScreen(vm: TunerViewModel) {
         vm.cancelAutoNext()
     }
 
+    // Scrubbing: hold ◀ ▶ (TV) or drag the bar (phone) to pick a spot, with a little picture of it.
+    var scrubTarget by remember(modeKey) { mutableStateOf<Long?>(null) }
+    var scrubFrame by remember(modeKey) { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
+    val previewUrl = when (mode) {
+        is PlayMode.RecordingPlay -> mode.recording.path
+        is PlayMode.Live -> null
+        else -> playback.currentUrl
+    }
+    val previews = remember(modeKey, previewUrl, vm.scrubPreviewsIptv) {
+        previewUrl?.takeIf { vm.scrubPreviewsIptv || ScrubPreview.safeFor(it, (mode as? PlayMode.Vod)?.contentId) }?.let { ScrubPreview(it) }
+    }
+    DisposableEffect(previews) { onDispose { previews?.release() } }
+    LaunchedEffect(scrubTarget, previews) {
+        val t = scrubTarget
+        if (t == null) {
+            scrubFrame = null
+            return@LaunchedEffect
+        }
+        val p = previews ?: return@LaunchedEffect
+        delay(180)
+        val bmp = withContext(Dispatchers.IO) { runCatching { p.frameAt(t) }.getOrNull() }
+        if (bmp != null) scrubFrame = bmp.asImageBitmap()
+    }
+
     LaunchedEffect(showStats) {
         while (showStats) {
             stats = playback.streamInfo()
@@ -182,6 +212,30 @@ fun PlayerScreen(vm: TunerViewModel) {
                 } else null
             }
         } else if (firstPress) vm.showNotice("Rewind isn't available on this stream")
+    }
+
+    /** First press jumps straight away; holding the button scrubs (faster the longer you hold) and jumps when let go. */
+    fun scrubOrSeek(deltaMs: Long, repeat: Int) {
+        if (repeat == 0 || isLive || duration <= 0) {
+            seek(deltaMs, repeat == 0)
+            return
+        }
+        val step = deltaMs * when {
+            repeat > 24 -> 6
+            repeat > 10 -> 3
+            else -> 1
+        }
+        scrubTarget = ((scrubTarget ?: playback.positionMs) + step).coerceIn(0L, (duration - 5_000L).coerceAtLeast(0L))
+        pokeInfo()
+    }
+
+    fun finishScrub() {
+        val t = scrubTarget ?: return
+        val before = playback.positionMs
+        playback.seekTo(t)
+        scrubTarget = null
+        if (mode is PlayMode.Vod && mode.seriesId != null && before < 180_000L && t > before) introCandidate = t
+        pokeInfo()
     }
 
     fun handleKey(e: KeyEvent): Boolean {
@@ -260,8 +314,8 @@ fun PlayerScreen(vm: TunerViewModel) {
             AndroidKey.KEYCODE_DPAD_LEFT -> if (down) {
                 if (isLive && !paused && !playback.timeshiftActive) {
                     if (first) overlay = Overlay.Channels
-                } else seek(-10_000, first)
-            }
+                } else scrubOrSeek(-10_000, e.nativeKeyEvent.repeatCount)
+            } else if (e.type == KeyEventType.KeyUp) finishScrub()
             AndroidKey.KEYCODE_DPAD_RIGHT -> if (down) {
                 if (skipIntroVisible && introEnd != null) {
                     if (first) {
@@ -273,8 +327,8 @@ fun PlayerScreen(vm: TunerViewModel) {
                     if (first) {
                         if (vm.previousChannel != null) vm.playPrevious() else pokeInfo()
                     }
-                } else seek(30_000, first)
-            }
+                } else scrubOrSeek(30_000, e.nativeKeyEvent.repeatCount)
+            } else if (e.type == KeyEventType.KeyUp) finishScrub()
             AndroidKey.KEYCODE_MEDIA_PLAY_PAUSE, AndroidKey.KEYCODE_MEDIA_PLAY, AndroidKey.KEYCODE_MEDIA_PAUSE -> if (first) {
                 playback.togglePause()
                 pokeInfo()
@@ -394,7 +448,17 @@ fun PlayerScreen(vm: TunerViewModel) {
                     duration = duration,
                     onChannels = { overlay = Overlay.Channels; controls = false },
                     onMenu = { overlay = Overlay.Options; controls = false },
+                    onSend = {
+                        if (vm.link.linked) {
+                            vm.link.search()
+                            overlay = Overlay.Send
+                        } else vm.showNotice("Link your TV first: Settings › Linked devices")
+                        controls = false
+                    },
                     onSeek = { playback.seekTo(it); controlsToken++ },
+                    scrubTarget = scrubTarget,
+                    scrubFrame = scrubFrame,
+                    onScrub = { scrubTarget = it; controlsToken++ },
                     onPoke = { controlsToken++ },
                     modifier = Modifier.fillMaxSize(),
                 )
@@ -431,9 +495,19 @@ fun PlayerScreen(vm: TunerViewModel) {
                 }
             }
 
-            if (skipIntroVisible) {
-                Box(Modifier.align(Alignment.BottomEnd).padding(end = 48.dp, bottom = 150.dp)) {
-                    Chip("⏭  Skip intro – press ▶")
+            if (!vm.isPhone) scrubTarget?.let { t ->
+                ScrubBubble(t, duration, scrubFrame, Modifier.align(Alignment.BottomCenter).padding(bottom = 190.dp))
+            }
+            if (skipIntroVisible && introEnd != null) {
+                Box(
+                    Modifier.align(Alignment.BottomEnd).padding(end = if (vm.isPhone) 20.dp else 48.dp, bottom = if (vm.isPhone) 90.dp else 150.dp)
+                        // Phones: tap it.
+                        .tvClickable({
+                            playback.seekTo(introEnd)
+                            introCandidate = null
+                        })
+                ) {
+                    Chip(if (vm.isPhone) "⏭  Skip intro" else "⏭  Skip intro – press ▶")
                 }
             }
             if (upNextVisible && nextEp != null) {
@@ -531,9 +605,27 @@ fun PlayerScreen(vm: TunerViewModel) {
                     val versions = remember(ch.id) { vm.versionsFor(ch) }
                     MenuDialog(
                         title = "Version",
-                        subtitle = "Tuner remembers your choice for this channel. The others are used as backups if a stream fails.",
+                        subtitle = "Flicker remembers your choice for this channel. The others are used as backups if a stream fails.",
                         items = versions.map { v ->
                             MenuItem(vm.versionLabel(v), if (v.id == ch.id) "✓ watching" else null) { if (v.id != ch.id) vm.watchVersion(v) }
+                        },
+                        onDismiss = { overlay = Overlay.None },
+                    )
+                }
+                Overlay.Send -> {
+                    val peers = vm.link.peers
+                    MenuDialog(
+                        title = "Send to…",
+                        subtitle = when {
+                            peers.isNotEmpty() -> "It carries on from here on the device you pick."
+                            vm.link.searching -> "Looking for your other devices…"
+                            else -> "No linked devices found. Flicker needs to be open on them (Settings › Linked devices)."
+                        },
+                        items = peers.map { p ->
+                            MenuItem((if (p.phone) "📱  " else "📺  ") + p.name) { vm.sendTo(p) }
+                        } + MenuItem("↻ Look again") {
+                            vm.link.search()
+                            overlay = Overlay.Send
                         },
                         onDismiss = { overlay = Overlay.None },
                     )
@@ -681,6 +773,13 @@ private fun OptionsMenu(
             add(MenuItem("🔎 Find subtitles online", if (vm.openSubtitlesKey == null) "needs a key in Settings" else null) { vm.findSubtitles() })
             add(MenuItem("ℹ Film info & trailer") { vm.openFilmInfo(mode.title, isSeries = mode.seriesId != null) })
         }
+        if (mode is PlayMode.Vod && mode.seriesId != null) {
+            val pos = playback.positionMs
+            if (pos in 10_000L..600_000L) {
+                add(MenuItem("⏭ The intro ends here", "${pos / 60_000}:${"%02d".format((pos / 1000) % 60)} – skip to here on every episode") { vm.setIntroEndHere(pos) })
+            }
+            if (vm.introEndFor() != null) add(MenuItem("Forget this series' intro") { vm.forgetIntro() })
+        }
         if (mode is PlayMode.Live) {
             if (channel != null && vm.versionsFor(channel).size > 1) {
                 add(MenuItem("📺 Version (HD / SD…)", vm.versionLabel(channel)) { onOverlay(Overlay.Versions) })
@@ -688,8 +787,19 @@ private fun OptionsMenu(
             add(MenuItem("🔊 Volume level (this channel)", vm.volumeLabel) { vm.cycleVolumeLevel() })
             add(MenuItem("📶 Picture quality (this channel)", vm.qualityLabel()) { vm.cycleQuality() })
         }
+        if (mode !is PlayMode.RecordingPlay) {
+            add(
+                MenuItem("📺 Send to another TV or phone", if (vm.link.linked) null else "link them first: Settings › Linked devices") {
+                    if (vm.link.linked) {
+                        vm.link.search()
+                        onOverlay(Overlay.Send)
+                    } else vm.showNotice("Link your devices first: Settings › Linked devices")
+                }
+            )
+        }
         add(MenuItem("😴 Sleep timer", vm.sleepLabel) { onOverlay(Overlay.Sleep) })
         add(MenuItem("🌙 Night mode sound", if (vm.nightMode) "On" else "Off") { vm.toggleNightMode() })
+        add(MenuItem("🗣 Clearer speech", if (vm.clearSpeech) "On" else "Off") { vm.toggleClearSpeech() })
         add(MenuItem("Subtitle size", vm.subtitleSizeLabel) { vm.cycleSubtitleSize() })
         add(MenuItem("📐 Picture size", vm.pictureModeLabel) { vm.cyclePictureMode() })
         add(MenuItem("👄 Sound timing (lip sync)", vm.lipSyncLabel()) { onOverlay(Overlay.LipSync) })
@@ -1210,7 +1320,11 @@ private fun PhoneControls(
     duration: Long,
     onChannels: () -> Unit,
     onMenu: () -> Unit,
+    onSend: () -> Unit,
     onSeek: (Long) -> Unit,
+    scrubTarget: Long?,
+    scrubFrame: androidx.compose.ui.graphics.ImageBitmap?,
+    onScrub: (Long?) -> Unit,
     onPoke: () -> Unit,
     modifier: Modifier,
 ) {
@@ -1236,6 +1350,10 @@ private fun PhoneControls(
             RoundButton("←", 44) { vm.back() }
             Spacer(Modifier.width(12.dp))
             Text(title, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            if (vm.mode !is PlayMode.RecordingPlay) {
+                RoundButton("📺", 44, onSend)
+                Spacer(Modifier.width(10.dp))
+            }
             if (isLive) {
                 RoundButton("☰", 44, onChannels)
                 Spacer(Modifier.width(10.dp))
@@ -1250,15 +1368,39 @@ private fun PhoneControls(
         }
         // Bottom: a scrub bar for films, episodes, catch-up and recordings.
         if (!isLive && duration > 0) {
+            // While dragging: a picture of where you'll land; it jumps there when you let go.
+            scrubTarget?.let { t -> ScrubBubble(t, duration, scrubFrame, Modifier.align(Alignment.BottomCenter).padding(bottom = 76.dp)) }
             Row(Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(horizontal = 20.dp, vertical = 18.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(clock(position), color = Color.White, fontSize = 13.sp)
+                Text(clock(scrubTarget ?: position), color = Color.White, fontSize = 13.sp)
                 androidx.compose.material3.Slider(
-                    value = (position.toFloat() / duration).coerceIn(0f, 1f),
-                    onValueChange = { onSeek((it * duration).toLong()) },
+                    value = ((scrubTarget ?: position).toFloat() / duration).coerceIn(0f, 1f),
+                    onValueChange = { onScrub((it * duration).toLong()) },
+                    onValueChangeFinished = {
+                        scrubTarget?.let { onSeek(it) }
+                        onScrub(null)
+                    },
                     modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
                 )
                 Text(clock(duration), color = Color.White, fontSize = 13.sp)
             }
         }
+    }
+}
+
+/** Where you'll land when scrubbing: a little picture (when the stream can give one) and the time. */
+@Composable
+private fun ScrubBubble(target: Long, duration: Long, frame: androidx.compose.ui.graphics.ImageBitmap?, modifier: Modifier) {
+    Column(
+        modifier.clip(RoundedCornerShape(12.dp)).background(Color(0xE60A1030)).padding(6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        if (frame != null) {
+            androidx.compose.foundation.Image(
+                frame, contentDescription = null, contentScale = ContentScale.Crop,
+                modifier = Modifier.size(width = 240.dp, height = 135.dp).clip(RoundedCornerShape(8.dp)),
+            )
+            Spacer(Modifier.height(4.dp))
+        }
+        Text(clock(target) + "  /  " + clock(duration), color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp))
     }
 }

@@ -57,7 +57,7 @@ class RecordingService : Service() {
     private fun notification(text: String): Notification =
         NotificationCompat.Builder(this, CHANNEL)
             .setSmallIcon(R.mipmap.ic_launcher)
-            .setContentTitle("Tuner is recording")
+            .setContentTitle("Flicker is recording")
             .setContentText(text)
             .setOngoing(true)
             .build()
@@ -237,7 +237,7 @@ class BootReceiver : BroadcastReceiver() {
                         ?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                         ?.let { context.startActivity(it) }
                 }
-            }.onFailure { com.titanejstudios.tuner.data.AppLog.warn("Couldn't open Tuner at start-up", it) }
+            }.onFailure { com.titanejstudios.tuner.data.AppLog.warn("Couldn't open Flicker at start-up", it) }
         }
     }
 }

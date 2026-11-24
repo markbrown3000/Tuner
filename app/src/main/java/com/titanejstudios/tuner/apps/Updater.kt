@@ -109,8 +109,8 @@ object Updater {
             val pending = PendingIntent.getBroadcast(context, id, Intent(context, InstallResultReceiver::class.java), flags)
             session.commit(pending.intentSender)
         }
-        AppLog.info("Installing Tuner ${info.versionName}")
-        onStatus?.invoke("Installing Tuner ${info.versionName}… confirm on screen")
+        AppLog.info("Installing Flicker ${info.versionName}")
+        onStatus?.invoke("Installing Flicker ${info.versionName}… confirm on screen")
     }
 }
 

@@ -211,4 +211,52 @@ class ChannelMergeTest {
         val back = com.titanejstudios.tuner.data.Taste.fromJson(t.toJson())
         assertTrue(back.isYourShow("match of the day"))
     }
+
+    @Test
+    fun usualChannelNeedsAClearHabit() {
+        val cal = java.util.Calendar.getInstance().apply { set(2026, java.util.Calendar.NOVEMBER, 23, 18, 10, 0) } // a Monday
+        val six = cal.timeInMillis
+        var json = "{}"
+        json = com.titanejstudios.tuner.data.Habits.add(json, six, "bbc1", 3_000)
+        json = com.titanejstudios.tuner.data.Habits.add(json, six, "itv", 600)
+        assertEquals("bbc1", com.titanejstudios.tuner.data.Habits.usual(json, six))
+        // Nothing usual at 3 in the morning, or on a Saturday at 6.
+        cal.set(java.util.Calendar.HOUR_OF_DAY, 3)
+        assertEquals(null, com.titanejstudios.tuner.data.Habits.usual(json, cal.timeInMillis))
+        cal.set(2026, java.util.Calendar.NOVEMBER, 28, 18, 10, 0)
+        assertEquals(null, com.titanejstudios.tuner.data.Habits.usual(json, cal.timeInMillis))
+    }
+
+    @Test
+    fun teamFixtureFindsItsChannel() {
+        val ko = 1_800_000_000_000L
+        val m = com.titanejstudios.tuner.data.Football.Match(1, "Premier League", "Newcastle", "Arsenal", null, null, "TIMED", ko)
+        val sky = Channel("s/1", "Sky Sports Main Event", "Sport", null, "http://x/1", null)
+        val bbc = Channel("s/2", "BBC One", "UK", null, "http://x/2", null)
+        val guide = mapOf(
+            "s/1" to listOf(Programme(ko - 30 * 60_000L, ko + 2 * 3_600_000L, "Live: Newcastle v Arsenal", "Premier League football", "Sport")),
+            "s/2" to listOf(Programme(ko - 30 * 60_000L, ko + 30 * 60_000L, "Pointless", null, "Entertainment")),
+        )
+        val found = com.titanejstudios.tuner.data.Football.broadcastFor(m, listOf(bbc, sky), guide, emptySet())
+        assertEquals("s/1", found?.first?.id)
+        // Nothing around kick-off names either team: no channel.
+        assertNull(com.titanejstudios.tuner.data.Football.broadcastFor(m, listOf(bbc), guide, emptySet()))
+    }
+
+    @Test
+    fun teamFormAndLeaguePlace() {
+        fun match(id: Long, home: String, away: String, hg: Int, ag: Int, t: Long) = org.json.JSONObject(
+            """{"id":$id,"status":"FINISHED","utcDate":"2026-11-0${t}T15:00:00Z","competition":{"name":"Premier League"},
+               "homeTeam":{"shortName":"$home"},"awayTeam":{"shortName":"$away"},"score":{"fullTime":{"home":$hg,"away":$ag}}}"""
+        )
+        val raw = listOf(
+            match(1, "Newcastle", "Spurs", 2, 0, 1),
+            match(2, "Arsenal", "Newcastle", 1, 1, 2),
+            match(3, "Newcastle", "Leeds", 0, 1, 3),
+        )
+        assertEquals("WDL", com.titanejstudios.tuner.data.Football.form(raw, "Newcastle"))
+        assertEquals("1st", com.titanejstudios.tuner.data.Football.ordinal(1))
+        assertEquals("12th", com.titanejstudios.tuner.data.Football.ordinal(12))
+        assertEquals("23rd", com.titanejstudios.tuner.data.Football.ordinal(23))
+    }
 }

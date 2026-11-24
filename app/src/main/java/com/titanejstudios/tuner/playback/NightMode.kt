@@ -11,30 +11,50 @@ import com.titanejstudios.tuner.data.AppLog
 class NightMode {
     private var effect: DynamicsProcessing? = null
     private var session = 0
+    /** What the current effect was built for ("night", "speech", "night+speech"). */
+    private var built = ""
     var supported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
         private set
 
-    /** Attach to [audioSessionId] when [on], otherwise remove the effect. */
-    fun apply(audioSessionId: Int, on: Boolean) {
-        if (!on || audioSessionId == 0 || !supported) {
+    /**
+     * Attach to [audioSessionId] when [on] (night mode) or [speech] (clearer dialogue), otherwise
+     * remove the effect. Clearer speech turns down rumble and music bass and lifts the 1–4 kHz
+     * range where voices are, so talking stands out from the background.
+     */
+    fun apply(audioSessionId: Int, on: Boolean, speech: Boolean = false) {
+        if ((!on && !speech) || audioSessionId == 0 || !supported) {
             release()
             return
         }
-        if (effect != null && session == audioSessionId) return
+        val want = (if (on) "night" else "") + (if (speech) "+speech" else "")
+        if (effect != null && session == audioSessionId && built == want) return
         release()
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return
         try {
+            val speechBands = listOf(
+                120f to -8f,     // rumble, explosions
+                400f to -3f,     // music bass, boominess
+                1_000f to 1f,
+                4_000f to 6f,    // where voices are clearest
+                8_000f to 2f,
+                20_000f to -2f,  // hiss
+            )
             val config = DynamicsProcessing.Config.Builder(
                 DynamicsProcessing.VARIANT_FAVOR_FREQUENCY_RESOLUTION,
                 2,          // channels (applied to all)
-                false, 0,   // pre-EQ
-                true, 1,    // multi-band compressor, one band = whole range
+                speech, if (speech) speechBands.size else 0,   // pre-EQ
+                on, if (on) 1 else 0,    // multi-band compressor, one band = whole range
                 false, 0,   // post-EQ
                 true,       // limiter
             ).build()
             val dp = DynamicsProcessing(0, audioSessionId, config)
+            if (speech) {
+                speechBands.forEachIndexed { i, (cutoff, gain) ->
+                    dp.setPreEqBandAllChannelsTo(i, DynamicsProcessing.EqBand(true, cutoff, gain))
+                }
+            }
             // Compress everything above -32 dB at 4:1, then lift the result back up by 9 dB.
-            dp.setMbcBandAllChannelsTo(
+            if (on) dp.setMbcBandAllChannelsTo(
                 0,
                 DynamicsProcessing.MbcBand(true, 20_000f, 8f, 250f, 4f, -32f, 8f, -90f, 1f, 0f, 9f),
             )
@@ -43,6 +63,7 @@ class NightMode {
             dp.enabled = true
             effect = dp
             session = audioSessionId
+            built = want
         } catch (e: Throwable) {
             supported = false
             AppLog.warn("Night mode sound isn't available on this TV", e)
@@ -57,5 +78,6 @@ class NightMode {
         }
         effect = null
         session = 0
+        built = ""
     }
 }

@@ -216,6 +216,38 @@ class Database private constructor(context: Context) :
         return out
     }
 
+    /**
+     * Programmes between [from] and [to] whose title contains any of [titleWords] (or, when
+     * [descWords] is given, whose description contains one of those). For the Christmas planner.
+     */
+    fun findInWindow(
+        sourceIds: List<String>,
+        from: Long,
+        to: Long,
+        titleWords: List<String>,
+        descWords: List<String> = emptyList(),
+        categoryWords: List<String> = emptyList(),
+        limit: Int = 800,
+    ): List<Pair<String, Programme>> {
+        if (sourceIds.isEmpty() || (titleWords.isEmpty() && descWords.isEmpty())) return emptyList()
+        fun like(w: String) = "%" + w.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        val words = titleWords.map { "title LIKE ? ESCAPE '\\'" } + descWords.map { "descr LIKE ? ESCAPE '\\'" }
+        val cats = if (categoryWords.isEmpty()) "" else " AND (" + categoryWords.joinToString(" OR ") { "category LIKE ? ESCAPE '\\'" } + ")"
+        val args = sourceIds + from.toString() + to.toString() + (titleWords + descWords).map { like(it) } + categoryWords.map { like(it) }
+        val out = ArrayList<Pair<String, Programme>>()
+        readableDatabase.rawQuery(
+            "SELECT channel_id, start, stop, title, descr, category, image FROM programmes " +
+                "WHERE source_id IN (${placeholders(sourceIds.size)}) AND start >= ? AND start < ? AND (" + words.joinToString(" OR ") + ")" + cats +
+                " ORDER BY start LIMIT $limit",
+            args.toTypedArray(),
+        ).use { c ->
+            while (c.moveToNext()) {
+                out += c.getString(0) to Programme(c.getLong(1), c.getLong(2), c.getString(3) ?: "", c.getString(4), c.getString(5), c.getString(6))
+            }
+        }
+        return out
+    }
+
     /** Sets logos only where the playlist had none. */
     fun fillMissingLogos(sourceId: String, logos: Map<String, String>) {
         writableDatabase.inTransaction {

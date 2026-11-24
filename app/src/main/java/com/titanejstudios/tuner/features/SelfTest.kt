@@ -202,13 +202,13 @@ class SelfTest(private val context: Context, private val store: Store) {
     }
 
     private fun alarms(): Result {
-        if (Build.VERSION.SDK_INT < 31) return Result("Recording timer", State.Pass, "Recordings can wake Tuner on time")
+        if (Build.VERSION.SDK_INT < 31) return Result("Recording timer", State.Pass, "Recordings can wake Flicker on time")
         val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
-        return if (am.canScheduleExactAlarms()) Result("Recording timer", State.Pass, "Recordings can wake Tuner on time")
+        return if (am.canScheduleExactAlarms()) Result("Recording timer", State.Pass, "Recordings can wake Flicker on time")
         else Result(
             "Recording timer", State.Fail,
-            "Android isn't letting Tuner set exact alarms, so recordings may start late. " +
-                "Settings › Apps › Special app access › Alarms & reminders › Tuner › Allow.",
+            "Android isn't letting Flicker set exact alarms, so recordings may start late. " +
+                "Settings › Apps › Special app access › Alarms & reminders › Flicker › Allow.",
         )
     }
 
@@ -254,8 +254,8 @@ class SelfTest(private val context: Context, private val store: Store) {
             -1
         }
         return when {
-            !listed -> Result("TV's Live tab", State.Warn, "The TV doesn't list Tuner as a TV source. Some Google TV models hide other apps' channels.")
-            count <= 0 -> Result("TV's Live tab", State.Warn, "Tuner is a TV source, but no channels have been copied yet – they're added 20 seconds after a refresh.")
+            !listed -> Result("TV's Live tab", State.Warn, "The TV doesn't list Flicker as a TV source. Some Google TV models hide other apps' channels.")
+            count <= 0 -> Result("TV's Live tab", State.Warn, "Flicker is a TV source, but no channels have been copied yet – they're added 20 seconds after a refresh.")
             else -> Result("TV's Live tab", State.Pass, "$count channels in the TV's own list")
         }
     }
@@ -263,7 +263,7 @@ class SelfTest(private val context: Context, private val store: Store) {
     private fun screensaver(): Result {
         val current = Settings.Secure.getString(context.contentResolver, "screensaver_components").orEmpty()
         val ours = ComponentName(context, TunerDream::class.java).flattenToString()
-        return if (current.contains(context.packageName)) Result("Screensaver", State.Pass, "Tuner is the screensaver")
+        return if (current.contains(context.packageName)) Result("Screensaver", State.Pass, "Flicker is the screensaver")
         else Result(
             "Screensaver", State.Info,
             "Not selected. Google TV only allows it from a computer:\nadb shell settings put secure screensaver_components $ours",
@@ -273,8 +273,8 @@ class SelfTest(private val context: Context, private val store: Store) {
     private fun voice(): Result {
         val intent = Intent(MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH).setPackage(context.packageName)
         val found = context.packageManager.queryIntentActivities(intent, 0).isNotEmpty()
-        return if (found) Result("Voice search", State.Info, "Tuner accepts \"play … on Tuner\". Google decides whether to send it here.")
-        else Result("Voice search", State.Warn, "Tuner isn't registered for voice requests")
+        return if (found) Result("Voice search", State.Info, "Flicker accepts \"play … on Flicker\". Google decides whether to send it here.")
+        else Result("Voice search", State.Warn, "Flicker isn't registered for voice requests")
     }
 
     private fun webServer(snap: Snapshot): Result {
@@ -344,7 +344,7 @@ class SelfTest(private val context: Context, private val store: Store) {
 
     private fun updates(): Result {
         val canInstall = Build.VERSION.SDK_INT < 26 || context.packageManager.canRequestPackageInstalls()
-        val allow = if (canInstall) "Tuner may install updates." else "Android will ask once to let Tuner install updates – say yes."
+        val allow = if (canInstall) "Flicker may install updates." else "Android will ask once to let Flicker install updates – say yes."
         val repo = store.updateRepo ?: return Result("App updates", State.Info, "$allow No GitHub repo set (uploading from a computer still works).")
         val rel = com.titanejstudios.tuner.apps.Updater.latest(repo)
         return if (rel == null) Result("App updates", State.Warn, "$allow No release with an APK in $repo")

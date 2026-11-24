@@ -47,14 +47,14 @@ fun VpnScreen(vm: TunerViewModel) {
                 color = if (v.connected) Color(0xFF7EF0A8) else TunerColors.TextSecondary, fontSize = 18.sp, fontWeight = FontWeight.SemiBold,
             )
             Text(
-                "Only Tuner's streams go through it – Netflix, YouTube and the rest of the TV are untouched, and Plex on your home network stays direct.",
+                "Only Flicker's streams go through it – Netflix, YouTube and the rest of the TV are untouched, and Plex on your home network stays direct.",
                 color = TunerColors.TextSecondary, fontSize = 14.sp,
             )
             Spacer(Modifier.height(4.dp))
             SettingRow(
                 if (v.enabled) "Turn the VPN off" else "Turn the VPN on",
                 modifier = Modifier.focusRequester(first),
-                subtitle = if (v.enabled) "Reconnects by itself whenever Tuner opens" else "Android asks once to allow it",
+                subtitle = if (v.enabled) "Reconnects by itself whenever Flicker opens" else "Android asks once to allow it",
                 detail = if (v.enabled) "On" else "Off",
                 onClick = { if (v.enabled) v.turnOff() else v.turnOn() },
             )

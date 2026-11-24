@@ -120,6 +120,9 @@ fun SportsScreen(vm: TunerViewModel) {
             item {
                 PillButton(if (liveOnly) "Live only ✓" else "Live only", { liveOnly = !liveOnly }, selected = liveOnly, compact = true)
             }
+            item(key = "teams") {
+                PillButton("★ My teams", { vm.navigate(com.titanejstudios.tuner.Screen.Teams) }, compact = true)
+            }
             item(key = "scores") {
                 PillButton("⚽ Live scores", { vm.navigate(com.titanejstudios.tuner.Screen.Football) }, compact = true)
             }

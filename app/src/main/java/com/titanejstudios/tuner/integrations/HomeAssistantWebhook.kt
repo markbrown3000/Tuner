@@ -18,7 +18,7 @@ object HomeAssistantWebhook {
 
     /** Sends a "test" event and waits for the answer. Returns the HTTP status code (throws if unreachable). */
     fun test(url: String): Int {
-        val body = JSONObject().put("event", "test").put("message", "Hello from Tuner's self-test")
+        val body = JSONObject().put("event", "test").put("message", "Hello from Flicker's self-test")
             .put("time", System.currentTimeMillis() / 1000)
         val conn = (URL(url.trim()).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"

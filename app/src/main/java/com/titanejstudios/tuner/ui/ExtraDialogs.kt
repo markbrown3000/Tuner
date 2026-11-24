@@ -53,7 +53,7 @@ fun StillWatchingDialog(vm: TunerViewModel) {
             Text("Are you still watching?", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(8.dp))
             Text(
-                "Tuner will stop in a minute or so if nobody answers – it saves your connection overnight.",
+                "Flicker will stop in a minute or so if nobody answers – it saves your connection overnight.",
                 color = TunerColors.TextSecondary, fontSize = 16.sp, textAlign = TextAlign.Center,
             )
             Spacer(Modifier.height(22.dp))
@@ -138,7 +138,7 @@ fun UpdateDialog(vm: TunerViewModel, release: com.titanejstudios.tuner.apps.Upda
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text("⬆", fontSize = 40.sp, color = Color.White)
-            Text("Tuner ${release.version.trimStart('v', 'V')} is available", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Bold)
+            Text("Flicker ${release.version.trimStart('v', 'V')} is available", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Bold)
             Text("You have ${vm.installedVersion}", color = TunerColors.TextSecondary, fontSize = 16.sp)
             release.notes?.let {
                 Spacer(Modifier.height(10.dp))

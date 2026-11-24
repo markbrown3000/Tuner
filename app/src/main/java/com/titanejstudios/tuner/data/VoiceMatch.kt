@@ -2,10 +2,10 @@ package com.titanejstudios.tuner.data
 
 import java.util.Locale
 
-/** Turns "Hey Google, play Sky Sports Main Event on Tuner" into a channel. */
+/** Turns "Hey Google, play Sky Sports Main Event on Flicker" into a channel. */
 object VoiceMatch {
     private val filler = Regex(
-        "\\b(hey google|ok google|please|play|watch|put on|switch to|turn on|open|tune to|go to|the channel|channel|on tuner|in tuner|tuner|live)\\b",
+        "\\b(hey google|ok google|please|play|watch|put on|switch to|turn on|open|tune to|go to|the channel|channel|on tuner|in tuner|tuner|on flicker|in flicker|flicker|live)\\b",
         RegexOption.IGNORE_CASE,
     )
     private val words = mapOf(

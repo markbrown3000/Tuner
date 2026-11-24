@@ -2,6 +2,7 @@ package com.titanejstudios.tuner
 
 import android.app.Application
 import android.content.Intent
+import org.json.JSONObject
 import android.net.Uri
 import android.os.StatFs
 import androidx.compose.runtime.getValue
@@ -105,6 +106,7 @@ enum class Screen {
     Home, Channels, Guide, Player, Search, Movies, Series, SeriesDetail, Settings, SourceEdit, Manage,
     ProfilePicker, ProfileEdit, PhoneSetup, EpgMap, Recordings, MultiView, Sports, Apps, Log,
     WhatsOn, Stats, ShareTv, Catchup, Categories, Plex, Football, Update, SelfTest, PlexLibrary, PlexShow, HomeRows, Languages, Recommendations, Vpn,
+    Link, Downloads, Teams, Remote, Christmas,
 }
 
 const val FAVOURITES = "★ Favourites"
@@ -140,6 +142,24 @@ class SearchResults(
     val films: List<VodItem> = emptyList(),
     val seriesFound: List<SeriesItem> = emptyList(),
 )
+
+/** One of your teams' fixtures, and which of your channels shows it (if the guide says yet). */
+/** Tracks how long a live programme has been watched (for "finish what you started"). */
+private class LiveWatch(val channelId: String, val start: Long, var seconds: Long, var lastSeen: Long)
+
+class TeamFixture(
+    val match: Football.Match,
+    val channel: Channel?,
+    val programme: Programme?,
+    /** The guide reaches that day, so "no channel" really means none of yours shows it. */
+    val guideCoversIt: Boolean,
+)
+
+/** One programme in the Christmas TV planner. [section] is "specials", "films" or "sport". */
+class FestiveItem(val channel: Channel, val programme: Programme, val section: String)
+
+/** A programme you switched off half-way, and where you got to in it. */
+class Unfinished(val channelId: String, val programme: Programme, val positionMs: Long, val at: Long)
 
 /** A trending film or show, and where you have it. */
 class TrendingItem(
@@ -362,6 +382,17 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
 
     /** Tuner's own VPN (WireGuard). */
     val vpn = com.titanejstudios.tuner.features.VpnFeature(app, store, viewModelScope)
+    /** Films and episodes saved on a phone for watching offline. */
+    val downloader = com.titanejstudios.tuner.features.DownloadsFeature(app, store)
+    val downloads: List<com.titanejstudios.tuner.features.DownloadEntry> get() = downloader.items
+    /** Linked TVs and phones: send to TV, carry on where you left off. */
+    val link = com.titanejstudios.tuner.features.LinkFeature(
+        app, store, viewModelScope,
+        phoneMode = { isPhone },
+        onPlay = { from, json -> handleLinkPlay(from, json) },
+        onSynced = { changed -> applyLinkChanges(changed) },
+        remote = this,
+    )
     /** What this profile likes, learned from what it watches. */
     private var taste: Taste = Taste.fromJson(store.taste(store.activeProfileId))
     private val pendingTaste = HashMap<Pair<String, String?>, Long>()
@@ -416,6 +447,9 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     var subtitleScale by mutableStateOf(1f); private set
     var subtitleBox by mutableStateOf(false); private set
     var nightMode by mutableStateOf(false); private set
+    var clearSpeech by mutableStateOf(store.clearSpeech); private set
+    /** Text size across Flicker (%). */
+    var textScale by mutableStateOf(store.textScale); private set
     var frameRateMatch by mutableStateOf(false); private set
 
     // What's on
@@ -568,6 +602,22 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     var shareStatus by mutableStateOf<String?>(null); private set
     private var tvShare: TvShare? = null
     private val pendingStats = HashMap<Pair<String, String>, Long>()
+    /** Live viewing per channel since the last save, for "your usual channel". */
+    private val pendingHabits = HashMap<String, Long>()
+    var offerUsual by mutableStateOf(store.offerUsual); private set
+    var scrubPreviewsIptv by mutableStateOf(store.scrubPreviewsIptv); private set
+    /** The channel you usually watch at this time, offered on Home. */
+    var usualOffer by mutableStateOf<Channel?>(null); private set
+    /** The Christmas TV planner's programmes (null until loaded). */
+    var festive by mutableStateOf<List<FestiveItem>?>(null); private set
+    /** Missed it? Programmes from the last week you'd probably like, ready on catch-up. */
+    var missed by mutableStateOf<List<HomeFeed.Pick>>(emptyList()); private set
+    /** Programmes you switched off half-way (newest first). */
+    var unfinished by mutableStateOf(loadUnfinished()); private set
+    /** The live programme being watched: channel, programme start, seconds watched, last seen. */
+    private var liveWatch: LiveWatch? = null
+    /** Your teams' next fixtures with their channels (My teams). */
+    var teamFixtures by mutableStateOf<List<TeamFixture>>(emptyList()); private set
     var epgOverrides by mutableStateOf<Map<String, String>>(emptyMap()); private set
 
     var mappingChannel by mutableStateOf<Channel?>(null); private set
@@ -734,6 +784,8 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         // Safe mode leaves the newer extras off without changing the saved settings.
         nightMode = store.nightMode && !SafeMode.active
         playback.nightModeOn = nightMode
+        clearSpeech = store.clearSpeech && !SafeMode.active
+        playback.speechOn = clearSpeech
         frameRateMatch = store.frameRateMatch && !SafeMode.active
         playback.setSeamlessFrameRate(frameRateMatch)
         liveTabScope = store.liveTabScope
@@ -775,6 +827,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     }
 
     override fun onCleared() {
+        link.stop()
         healthCancel = true
         tvShare?.stop()
         phoneServer?.stop()
@@ -850,6 +903,9 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         epgLoadedAt = t
         applySeriesLinks()
         refreshHomeFeed()
+        updateWidget()
+        checkUsual()
+        refreshTeamFixtures()
         applySportFollow()
     }
 
@@ -977,7 +1033,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         store.preferredVersions = preferredVersions
         startLive(channel)
         rebuildChannelCaches()
-        showNotice("${channel.name} – Tuner will use this version from now on")
+        showNotice("${channel.name} – Flicker will use this version from now on")
     }
 
     fun toggleMergeVersions() {
@@ -1005,6 +1061,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
             sportNow = result.first
             topPicks = result.second
             yourShows = result.third
+            missed = if (learned.isEmpty) emptyList() else withContext(Dispatchers.Default) { missedPicks(chans, guide, learned, t) }
         }
     }
 
@@ -1096,7 +1153,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         val name = newName.trim()
         if (name.isEmpty() || name == current) return
         if (name == FAVOURITES || name == RECENT || name == ALL) {
-            showNotice("That name is used by Tuner")
+            showNotice("That name is used by Flicker")
             return
         }
         if (current in customGroups) {
@@ -1216,6 +1273,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
             zapPreview = null
         }
         cleanPlaySeconds = 0
+        usualOffer = null
         val current = mode
         if (current is PlayMode.Live && current.channel.id == channel.id && playback.isActive) return
         if (current is PlayMode.Live) previousChannel = current.channel
@@ -1334,11 +1392,11 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     fun canCatchup(channel: Channel, p: Programme): Boolean =
         catchupVersion(channel)?.let { Catchup.isAvailable(it, p, now) } == true
 
-    fun playCatchup(requested: Channel, p: Programme, list: List<Channel>) {
+    fun playCatchup(requested: Channel, p: Programme, list: List<Channel>, startAt: Long = 0L) {
         if (vpnBlocks()) return
         val channel = catchupVersion(requested) ?: requested
         if (!isAllowed(channel)) {
-            requestUnlock { playCatchup(channel, p, list) }
+            requestUnlock { playCatchup(channel, p, list, startAt) }
             return
         }
         val url = Catchup.url(channel, p, System.currentTimeMillis())
@@ -1351,7 +1409,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         mode = PlayMode.CatchupPlay(channel, p)
         focusChannelId = channel.id
         val meta = MediaMetadata.Builder().setTitle(p.title).setArtist(channel.name).build()
-        playback.play(url, live = false, metadata = meta)
+        playback.play(url, live = false, startPositionMs = startAt, metadata = meta)
         sendHa("playing", mapOf("kind" to "catchup", "channel" to channel.name, "title" to p.title, "category" to p.category))
         navigate(Screen.Player)
     }
@@ -1364,6 +1422,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
 
     fun stopPlayback() {
         trackStats(flush = true)
+        finishLiveWatch()
         val wasPlaying = mode != null
         playback.stop()
         mode = null
@@ -1372,6 +1431,8 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
 
     fun onAppStopped() {
         inForeground = false
+        finishLiveWatch()
+        updateWidget()
         AppState.foreground = false
         trackStats(flush = true)
         updateServer()
@@ -1385,6 +1446,11 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
 
     fun onAppStarted() {
         inForeground = true
+        checkUsual()
+        if (link.linked) {
+            link.start()
+            link.syncSoon(2_500L)
+        }
         if (extrasStarted) refreshPlex()
         AppState.foreground = true
         loadApps()
@@ -1429,6 +1495,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         favourites = if (channelId in favouriteSet) favourites - channelId else favourites + channelId
         favouriteSet = favourites.toSet()
         store.setFavourites(activeProfile.id, favourites)
+        updateWidget()
         publishFavouritesRow()
         markChanged(TvSync.FAVOURITES)
     }
@@ -1943,7 +2010,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         store.setTaste(activeProfile.id, taste.toJson())
         tasteVersion++
         refreshHomeFeed()
-        showNotice("Recommendations reset – Tuner will learn again from what you watch")
+        showNotice("Recommendations reset – Flicker will learn again from what you watch")
     }
 
     fun toggleLearnTaste() {
@@ -2418,11 +2485,12 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         startVod(PlayMode.Vod(entry.contentId, entry.title, entry.subtitle, entry.poster, entry.url, entry.seriesId), false)
     }
 
-    private fun startVod(m: PlayMode.Vod, fromStart: Boolean) {
-        if (vpnBlocks()) return
+    private fun startVod(m: PlayMode.Vod, fromStart: Boolean, startAt: Long? = null) {
+        // Downloads play from the phone itself, so the VPN kill switch doesn't apply.
+        if (!m.url.startsWith("file:") && vpnBlocks()) return
         if (mode is PlayMode.Vod) saveResume(syncHome = false)
         mode = m
-        val start = if (fromStart) 0L else resume[m.contentId]?.positionMs ?: 0L
+        val start = if (fromStart) 0L else startAt ?: resume[m.contentId]?.positionMs ?: 0L
         val meta = MediaMetadata.Builder().setTitle(m.title).setArtist(m.subtitle)
         m.poster?.let { meta.setArtworkUri(Uri.parse(it)) }
         playback.play(m.url, live = false, startPositionMs = start, metadata = meta.build())
@@ -2442,7 +2510,10 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         val dur = playback.durationMs
         if (dur <= 0) return
         val updated = resume.toMutableMap()
-        if (pos > dur * 95 / 100) updated.remove(m.contentId)
+        if (pos > dur * 95 / 100) {
+            updated.remove(m.contentId)
+            com.titanejstudios.tuner.integrations.LinkSync.markDone(store, m.contentId)
+        }
         else if (pos > 30_000) {
             updated[m.contentId] = ResumeEntry(
                 m.contentId, m.title, m.subtitle, m.poster, m.url, pos, dur, System.currentTimeMillis(), m.seriesId,
@@ -2454,6 +2525,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         if (syncHome) {
             val entries = updated.values.toList()
             viewModelScope.launch(Dispatchers.IO) { HomeScreen.syncContinueWatching(app, store, entries) }
+            link.tellOthers()
         }
     }
 
@@ -2462,6 +2534,8 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
             is PlayMode.Vod -> {
                 resume = resume - m.contentId
                 store.resume = resume
+                com.titanejstudios.tuner.integrations.LinkSync.markDone(store, m.contentId)
+                link.tellOthers()
                 if (episodeQueue.isNotEmpty()) {
                     showNotice("Playing next episode")
                     startNextEpisode(m)
@@ -2678,6 +2752,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         stopPlayback()
         loadSettingsFromStore()
         updates.reload()
+        link.reload()
         if (!SafeMode.active) {
             football.reload()
             plexFeature.reload()
@@ -2771,12 +2846,17 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
             is PlayMode.CatchupPlay -> o.put("title", m.programme.title).put("detail", "Catch-up · ${m.channel.name}")
             is PlayMode.Vod -> o.put("title", m.title).put("detail", m.subtitle ?: "Film")
             is PlayMode.RecordingPlay -> o.put("title", m.recording.title).put("detail", "Recording · ${m.recording.channelName}")
-            null -> o.put("title", "Tuner").put("detail", "Nothing playing · ${screen.name}")
+            null -> o.put("title", "Flicker").put("detail", "Nothing playing · ${screen.name}")
         }
         return o.toString()
     }
 
     override fun key(code: Int) {
+        // -1 = "Home" from the phone remote (Android doesn't let an app press the real Home button).
+        if (code == -1) {
+            resetTo(Screen.Home)
+            return
+        }
         remoteKeys.tryEmit(code)
     }
 
@@ -2873,7 +2953,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
             showNotice("Sleep timer off")
             return
         }
-        showNotice("Tuner will stop at ${hhmm(sleepAt)}")
+        showNotice("Flicker will stop at ${hhmm(sleepAt)}")
         sleepJob = viewModelScope.launch {
             val warnAt = sleepAt - 60_000L
             if (warnAt > System.currentTimeMillis()) {
@@ -3008,6 +3088,37 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         store.subtitleBox = subtitleBox
         SubtitleLook.background = subtitleBox
     }
+
+    fun toggleClearSpeech() {
+        clearSpeech = !clearSpeech
+        store.clearSpeech = clearSpeech
+        playback.speechOn = clearSpeech
+        showNotice(
+            when {
+                !clearSpeech -> "Clearer speech off"
+                !playback.nightModeSupported -> "Clearer speech isn't supported on this device"
+                audioPassthrough -> "Clearer speech on – it needs Audio passthrough off to work"
+                else -> "Clearer speech on – voices lifted over music and effects"
+            }
+        )
+    }
+
+    /** Normal → Large → Larger text. */
+    fun cycleTextScale() {
+        textScale = when (textScale) {
+            100 -> 115
+            115 -> 130
+            else -> 100
+        }
+        store.textScale = textScale
+    }
+
+    val textScaleLabel: String
+        get() = when (textScale) {
+            115 -> "Large"
+            130 -> "Larger"
+            else -> "Normal"
+        }
 
     fun toggleNightMode() {
         nightMode = !nightMode
@@ -3246,11 +3357,11 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         updateServer()
         val server = phoneServer
         if (server == null || phoneBase == null) {
-            shareStatus = "This TV isn't on a network Tuner can use"
+            shareStatus = "This TV isn't on a network Flicker can use"
         } else {
             val share = TvShare(app).also { tvShare = it }
             val name = (android.provider.Settings.Global.getString(app.contentResolver, "device_name") ?: android.os.Build.MODEL)
-            share.advertise("Tuner on $name", server.port)
+            share.advertise("Flicker on $name", server.port)
         }
         if (screen != Screen.ShareTv) navigate(Screen.ShareTv)
     }
@@ -3259,7 +3370,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         stopShare()
         shareMode = "receive"
         shareFound = emptyList()
-        shareStatus = "Looking for other TVs with Tuner open on \"Copy to another TV\"…"
+        shareStatus = "Looking for other TVs with Flicker open on \"Copy to another TV\"…"
         val share = TvShare(app).also { tvShare = it }
         share.discover { found ->
             if (shareFound.none { it.host == found.host && it.port == found.port }) shareFound = shareFound + found
@@ -3306,6 +3417,19 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
             }
             val key = name to (genre ?: "Other")
             pendingStats[key] = (pendingStats[key] ?: 0L) + 15L
+            if (m is PlayMode.Live) pendingHabits[m.channel.id] = (pendingHabits[m.channel.id] ?: 0L) + 15L
+            if (m is PlayMode.Live) {
+                val now = System.currentTimeMillis()
+                val p = nowNext(m.channel.id, now).first
+                val w = liveWatch
+                if (p != null && w != null && w.channelId == m.channel.id && w.start == p.start) {
+                    w.seconds += 15
+                    w.lastSeen = now
+                } else {
+                    finishLiveWatch()
+                    if (p != null) liveWatch = LiveWatch(m.channel.id, p.start, 15, now)
+                }
+            } else finishLiveWatch()
             // Learning what you like: the programme or film, and its kind.
             val title = when (m) {
                 is PlayMode.Live -> nowNext(m.channel.id, System.currentTimeMillis()).first?.title
@@ -3325,6 +3449,14 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
             for ((k, secs) in pendingStats) json = WatchStats.add(json, day, k.first, k.second, secs)
             pendingStats.clear()
             store.setStats(pid, json)
+        }
+        if (flush && pendingHabits.isNotEmpty()) {
+            val pid = activeProfile.id
+            val t = System.currentTimeMillis()
+            var json = store.habits(pid)
+            for ((id, secs) in pendingHabits) json = com.titanejstudios.tuner.data.Habits.add(json, t, id, secs)
+            pendingHabits.clear()
+            store.setHabits(pid, json)
         }
         if (flush && pendingTaste.isNotEmpty()) {
             val t = System.currentTimeMillis()
@@ -3348,13 +3480,13 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     fun toggleAudioPassthrough() {
         audioPassthrough = !audioPassthrough
         store.audioPassthrough = audioPassthrough
-        showNotice("Saved – close and reopen Tuner for this to take effect")
+        showNotice("Saved – close and reopen Flicker for this to take effect")
     }
 
     fun toggleStreamCompatibility() {
         streamCompatibility = !streamCompatibility
         store.streamCompatibility = streamCompatibility
-        showNotice("Saved – close and reopen Tuner for this to take effect")
+        showNotice("Saved – close and reopen Flicker for this to take effect")
     }
 
     fun toggleTimeshift() {
@@ -3643,13 +3775,13 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         startExtras()
         scheduleLiveSync()
         safeModeBannerHidden = true
-        showNotice("Safe mode off. Audio passthrough and stream compatibility (if you use them) return next time Tuner starts.")
+        showNotice("Safe mode off. Audio passthrough and stream compatibility (if you use them) return next time Flicker starts.")
     }
 
     /** For "something's not right but it doesn't crash": start with the extras off next time. */
     fun startInSafeModeNextTime() {
         SafeMode.forceNextStart()
-        showNotice("Next time Tuner starts it will be in safe mode")
+        showNotice("Next time Flicker starts it will be in safe mode")
     }
 
     fun clearLastCrash() {
@@ -4062,6 +4194,21 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         return introEnds[sid]?.toLongOrNull()
     }
 
+    /** "The intro ends here" from the player's menu. */
+    fun setIntroEndHere(posMs: Long) {
+        val sid = (mode as? PlayMode.Vod)?.seriesId ?: return
+        introEnds = introEnds + (sid to posMs.toString())
+        store.introEnds = introEnds
+        showNotice("Got it – every episode will offer to skip to here")
+    }
+
+    fun forgetIntro() {
+        val sid = (mode as? PlayMode.Vod)?.seriesId ?: return
+        introEnds = introEnds - sid
+        store.introEnds = introEnds
+        showNotice("Intro forgotten – skip it once to teach Flicker again")
+    }
+
     /** You skipped forward near the start of an episode and stayed there: remember it as the intro's end. */
     fun learnIntro(endMs: Long) {
         val sid = (mode as? PlayMode.Vod)?.seriesId ?: return
@@ -4072,6 +4219,447 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         store.introEnds = introEnds
         showNotice("Next episode: press ▶ to skip the intro")
     }
+
+    // ---------------- Linked devices: send to TV, carry on where you left off ----------------
+
+    /** What's playing here, ready to send to another device (null if it can't be sent). */
+    private fun sendable(): JSONObject? {
+        val pos = playback.positionMs
+        return when (val m = mode) {
+            is PlayMode.Live -> JSONObject().put("kind", "live").put("channel", m.channel.id)
+            is PlayMode.CatchupPlay -> JSONObject().put("kind", "catchup").put("channel", m.channel.id)
+                .put("start", m.programme.start).put("stop", m.programme.stop).put("title", m.programme.title)
+                .put("category", m.programme.category).put("pos", pos)
+            is PlayMode.Vod -> {
+                // A download plays from this phone's storage: send the original instead.
+                val url = if (m.url.startsWith("file:")) downloads.firstOrNull { it.contentId == m.contentId }?.sourceUrl ?: return null else m.url
+                JSONObject().put("kind", "vod").put("id", m.contentId).put("title", m.title).put("sub", m.subtitle)
+                    .put("poster", m.poster).put("url", url).put("series", m.seriesId).put("pos", pos)
+            }
+            is PlayMode.RecordingPlay, null -> null
+        }
+    }
+
+    /** Sends what's playing to [peer], then stops it here. */
+    fun sendTo(peer: com.titanejstudios.tuner.features.LinkFeature.Peer) {
+        val what = sendable()
+        if (what == null) {
+            showNotice(if (mode is PlayMode.RecordingPlay) "Recordings stay on this device – they can't be sent" else "Nothing to send")
+            return
+        }
+        if (mode is PlayMode.Vod) saveResume(syncHome = true)
+        showNotice("Sending to ${peer.name}…")
+        link.send(peer, what) { ok ->
+            if (ok) {
+                stopPlayback()
+                if (screen == Screen.Player) back()
+                showNotice("▶ Now playing on ${peer.name}")
+            } else showNotice("${peer.name} didn't answer – is Flicker open on it?")
+        }
+    }
+
+    /** Another linked device sent something to play here. */
+    private fun handleLinkPlay(from: String, j: JSONObject): Boolean {
+        if (allChannels.isEmpty() && j.optString("kind") != "vod") return false
+        val ok = when (j.optString("kind")) {
+            "live" -> {
+                val ch = allChannelsById(j.optString("channel")) ?: return false
+                resetTo(Screen.Home)
+                play(ch, channelsFor(ALL))
+                true
+            }
+            "catchup" -> {
+                val ch = allChannelsById(j.optString("channel")) ?: return false
+                val start = j.optLong("start")
+                val p = programmesFor(ch.id).firstOrNull { it.start == start } ?: Programme(
+                    start = start, stop = j.optLong("stop"), title = j.optString("title"), desc = null,
+                    category = j.optString("category").takeIf { it.isNotBlank() && it != "null" },
+                )
+                resetTo(Screen.Home)
+                playCatchup(ch, p, channelsFor(ALL), startAt = j.optLong("pos"))
+                true
+            }
+            "vod" -> {
+                fun str(k: String) = j.optString(k).takeIf { it.isNotBlank() && it != "null" }
+                val id = str("id") ?: return false
+                val url = str("url") ?: return false
+                episodeQueue = emptyList()
+                resetTo(Screen.Home)
+                startVod(PlayMode.Vod(id, j.optString("title"), str("sub"), str("poster"), url, str("series")), fromStart = false, startAt = j.optLong("pos"))
+                true
+            }
+            else -> false
+        }
+        if (ok) {
+            showNotice("▶ Sent from ${from.ifBlank { "another device" }}")
+            if (!inForeground) {
+                // Bring Flicker to the front (allowed because it may draw over other apps).
+                runCatching {
+                    app.startActivity(
+                        Intent(app, MainActivity::class.java)
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+                    )
+                }
+            }
+        }
+        return ok
+    }
+
+    private fun applyLinkChanges(changed: Set<String>) {
+        if (com.titanejstudios.tuner.integrations.LinkSync.INTROS in changed) introEnds = store.introEnds
+        val lists = changed - com.titanejstudios.tuner.integrations.LinkSync.INTROS
+        if (lists.isNotEmpty()) applySyncedChanges(lists)
+        if (TvSync.RESUME in changed) {
+            val entries = resume.values.toList()
+            viewModelScope.launch(Dispatchers.IO) { HomeScreen.syncContinueWatching(app, store, entries) }
+        }
+    }
+
+    // ---------------- Christmas TV planner ----------------
+
+    /** From late November to New Year: Home offers the planner. */
+    val christmasSeason: Boolean
+        get() {
+            val c = java.util.Calendar.getInstance()
+            val m = c.get(java.util.Calendar.MONTH)
+            val d = c.get(java.util.Calendar.DAY_OF_MONTH)
+            return (m == java.util.Calendar.NOVEMBER && d >= 20) || m == java.util.Calendar.DECEMBER || (m == java.util.Calendar.JANUARY && d <= 2)
+        }
+
+    /**
+     * Festive specials, Christmas films and the big sport (the darts, and your teams) from now to
+     * 2 January, from the stored guide. Guides only reach about a week ahead, so it fills up as
+     * Christmas gets nearer.
+     */
+    fun loadChristmas() {
+        val ids = activeSources().map { it.id }
+        val chans = allowedAll
+        val favs = favouriteSet
+        val teams = football.teams.toList()
+        viewModelScope.launch {
+            val now = System.currentTimeMillis()
+            val c = java.util.Calendar.getInstance()
+            val year = if (c.get(java.util.Calendar.MONTH) == java.util.Calendar.JANUARY) c.get(java.util.Calendar.YEAR) - 1 else c.get(java.util.Calendar.YEAR)
+            c.clear()
+            c.set(year + 1, java.util.Calendar.JANUARY, 3, 0, 0, 0)
+            val to = c.timeInMillis
+            val from = now - 3 * 3_600_000L
+            val byId = chans.associateBy { it.id }
+            val items = withContext(Dispatchers.IO) {
+                runCatching {
+                    val festiveWords = listOf("christmas", "xmas", "festive", "new year", "hogmanay", "santa", "snowman", "nativity", "carol", "boxing day")
+                    val specials = db.findInWindow(ids, from, to, festiveWords, limit = 1500)
+                    val films = db.findInWindow(
+                        ids, from, to,
+                        titleWords = festiveWords + listOf("elf", "grinch", "scrooge", "home alone", "polar express", "nutcracker", "reindeer", "jingle", "noel", "holiday"),
+                        descWords = listOf("christmas", "santa", "festive", "xmas"),
+                        categoryWords = listOf("film", "movie"),
+                        limit = 1500,
+                    )
+                    val sport = db.findInWindow(ids, from, to, listOf("darts") + teams, limit = 1500)
+                    val out = LinkedHashMap<String, FestiveItem>()
+                    fun add(list: List<Pair<String, Programme>>, section: String, accept: (Programme) -> Boolean) {
+                        // Favourite channels first, so the copy kept of a programme is on one you use.
+                        for ((id, p) in list.sortedBy { if (it.first in favs) 0 else 1 }) {
+                            val ch = byId[id] ?: continue
+                            if (!accept(p)) continue
+                            val key = p.title.lowercase().trim() + "|" + p.start
+                            if (key !in out) out[key] = FestiveItem(ch, p, section)
+                        }
+                    }
+                    val isFilm = { p: Programme -> (p.category ?: "").lowercase().let { "film" in it || "movie" in it } }
+                    add(films, "films") { true }
+                    add(specials, "specials") { !isFilm(it) && it.stop - it.start >= 20 * 60_000L && Genres.of(it.category, it.title, null) != "News" }
+                    add(sport, "sport") { Sports.classify(it) != null && Sports.looksLive(it) }
+                    out.values.sortedBy { it.programme.start }
+                }.getOrDefault(emptyList())
+            }
+            festive = items
+        }
+    }
+
+    // ---------------- Missed it? & finish what you started ----------------
+
+    /** Ended programmes from the last week on catch-up channels that suit your taste, best first. */
+    private fun missedPicks(chans: List<Channel>, guide: Map<String, List<Programme>>, learned: Taste, t: Long): List<HomeFeed.Pick> {
+        val best = HashMap<String, Pair<Double, HomeFeed.Pick>>()
+        for (c in chans) {
+            if (!c.hasCatchup) continue
+            val from = t - c.catchupDays.coerceIn(1, 7) * 86_400_000L
+            for (p in guide[c.id].orEmpty()) {
+                if (p.stop > t || p.start < from || p.stop - p.start < 20 * 60_000L) continue
+                val genre = Genres.of(p.category, p.title, c.group)
+                if (genre == "News") continue
+                val (score, reason) = learned.score(p.title, genre, t)
+                if (score < 5.0) continue
+                val key = p.title.lowercase().trim()
+                val old = best[key]
+                // The best-suited, and of equals the most recent showing.
+                if (old == null || score > old.first || (score == old.first && p.start > old.second.programme.start)) {
+                    best[key] = score to HomeFeed.Pick(c, p, reason ?: "On catch-up")
+                }
+            }
+        }
+        return best.values.sortedByDescending { it.first }.take(20).map { it.second }
+    }
+
+    private fun loadUnfinished(): List<Unfinished> = runCatching {
+        val arr = org.json.JSONArray(store.unfinishedJson)
+        (0 until arr.length()).map { i ->
+            val o = arr.getJSONObject(i)
+            Unfinished(
+                o.getString("ch"),
+                Programme(o.getLong("s"), o.getLong("e"), o.getString("t"), null, o.optString("c").takeIf { it.isNotBlank() && it != "null" }),
+                o.getLong("pos"), o.getLong("at"),
+            )
+        }
+    }.getOrDefault(emptyList())
+
+    private fun saveUnfinished(list: List<Unfinished>) {
+        // Keep the newest 10, and only while catch-up still has them (a week at most).
+        val t = System.currentTimeMillis()
+        val keep = list.filter { it.programme.start > t - 7 * 86_400_000L }.sortedByDescending { it.at }.take(10)
+        unfinished = keep
+        val arr = org.json.JSONArray()
+        keep.forEach {
+            arr.put(JSONObject().put("ch", it.channelId).put("s", it.programme.start).put("e", it.programme.stop)
+                .put("t", it.programme.title).put("c", it.programme.category).put("pos", it.positionMs).put("at", it.at))
+        }
+        store.unfinishedJson = arr.toString()
+    }
+
+    /** The live programme you were watching changed or stopped: switched off half-way? */
+    private fun finishLiveWatch() {
+        val w = liveWatch ?: return
+        liveWatch = null
+        if (w.seconds < 10 * 60) return
+        val p = programmesFor(w.channelId).firstOrNull { it.start == w.start } ?: return
+        // Watched to (nearly) the end, or too short a programme to bother.
+        if (w.lastSeen >= p.stop - 5 * 60_000L || p.stop - p.start < 25 * 60_000L) {
+            if (unfinished.any { it.channelId == w.channelId && it.programme.start == w.start }) {
+                saveUnfinished(unfinished.filterNot { it.channelId == w.channelId && it.programme.start == w.start })
+            }
+            return
+        }
+        val ch = allChannelsById(w.channelId) ?: return
+        if (catchupVersion(ch) == null) return
+        val pos = (w.lastSeen - p.start - 30_000L).coerceAtLeast(0L)
+        saveUnfinished(listOf(Unfinished(w.channelId, p, pos, System.currentTimeMillis())) +
+            unfinished.filterNot { it.channelId == w.channelId && it.programme.start == w.start })
+    }
+
+    /** Programmes you can still finish (catch-up has them). */
+    val finishable: List<Unfinished>
+        get() = unfinished.filter { u -> allChannelsById(u.channelId)?.let { canCatchup(it, u.programme) } == true }
+
+    fun finishUnfinished(u: Unfinished) {
+        val ch = allChannelsById(u.channelId) ?: return
+        saveUnfinished(unfinished.filterNot { it === u })
+        playCatchup(ch, u.programme, channelsFor(ALL), startAt = u.positionMs)
+    }
+
+    fun forgetUnfinished(u: Unfinished) {
+        saveUnfinished(unfinished.filterNot { it === u })
+    }
+
+    fun playMissed(pick: HomeFeed.Pick) {
+        playCatchup(pick.channel, pick.programme, channelsFor(ALL))
+    }
+
+    // ---------------- My teams: next fixtures and which channel ----------------
+
+    /** The next fixture in the coming week (for Home). */
+    val nextTeamFixture: TeamFixture?
+        get() {
+            val t = System.currentTimeMillis()
+            return teamFixtures.firstOrNull { it.match.kickoff > t - 2 * 3_600_000L && it.match.kickoff < t + 7 * 86_400_000L }
+        }
+
+    /** Match day: one of your teams plays within the next 12 hours (or is playing now). */
+    val matchDay: TeamFixture?
+        get() {
+            val t = now
+            return teamFixtures.firstOrNull { it.match.live || it.match.kickoff in (t - 2 * 3_600_000L)..(t + 12 * 3_600_000L) }
+                ?.takeIf { !it.match.finished }
+        }
+
+    /** Watch the match if it's about to start (or on); otherwise open My teams. */
+    fun openMatchDay(f: TeamFixture) {
+        if (f.channel != null && (f.match.live || f.match.kickoff - now <= 15 * 60_000L)) watchFixture(f) else navigate(Screen.Teams)
+    }
+
+    fun refreshTeamFixtures(force: Boolean = false) {
+        if (football.key == null || football.teams.isEmpty()) {
+            teamFixtures = emptyList()
+            return
+        }
+        viewModelScope.launch {
+            football.loadFixtures(force)
+            matchFixtureChannels()
+        }
+    }
+
+    fun loadTeamList() {
+        viewModelScope.launch { football.loadTeamList() }
+    }
+
+    /** Looks in the guide around each kick-off for a channel showing it. */
+    private suspend fun matchFixtureChannels() {
+        val now = System.currentTimeMillis()
+        val list = football.fixtures.take(12)
+        if (list.isEmpty()) {
+            teamFixtures = emptyList()
+            return
+        }
+        val ids = activeSources().map { it.id }
+        val chans = allowedAll
+        val favs = favouriteSet
+        teamFixtures = withContext(Dispatchers.IO) {
+            list.map { m ->
+                if (m.kickoff > now + 21 * 86_400_000L) return@map TeamFixture(m, null, null, false)
+                val guide = runCatching {
+                    shiftGuide(chans, db.loadEpg(ids, m.kickoff - 90 * 60_000L, m.kickoff + 30 * 60_000L, emptyMap()))
+                }.getOrDefault(emptyMap())
+                val b = Football.broadcastFor(m, chans, guide, favs)
+                TeamFixture(m, b?.first, b?.second, guide.values.any { it.isNotEmpty() })
+            }
+        }
+        // "Newcastle v Arsenal today at 17:30 on Sky Sports Main Event" – once per match.
+        val today = teamFixtures.firstOrNull { it.channel != null && it.match.kickoff in now..(now + 14 * 3_600_000L) }
+        if (today != null && today.match.id.toString() !in store.teamAnnounced) {
+            store.teamAnnounced = (store.teamAnnounced + today.match.id.toString()).toList().takeLast(50).toSet()
+            val ch = today.channel
+            showNotice("⚽ ${today.match.home} v ${today.match.away} today at ${hhmm(today.match.kickoff)} on ${ch?.name}")
+        }
+    }
+
+    fun watchFixture(f: TeamFixture) {
+        val ch = f.channel ?: return
+        play(ch, channelsFor(ALL))
+    }
+
+    // ---------------- Your usual channel ----------------
+
+    /** Is there a channel you normally watch around now? Offered on Home when Flicker opens. */
+    fun checkUsual() {
+        usualOffer = null
+        if (!offerUsual || mode != null || allChannels.isEmpty()) return
+        val id = com.titanejstudios.tuner.data.Habits.usual(store.habits(activeProfile.id), System.currentTimeMillis()) ?: return
+        val ch = allChannelsById(id) ?: return
+        if (!isAllowed(ch)) return
+        usualOffer = ch
+    }
+
+    fun playUsual() {
+        val ch = usualOffer ?: return
+        usualOffer = null
+        play(ch, channelsFor(ALL))
+    }
+
+    fun toggleScrubPreviews() {
+        scrubPreviewsIptv = !scrubPreviewsIptv
+        store.scrubPreviewsIptv = scrubPreviewsIptv
+    }
+
+    fun toggleOfferUsual() {
+        offerUsual = !offerUsual
+        store.offerUsual = offerUsual
+        if (offerUsual) checkUsual() else usualOffer = null
+    }
+
+    // ---------------- Home-screen widget (phones) ----------------
+
+    /** Saves your first four favourites with the next few hours of their guide for the "On now" widget. */
+    private fun updateWidget() {
+        if (!isPhone || allChannels.isEmpty()) return
+        val now = System.currentTimeMillis()
+        val chs = favourites.mapNotNull { allChannelsById(it) }.take(4)
+        val snap = com.titanejstudios.tuner.tv.NowWidget.snapshot(
+            chs.map { c ->
+                Triple(c.id, c.name, programmesFor(c.id).filter { it.stop > now && it.start < now + 12 * 3600_000L }.take(12).map { Triple(it.start, it.stop, it.title) })
+            }
+        )
+        if (snap == store.widgetSnapshot) return
+        store.widgetSnapshot = snap
+        com.titanejstudios.tuner.tv.NowWidget.refresh(app)
+    }
+
+    // ---------------- Downloads (phones) ----------------
+
+    fun downloadMovie(m: VodItem) {
+        showNotice(downloader.start(m.id, m.name, null, m.poster, null, m.url))
+    }
+
+    fun downloadEpisode(e: Episode) {
+        val s = openSeries
+        showNotice(downloader.start(e.id, s?.name ?: e.title, "S${e.season} E${e.number}  ${e.title}", e.image ?: s?.cover, s?.id, e.url))
+    }
+
+    fun playDownload(d: com.titanejstudios.tuner.features.DownloadEntry) {
+        if (!java.io.File(d.file).exists()) {
+            showNotice("That download is missing – it may have been deleted")
+            return
+        }
+        episodeQueue = emptyList()
+        startVod(PlayMode.Vod(d.contentId, d.title, d.subtitle, d.poster, Uri.fromFile(java.io.File(d.file)).toString(), d.seriesId), fromStart = false)
+    }
+
+    fun removeDownload(contentId: String) {
+        downloader.remove(contentId)
+        showNotice("Download deleted")
+    }
+
+    // ---- Pick on the phone, watch on the TV ----
+
+    /** Something waiting for you to choose which TV it goes to (more than one found). */
+    var tvChoice by mutableStateOf<JSONObject?>(null); private set
+
+    fun liveJson(ch: Channel): JSONObject = JSONObject().put("kind", "live").put("channel", ch.id)
+
+    fun filmJson(m: VodItem): JSONObject = JSONObject().put("kind", "vod").put("id", m.id).put("title", m.name)
+        .put("sub", m.category).put("poster", m.poster).put("url", m.url).put("pos", resume[m.id]?.positionMs ?: 0L)
+
+    fun episodeJson(e: Episode): JSONObject {
+        val s = openSeries
+        return JSONObject().put("kind", "vod").put("id", e.id).put("title", s?.name ?: e.title)
+            .put("sub", "S${e.season} E${e.number}  ${e.title}").put("poster", e.image ?: s?.cover).put("url", e.url)
+            .put("series", s?.id).put("pos", resume[e.id]?.positionMs ?: 0L)
+    }
+
+    fun catchupJson(ch: Channel, p: Programme): JSONObject = JSONObject().put("kind", "catchup").put("channel", ch.id)
+        .put("start", p.start).put("stop", p.stop).put("title", p.title).put("category", p.category).put("pos", 0L)
+
+    /** Plays [what] on a linked TV (asks which, if there are several). */
+    fun watchOnTv(what: JSONObject) {
+        if (!link.linked) {
+            showNotice("Link your TV first: Settings › Linked devices")
+            return
+        }
+        fun go() {
+            val tvs = link.tvs
+            when {
+                tvs.isEmpty() -> showNotice("No TV found – is Flicker open on it?")
+                tvs.size == 1 -> sendToTv(tvs[0], what)
+                else -> tvChoice = what
+            }
+        }
+        if (link.tvs.isEmpty()) {
+            showNotice("Looking for your TV…")
+            link.search { go() }
+        } else go()
+    }
+
+    fun sendToTv(tv: com.titanejstudios.tuner.features.LinkFeature.Peer, what: JSONObject) {
+        tvChoice = null
+        link.send(tv, what) { ok -> showNotice(if (ok) "▶ Playing on ${tv.name}" else "${tv.name} didn't answer – is Flicker open on it?") }
+    }
+
+    fun cancelTvChoice() {
+        tvChoice = null
+    }
+
+    fun linkShowCode() = link.showCode()
+    fun linkFindCodes() = link.findCodes()
 
     // ---------------- Keeping TVs in sync & NAS backups (5.4) ----------------
 
@@ -4093,8 +4681,9 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
 
     /** Remember that a list changed here, and sync it soon. */
     private fun markChanged(section: String) {
-        if (!syncEnabled) return
+        // Stamped even without the network drive: linked devices use it to see which list is newest.
         store.setSyncStamp(section, System.currentTimeMillis())
+        if (!syncEnabled) return
         scheduleSync(15_000L)
     }
 
@@ -4151,7 +4740,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         viewModelScope.launch {
             val name = android.provider.Settings.Global.getString(app.contentResolver, "device_name") ?: android.os.Build.MODEL
             val r = withContext(Dispatchers.IO) { runCatching { NasBackup.save(store, name) } }
-            r.onSuccess { showNotice("Backed up as ${it ?: "?"} in \"Tuner backups\"") }
+            r.onSuccess { showNotice("Backed up as ${it ?: "?"} in \"Flicker backups\"") }
                 .onFailure { showNotice("Backup failed: ${it.message ?: it.javaClass.simpleName}") }
         }
     }
@@ -4253,11 +4842,11 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         openOnBoot = !openOnBoot
         store.openOnBoot = openOnBoot
         if (!openOnBoot) {
-            showNotice("Tuner won't open by itself any more")
+            showNotice("Flicker won't open by itself any more")
             return
         }
         if (canOpenOnBoot) {
-            showNotice("Tuner will open when the TV starts up")
+            showNotice("Flicker will open when the TV starts up")
             return
         }
         // Android only lets apps open themselves at start-up with this permission.
@@ -4268,7 +4857,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
             )
         }.isSuccess
         showNotice(
-            if (asked) "Turn on \"Allow display over other apps\" for Tuner, then press BACK"
+            if (asked) "Turn on \"Allow display over other apps\" for Flicker, then press BACK"
             else "This TV hides that setting – see the README (Open on start-up) for the one-line fix"
         )
     }

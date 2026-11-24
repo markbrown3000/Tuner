@@ -54,7 +54,7 @@ fun PlexScreen(vm: TunerViewModel) {
     }
     Column(Modifier.fillMaxSize().skyBackground().padding(screenPadding(64.dp, 32.dp))) {
         Text("Plex", fontSize = 32.sp, fontWeight = FontWeight.Bold, color = TunerColors.TextPrimary)
-        Text("Shows your Plex \"Continue watching\" on Tuner's Home screen, and plays it here.", color = TunerColors.TextSecondary, fontSize = 15.sp)
+        Text("Shows your Plex \"Continue watching\" on Flicker's Home screen, and plays it here.", color = TunerColors.TextSecondary, fontSize = 15.sp)
         Spacer(Modifier.height(22.dp))
         val code = vm.plexCode
         if (code != null) {
@@ -229,8 +229,8 @@ fun UpdateScreen(vm: TunerViewModel) {
         runCatching { first.requestFocus() }
     }
     Column(Modifier.fillMaxSize().skyBackground().padding(screenPadding(64.dp, 32.dp))) {
-        Text("Update Tuner", fontSize = 32.sp, fontWeight = FontWeight.Bold, color = TunerColors.TextPrimary)
-        Text("This TV has Tuner ${vm.installedVersion}.", color = TunerColors.TextSecondary, fontSize = 16.sp)
+        Text("Update Flicker", fontSize = 32.sp, fontWeight = FontWeight.Bold, color = TunerColors.TextPrimary)
+        Text("This TV has Flicker ${vm.installedVersion}.", color = TunerColors.TextSecondary, fontSize = 16.sp)
         Spacer(Modifier.height(20.dp))
         Text("From your computer", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
         Text(
@@ -243,7 +243,7 @@ fun UpdateScreen(vm: TunerViewModel) {
         Text("From GitHub", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
         Text(
             vm.updateRepo?.let { "Checks the latest release of github.com/$it for an .apk" }
-                ?: "If you put each new APK on a GitHub release, Tuner can check for it and install it.",
+                ?: "If you put each new APK on a GitHub release, Flicker can check for it and install it.",
             color = TunerColors.TextSecondary, fontSize = 16.sp,
         )
         vm.updateStatus?.let {
@@ -260,7 +260,7 @@ fun UpdateScreen(vm: TunerViewModel) {
         }
         Spacer(Modifier.height(18.dp))
         Text(
-            "Android will ask you to confirm. The first time it asks to allow Tuner to install apps – say yes. " +
+            "Android will ask you to confirm. The first time it asks to allow Flicker to install apps – say yes. " +
                 "Updates must be built on the same computer (same signing key), or Android refuses them.",
             color = TunerColors.TextSecondary, fontSize = 14.sp, modifier = Modifier.widthIn(max = 950.dp),
         )

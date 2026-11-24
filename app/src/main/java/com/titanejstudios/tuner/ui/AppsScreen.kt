@@ -47,7 +47,7 @@ fun AppsScreen(vm: TunerViewModel) {
         Spacer(Modifier.height(8.dp))
         Text("Apps", color = Color.White, fontSize = 32.sp, fontWeight = FontWeight.Bold)
         Text(
-            "OK opens the app – press Home or Back on the remote to come back to Tuner. " +
+            "OK opens the app – press Home or Back on the remote to come back to Flicker. " +
                 "Hold OK to show or hide an app in the \"Your apps\" row on Home.",
             color = TunerColors.TextSecondary,
             fontSize = 15.sp,

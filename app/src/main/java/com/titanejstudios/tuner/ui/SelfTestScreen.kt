@@ -62,7 +62,7 @@ fun SelfTestScreen(vm: TunerViewModel) {
             PillButton("Problem log", { vm.openLog() }, compact = true)
         }
         Text(
-            "Tries each part of Tuner on this TV. Take a photo of anything red and send it over. " +
+            "Tries each part of Flicker on this TV. Take a photo of anything red and send it over. " +
                 "The stream test uses one connection to your provider for a few seconds.",
             fontSize = 15.sp,
             color = TunerColors.TextSecondary,

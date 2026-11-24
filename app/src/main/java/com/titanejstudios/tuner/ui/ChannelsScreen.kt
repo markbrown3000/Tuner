@@ -417,6 +417,7 @@ fun ChannelMenu(
     val isFav = ch.id in vm.favouriteSet
     val items = buildList {
         add(MenuItem("Watch") { vm.play(ch, list) })
+        if (vm.isPhone && vm.link.linked) add(MenuItem("📺 Watch on TV") { vm.watchOnTv(vm.liveJson(ch)) })
         add(MenuItem(if (isFav) "Remove from favourites" else "Add to favourites") { vm.toggleFavourite(ch.id) })
         if (group == FAVOURITES && isFav) {
             add(MenuItem("Move up in favourites") { vm.moveFavourite(ch.id, -1) })

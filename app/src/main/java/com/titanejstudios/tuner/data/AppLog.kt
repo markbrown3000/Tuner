@@ -23,7 +23,7 @@ object AppLog {
         val previous = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, error ->
             try {
-                write("CRASH", "Tuner closed unexpectedly (${thread.name})\n" + stackOf(error))
+                write("CRASH", "Flicker closed unexpectedly (${thread.name})\n" + stackOf(error))
             } catch (_: Throwable) {
             }
             try {

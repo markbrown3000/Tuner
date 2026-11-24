@@ -65,7 +65,7 @@ fun ShareTvScreen(vm: TunerViewModel) {
 
         when (vm.shareMode) {
             "send" -> {
-                Text("On the other $other, open Tuner › Settings › Copy from another $other, pick this one and enter:", color = Color.White, fontSize = if (narrow) 17.sp else 20.sp)
+                Text("On the other $other, open Flicker › Settings › Copy from another $other, pick this one and enter:", color = Color.White, fontSize = if (narrow) 17.sp else 20.sp)
                 Spacer(Modifier.height(18.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                     (vm.shareCode ?: "----").forEach { d ->
@@ -88,7 +88,7 @@ fun ShareTvScreen(vm: TunerViewModel) {
                     Spacer(Modifier.height(12.dp))
                     if (vm.shareFound.isEmpty()) {
                         Text(
-                            "On the other $other, open Tuner › Settings › Copy to another $other. It will appear here.",
+                            "On the other $other, open Flicker › Settings › Copy to another $other. It will appear here.",
                             color = Color.White, fontSize = 18.sp,
                         )
                         Spacer(Modifier.height(16.dp))

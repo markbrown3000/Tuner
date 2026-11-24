@@ -36,7 +36,7 @@ object HomeScreen {
             if (!exists) {
                 val logo = BitmapFactory.decodeResource(context.resources, R.mipmap.ic_launcher)
                 val previewChannel = PreviewChannel.Builder()
-                    .setDisplayName("Tuner – Favourites")
+                    .setDisplayName("Flicker – Favourites")
                     .setAppLinkIntentUri(Uri.parse("tuner://open"))
                     .setLogo(logo)
                     .build()

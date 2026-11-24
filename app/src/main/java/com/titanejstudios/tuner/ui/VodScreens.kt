@@ -301,6 +301,8 @@ fun MoviesScreen(vm: TunerViewModel) {
                 add(MenuItem(if (vm.inWatchlist(m.id)) "Remove from My list" else "＋ Add to My list") { vm.toggleWatchlist(m) })
                 add(MenuItem("Play from the beginning") { vm.playMovie(m, fromStart = true) })
                 if (vm.plexLinked && vm.preferPlexFilms) add(MenuItem("Play the IPTV copy", "not Plex's") { vm.playMovie(m, fromStart = false, viaPlex = false) })
+                if (vm.isPhone && vm.link.linked) add(MenuItem("📺 Watch on TV") { vm.watchOnTv(vm.filmJson(m)) })
+                if (vm.isPhone) addAll(downloadItems(vm, m.id) { vm.downloadMovie(m) })
             },
             onDismiss = { menuFor = null },
         )
@@ -389,6 +391,7 @@ fun SeriesDetailScreen(vm: TunerViewModel) {
     var season by remember(seasons) { mutableStateOf(upTo?.season ?: seasons.firstOrNull() ?: 1) }
     val shown = remember(eps, season) { eps.orEmpty().filter { it.season == season } }
     var resumeAsk by remember { mutableStateOf<Episode?>(null) }
+    var episodeMenu by remember { mutableStateOf<Episode?>(null) }
     val firstFocus = remember { FocusRequester() }
     val episodeFocus = remember { FocusRequester() }
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
@@ -445,6 +448,7 @@ val paneA: @Composable (Modifier) -> Unit = { pane ->
                     val r = vm.resume[e.id]
                     FocusSurface(
                         onClick = { if (r != null) resumeAsk = e else vm.playEpisode(e, eps, fromStart = true) },
+                        onLongClick = { episodeMenu = e },
                         baseColor = TunerColors.Panel,
                         modifier = Modifier.fillMaxWidth().height(96.dp)
                             .then(if (e.id == upTo?.id) Modifier.focusRequester(episodeFocus) else Modifier),
@@ -460,7 +464,7 @@ val paneA: @Composable (Modifier) -> Unit = { pane ->
                             Spacer(Modifier.width(16.dp))
                             Column(Modifier.weight(1f)) {
                                 Text(
-                                    "${e.number}. ${e.title}",
+                                    "${e.number}. ${e.title}" + (if (vm.downloads.any { it.contentId == e.id }) "  ⬇" else ""),
                                     color = Color.White,
                                     fontSize = 18.sp,
                                     fontWeight = FontWeight.SemiBold,
@@ -512,6 +516,18 @@ val paneA: @Composable (Modifier) -> Unit = { pane ->
         }
     }
 
+    episodeMenu?.let { e ->
+        MenuDialog(
+            title = "S${e.season} E${e.number}  ${e.title}",
+            items = buildList {
+                add(MenuItem("▶ Play") { vm.playEpisode(e, eps.orEmpty(), fromStart = vm.resume[e.id] == null) })
+                add(MenuItem("Start from the beginning") { vm.playEpisode(e, eps.orEmpty(), fromStart = true) })
+                if (vm.isPhone && vm.link.linked) add(MenuItem("📺 Watch on TV") { vm.watchOnTv(vm.episodeJson(e)) })
+                if (vm.isPhone) addAll(downloadItems(vm, e.id) { vm.downloadEpisode(e) })
+            },
+            onDismiss = { episodeMenu = null },
+        )
+    }
     resumeAsk?.let { e ->
         val r = vm.resume[e.id]
         MenuDialog(
@@ -522,5 +538,18 @@ val paneA: @Composable (Modifier) -> Unit = { pane ->
             ),
             onDismiss = { resumeAsk = null },
         )
+    }
+}
+
+/** Menu items for saving a film or episode on a phone, or playing and deleting the saved copy. */
+internal fun downloadItems(vm: TunerViewModel, contentId: String, start: () -> Unit): List<MenuItem> {
+    val d = vm.downloads.firstOrNull { it.contentId == contentId }
+    return when {
+        d == null -> listOf(MenuItem("⬇ Download", "watch it offline") { start() })
+        vm.downloader.isReady(contentId) -> listOf(
+            MenuItem("▶ Play the download") { vm.playDownload(d) },
+            MenuItem("🗑 Delete the download") { vm.removeDownload(contentId) },
+        )
+        else -> listOf(MenuItem("⬇ Downloading…", "cancel") { vm.removeDownload(contentId) })
     }
 }

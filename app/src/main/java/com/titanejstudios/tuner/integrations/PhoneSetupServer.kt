@@ -167,7 +167,7 @@ class PhoneSetupServer(
                 if (isRemoteRoute) {
                     if (!remoteEnabled || given != remoteToken) {
                         req.bodyFile?.delete()
-                        respond(out, 403, "text/html", page("Remote is off", "<p>Turn on <b>Phone remote</b> in Tuner's Settings, then scan its QR code.</p>"))
+                        respond(out, 403, "text/html", page("Remote is off", "<p>Turn on <b>Phone remote</b> in Flicker's Settings, then scan its QR code.</p>"))
                         return
                     }
                     if (req.path == "/log.txt") {
@@ -390,7 +390,7 @@ class PhoneSetupServer(
     private fun updatePage(): String {
         val t = remoteToken
         return page(
-            "Update Tuner",
+            "Update Flicker",
             """<p>Pick the new <b>app-release.apk</b> (in Android Studio: <i>app/build/outputs/apk/release/</i>) and press Upload. The TV will ask you to confirm.</p>
 <input type="file" id="f" accept=".apk"><br><br><button onclick="up()">Upload to the TV</button><p id="s"></p>
 <script>function up(){var f=document.getElementById('f').files[0];if(!f)return;var s=document.getElementById('s');s.textContent='Uploading…';
@@ -402,7 +402,7 @@ fetch('/api/install?t=$t',{method:'POST',body:f}).then(function(r){return r.json
         val t = remoteToken
         return """<!DOCTYPE html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
-<meta name="apple-mobile-web-app-capable" content="yes"><title>Tuner remote</title>
+<meta name="apple-mobile-web-app-capable" content="yes"><title>Flicker remote</title>
 <style>
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 body{font-family:system-ui,sans-serif;background:#0f1318;color:#f1f4f8;margin:0;padding:14px;max-width:520px;margin:auto}
@@ -421,7 +421,7 @@ input{width:100%;padding:12px;border-radius:10px;border:1px solid #2b3440;backgr
 .ch .t div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.ch .p{color:#9aa4b2;font-size:13px}
 #list{display:none}
 </style></head><body>
-<div class="now" id="now"><b>Tuner</b><span>Connecting…</span></div>
+<div class="now" id="now"><b>Flicker</b><span>Connecting…</span></div>
 <div class="tabs"><button onclick="tab('keys')">Remote</button><button onclick="tab('list')">Channels</button><button onclick="tab('guide')">Record</button></div>
 <div id="keys">
 <div class="pad">
@@ -456,7 +456,7 @@ function draw(){var q=document.getElementById('q').value.toLowerCase(),h='';
   '<div class="t"><div>'+esc(c.name)+'</div><div class="p">'+esc(c.now||'')+'</div></div></div>'});
  document.getElementById('chs').innerHTML=h||'<p>No channels</p>'}
 function state(){fetch('/api/state?t='+T).then(function(r){return r.json()}).then(function(s){
- document.getElementById('now').innerHTML='<b>'+esc(s.title||'Tuner')+'</b><span>'+esc(s.detail||'')+'</span>'}).catch(function(){})}
+ document.getElementById('now').innerHTML='<b>'+esc(s.title||'Flicker')+'</b><span>'+esc(s.detail||'')+'</span>'}).catch(function(){})}
 var d='';for(var i=1;i<=9;i++)d+='<button class="small" onclick="k('+(7+i)+')">'+i+'</button>';d+='<button class="small" onclick="k(7)">0</button>';
 document.getElementById('digits').innerHTML=d;document.getElementById('digits').style.gridTemplateColumns='repeat(5,1fr)';
 state();setInterval(state,4000);
@@ -470,7 +470,7 @@ state();setInterval(state,4000);
     private fun back() = "<p><a href=\"/?t=$setupToken\">← Back</a></p>"
 
     private fun page(title: String, body: String) = """<!DOCTYPE html><html><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>Tuner – $title</title>
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Flicker – $title</title>
 <style>
 body{font-family:system-ui,sans-serif;background:#0f1318;color:#f1f4f8;margin:0;padding:20px;max-width:560px}
 h1{font-size:24px}h2{font-size:18px;margin-top:28px;color:#9aa4b2}
@@ -484,7 +484,7 @@ a{color:#7ab0ff}.row{display:flex;gap:8px;align-items:center}.row input{width:au
         val webhook = esc(store.webhookUrl ?: "")
         val t = setupToken
         return page(
-            "Tuner setup",
+            "Flicker setup",
             """
 <p>Anything you save here goes straight to the TV.</p>
 <h2>Add an M3U playlist</h2>
@@ -506,7 +506,7 @@ a{color:#7ab0ff}.row{display:flex;gap:8px;align-items:center}.row input{width:au
 
 <h2>Home Assistant</h2>
 <form class="card" method="post" action="/settings?t=$t">
-<label>Webhook URL (Tuner sends what's playing here)</label>
+<label>Webhook URL (Flicker sends what's playing here)</label>
 <input name="webhook" value="$webhook" placeholder="http://homeassistant.local:8123/api/webhook/tuner">
 <button>Save</button></form>
 

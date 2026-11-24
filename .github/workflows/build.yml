@@ -5,7 +5,7 @@
 #
 # One-off set-up (see README › "Automatic builds on GitHub"): add your PC's debug key as the secret
 # DEBUG_KEYSTORE_BASE64, so GitHub's APKs install over the ones you built yourself.
-name: Build Tuner
+name: Build Flicker
 
 on:
   push:

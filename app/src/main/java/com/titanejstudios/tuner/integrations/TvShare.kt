@@ -15,7 +15,7 @@ import java.net.URLEncoder
  * Copy Tuner's settings from one TV to another on the same Wi-Fi: the sending TV announces itself
  * and shows a 4-digit code; the receiving TV finds it and fetches the settings with that code.
  */
-class TvShare(context: Context) {
+class TvShare(context: Context, private val serviceType: String = SERVICE_TYPE) {
     class Found(val name: String, val host: String, val port: Int)
 
     private val nsd = context.getSystemService(NsdManager::class.java)
@@ -29,7 +29,7 @@ class TvShare(context: Context) {
         stopAdvertising()
         val info = NsdServiceInfo().apply {
             serviceName = name
-            serviceType = SERVICE_TYPE
+            serviceType = this@TvShare.serviceType
             setPort(port)
         }
         val listener = object : NsdManager.RegistrationListener {
@@ -67,7 +67,7 @@ class TvShare(context: Context) {
             }
         }
         discovery = listener
-        runCatching { nsd.discoverServices(SERVICE_TYPE, NsdManager.PROTOCOL_DNS_SD, listener) }
+        runCatching { nsd.discoverServices(serviceType, NsdManager.PROTOCOL_DNS_SD, listener) }
     }
 
     /** NsdManager only resolves one service at a time. */

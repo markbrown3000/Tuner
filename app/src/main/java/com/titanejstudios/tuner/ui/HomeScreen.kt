@@ -2,6 +2,8 @@
 
 package com.titanejstudios.tuner.ui
 
+import com.titanejstudios.tuner.R
+import androidx.compose.ui.res.painterResource
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.animation.core.animateFloat
@@ -90,6 +92,7 @@ enum class HomeRow(val title: String) {
     Trending("Trending this week"),
     PlexNew("New on Plex"),
     TopPicks("Top picks for you"),
+    Missed("Missed it?"),
     Because("Because you watched"),
     Favourites("Favourites"),
     Recordings("Recordings"),
@@ -291,6 +294,49 @@ private fun filmCard(vm: TunerViewModel, m: com.titanejstudios.tuner.data.VodIte
     hero = HeroInfo(m.name, m.category, null, null, m.poster, wide = false, label = "LIKE THE LAST FILM YOU WATCHED"),
 )
 
+/** A programme you switched off half-way: finish it on catch-up. */
+private fun unfinishedCard(vm: TunerViewModel, u: com.titanejstudios.tuner.Unfinished): HomeCard {
+    val p = u.programme
+    val ch = vm.allChannelsById(u.channelId)
+    val name = ch?.name ?: ""
+    return HomeCard(
+        key = "un" + u.channelId + "|" + p.start,
+        tag = "FINISH IT", tagBg = TunerColors.Accent, tagFg = Color.White,
+        title = p.title,
+        line1 = "$name · ${dayLabel(p.start)} ${hhmm(p.start)}",
+        line2 = "Carry on from ${(u.positionMs / 60_000)} min · hold to forget",
+        image = null,
+        poster = false,
+        channel = ch,
+        progress = (u.positionMs.toFloat() / (p.stop - p.start).coerceAtLeast(1L)).coerceIn(0f, 1f),
+        progressColor = TunerColors.Accent,
+        onClick = { vm.finishUnfinished(u) },
+        onLongClick = { vm.forgetUnfinished(u) },
+        hero = HeroInfo(p.title, "$name · you stopped ${u.positionMs / 60_000} minutes in – carry on with catch-up", null, ch, null, label = "FINISH WHAT YOU STARTED"),
+    )
+}
+
+/** Missed it? A programme from the last week you'd probably like, on catch-up. */
+private fun missedCard(vm: TunerViewModel, pick: HomeFeed.Pick): HomeCard {
+    val p = pick.programme
+    return HomeCard(
+        key = "mi" + pick.channel.id + "|" + p.start,
+        tag = "CATCH-UP", tagBg = Color(0xCC050816), tagFg = TunerColors.NowLine,
+        title = p.title,
+        line1 = "${pick.channel.name} · ${dayLabel(p.start)} ${hhmm(p.start)}",
+        line2 = pick.reason,
+        image = p.image,
+        poster = false,
+        channel = pick.channel,
+        progress = null,
+        progressColor = TunerColors.Accent,
+        onClick = { vm.playMissed(pick) },
+        onLongClick = null,
+        hero = HeroInfo(p.title, "${pick.channel.name}  ·  ${dayLabel(p.start)} ${hhmm(p.start)}  ·  on catch-up", p.desc, pick.channel, p.image,
+            label = pick.reason?.uppercase() ?: "MISSED IT?"),
+    )
+}
+
 private fun recordingCard(vm: TunerViewModel, r: Recording): HomeCard {
     val live = r.status == RecStatus.RECORDING
     return HomeCard(
@@ -388,9 +434,11 @@ fun HomeScreen(vm: TunerViewModel) {
         minute, recent, favourites, allChannels, vm.sportNow, vm.topPicks, vm.plexItems, vm.plexRecent,
         vm.yourShows, vm.plexFeature.similar, vm.becauseFilms, vm.trending,
         vm.resume, vm.recordings, vm.followedSeries, vm.watchlist, vm.football.matches, vm.reminders,
+        vm.missed, vm.unfinished,
     ) {
         buildMap {
             put(HomeRow.Continue, buildList {
+                vm.finishable.take(4).forEach { add(unfinishedCard(vm, it)) }
                 vm.plexItems.take(8).forEach { item -> add(plexItemCard(vm, item) { plexMenu = item }) }
                 if (vm.hasVod) vm.resume.values.sortedByDescending { it.updatedAt }.take(8).forEach { add(resumeCard(vm, it)) }
                 recent.forEach { add(channelCard(vm, it, recent, now, followed)) }
@@ -400,6 +448,7 @@ fun HomeScreen(vm: TunerViewModel) {
             put(HomeRow.Trending, vm.trending.map { trendingCard(vm, it) })
             put(HomeRow.TopPicks, vm.topPicks.let { picks -> val chans = picks.map { it.channel }; picks.map { pk -> pickCard(vm, pk, chans, now) { pickMenu = pk } } })
             put(HomeRow.YourShows, vm.yourShows.let { picks -> val chans = picks.map { it.channel }; picks.map { pk -> pickCard(vm, pk, chans, now) { pickMenu = pk } } })
+            put(HomeRow.Missed, vm.missed.map { missedCard(vm, it) })
             put(HomeRow.Because, buildList {
                 vm.plexFeature.similar.take(20).forEach { add(plexEntryCard(vm, it, "LIKE THIS")) }
                 if (vm.hasVod) vm.becauseFilms.forEach { m -> add(filmCard(vm, m)) }
@@ -526,13 +575,19 @@ fun HomeScreen(vm: TunerViewModel) {
                 }
             }
 
-            // Quick buttons.
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                vm.lastChannel?.let { last -> PillButton("▶  ${last.name}", { vm.play(last, allChannels) }, compact = true) }
-                PillButton("TV Guide", { vm.navigate(Screen.Channels) }, compact = true)
-                PillButton("Sport", { vm.navigate(Screen.Sports) }, compact = true)
-                PillButton("Search", { vm.navigate(Screen.Search) }, compact = true)
-                PillButton("🎤  Say it", { vm.startVoiceSearch() }, compact = true)
+            // Quick buttons (they scroll sideways when there are a lot).
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                // The channel you normally watch at this time (the news at 6, say).
+                vm.usualOffer?.let { u -> item { PillButton("★  Your usual: ${u.name}", { vm.playUsual() }, compact = true, selected = true) } }
+                val md = vm.matchDay
+                if (md != null) item { PillButton(matchDayText(md, vm.now), { vm.openMatchDay(md) }, compact = true, selected = true) }
+                else vm.nextTeamFixture?.let { f -> item { PillButton(fixturePill(f), { vm.navigate(Screen.Teams) }, compact = true) } }
+                vm.lastChannel?.takeIf { it.id != vm.usualOffer?.id }?.let { last -> item { PillButton("▶  ${last.name}", { vm.play(last, allChannels) }, compact = true) } }
+                item { PillButton("TV Guide", { vm.navigate(Screen.Channels) }, compact = true) }
+                item { PillButton("Sport", { vm.navigate(Screen.Sports) }, compact = true) }
+                if (vm.christmasSeason) item { PillButton("🎄 Christmas TV", { vm.navigate(Screen.Christmas) }, compact = true) }
+                item { PillButton("Search", { vm.navigate(Screen.Search) }, compact = true) }
+                item { PillButton("🎤  Say it", { vm.startVoiceSearch() }, compact = true) }
             }
             Spacer(Modifier.height(10.dp))
 
@@ -633,7 +688,9 @@ private fun PhoneHomeBody(
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         item(key = "top") {
             Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("Tuner", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.weight(1f))
+                Image(painterResource(R.drawable.logo_icon), contentDescription = null, modifier = Modifier.size(32.dp).clip(RoundedCornerShape(8.dp)))
+                Spacer(Modifier.width(10.dp))
+                Text("Flicker", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.weight(1f))
                 if (vm.vpn.connected) Text("🔒  ", fontSize = 16.sp)
                 Box(Modifier.tvClickable({ vm.navigate(Screen.ProfilePicker) })) {
                     ProfileAvatar(vm.activeProfile, 34.dp, vm.profiles.indexOfFirst { it.id == vm.activeProfile.id })
@@ -641,6 +698,8 @@ private fun PhoneHomeBody(
             }
         }
         if (vm.safeMode && !vm.safeModeBannerHidden) item(key = "safe") { Box(Modifier.padding(horizontal = 12.dp)) { SafeModeBanner(vm) } }
+        // Match day: your team's game, big, at the top.
+        vm.matchDay?.let { md -> item(key = "matchday") { MatchDayCard(vm, md) } }
         // The featured item: the first tile of the first row, big.
         val hero = featured?.hero ?: h
         if (hero != null) item(key = "hero") {
@@ -667,7 +726,12 @@ private fun PhoneHomeBody(
         }
         item(key = "quick") {
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)) {
-                vm.lastChannel?.let { last -> item { PillButton("▶  ${last.name}", { vm.play(last, allChannels) }, compact = true) } }
+                vm.usualOffer?.let { u -> item { PillButton("★  Your usual: ${u.name}", { vm.playUsual() }, compact = true, selected = true) } }
+                if (vm.matchDay == null) vm.nextTeamFixture?.let { f -> item { PillButton(fixturePill(f), { vm.navigate(Screen.Teams) }, compact = true) } }
+                if (vm.christmasSeason) item { PillButton("🎄 Christmas TV", { vm.navigate(Screen.Christmas) }, compact = true) }
+                vm.lastChannel?.takeIf { it.id != vm.usualOffer?.id }?.let { last -> item { PillButton("▶  ${last.name}", { vm.play(last, allChannels) }, compact = true) } }
+                if (vm.link.linked) item { PillButton("📺 TV remote", { vm.navigate(Screen.Remote) }, compact = true) }
+                if (vm.downloads.isNotEmpty()) item { PillButton("⬇ Downloads", { vm.navigate(Screen.Downloads) }, compact = true) }
                 item { PillButton("Sport", { vm.navigate(Screen.Sports) }, compact = true) }
                 item { PillButton("What's On", { vm.openWhatsOn(vm.whatsOnGenre) }, compact = true) }
                 item { PillButton("Catch-up", { vm.navigate(Screen.Catchup) }, compact = true) }
@@ -976,7 +1040,7 @@ private fun SafeModeBanner(vm: TunerViewModel) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
-            Text("Safe mode – Tuner closed unexpectedly, so the newer extras are switched off", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+            Text("Safe mode – Flicker closed unexpectedly, so the newer extras are switched off", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
             Text(
                 vm.lastCrash?.let { "Last problem: $it" } ?: "Night mode, lip sync, frame-rate matching, Live tab, Plex and scores are off for now.",
                 color = Color(0xFFFFE2B0),
@@ -1181,5 +1245,67 @@ private fun SkeletonRows(status: String) {
                 }
             }
         }
+    }
+}
+
+/** "⚽ Newcastle v Arsenal · Sat 17:30 · Sky Sports Main Event" for Home's quick buttons. */
+private fun fixturePill(f: com.titanejstudios.tuner.TeamFixture): String {
+    val m = f.match
+    val now = System.currentTimeMillis()
+    val dayFmt = java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.UK)
+    val day = when {
+        m.live -> "LIVE"
+        dayFmt.format(java.util.Date(m.kickoff)) == dayFmt.format(java.util.Date(now)) -> "Today"
+        else -> java.text.SimpleDateFormat("EEE", java.util.Locale.UK).format(java.util.Date(m.kickoff))
+    }
+    return "⚽  " + com.titanejstudios.tuner.data.Football.shortName(m.home) + " v " + com.titanejstudios.tuner.data.Football.shortName(m.away) + " · " + day + " " + hhmm(m.kickoff) +
+        (f.channel?.let { " · " + it.name } ?: "")
+}
+
+/** "⚽ Kick-off in 2h 10m: Newcastle v Arsenal · Sky Sports Main Event" (or LIVE / about to start). */
+private fun matchDayText(f: com.titanejstudios.tuner.TeamFixture, now: Long): String {
+    val m = f.match
+    val teams = com.titanejstudios.tuner.data.Football.shortName(m.home) + " v " + com.titanejstudios.tuner.data.Football.shortName(m.away)
+    val ch = f.channel?.let { " · " + it.name } ?: ""
+    val mins = (m.kickoff - now) / 60_000
+    return when {
+        m.live || mins <= 0 -> "⚽  LIVE: $teams$ch  ▶"
+        mins <= 15 -> "⚽  Kick-off in $mins min: $teams$ch  ▶"
+        mins < 60 -> "⚽  Match day · kick-off in $mins min: $teams$ch"
+        else -> "⚽  Match day · ${hhmm(m.kickoff)} (in ${mins / 60}h ${mins % 60}m): $teams$ch"
+    }
+}
+
+/** Phones: your team's match at the top of Home on match day, with a countdown. */
+@Composable
+private fun MatchDayCard(vm: TunerViewModel, f: com.titanejstudios.tuner.TeamFixture) {
+    val m = f.match
+    val now = vm.now
+    val mins = (m.kickoff - now) / 60_000
+    Column(
+        Modifier.padding(horizontal = 12.dp, vertical = 6.dp).fillMaxWidth().clip(RoundedCornerShape(16.dp))
+            .background(Brush.horizontalGradient(listOf(Color(0xFF1B5E3A), Color(0xFF0E2A5C))))
+            .tvClickable({ vm.openMatchDay(f) })
+            .padding(16.dp),
+    ) {
+        Text(if (m.live) "● LIVE NOW" else "⚽ MATCH DAY", color = if (m.live) Color(0xFFFF6B6B) else Color(0xFFFFD66B), fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp)
+        Text(
+            com.titanejstudios.tuner.data.Football.shortName(m.home) + "  v  " + com.titanejstudios.tuner.data.Football.shortName(m.away),
+            color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            when {
+                m.live -> m.scoreText.takeIf { it != "v" }?.let { "Score $it" } ?: "On now"
+                mins <= 0 -> "Kicking off now"
+                mins < 60 -> "Kick-off in $mins min (${hhmm(m.kickoff)})"
+                else -> "Kick-off ${hhmm(m.kickoff)} – in ${mins / 60}h ${mins % 60}m"
+            } + " · " + m.competition,
+            color = Color(0xFFD4DDF5), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            f.channel?.let { "📺 " + it.name + if (m.live || mins <= 15) "  ·  tap to watch" else "" } ?: "Channel not in the guide yet",
+            color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+        )
     }
 }

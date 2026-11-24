@@ -43,11 +43,11 @@ class Plex(private val clientId: String) {
             readTimeout = timeoutMs
             setRequestProperty("Accept", "application/json")
             setRequestProperty("X-Plex-Client-Identifier", clientId)
-            setRequestProperty("X-Plex-Product", "Tuner")
+            setRequestProperty("X-Plex-Product", "Flicker")
             setRequestProperty("X-Plex-Version", "5.2")
             setRequestProperty("X-Plex-Platform", "Android")
             setRequestProperty("X-Plex-Device", "Android TV")
-            setRequestProperty("X-Plex-Device-Name", "Tuner")
+            setRequestProperty("X-Plex-Device-Name", "Flicker")
             token?.let { setRequestProperty("X-Plex-Token", it) }
         }
 

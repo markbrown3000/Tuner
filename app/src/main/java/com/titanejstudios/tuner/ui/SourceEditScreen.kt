@@ -76,7 +76,7 @@ fun SourceEditScreen(vm: TunerViewModel) {
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Text(
-            if (firstRun) "Welcome to Tuner" else if (existing == null) "Add a playlist" else "Edit playlist",
+            if (firstRun) "Welcome to Flicker" else if (existing == null) "Add a playlist" else "Edit playlist",
             fontSize = 36.sp,
             fontWeight = FontWeight.Bold,
             color = TunerColors.TextPrimary,

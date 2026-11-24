@@ -97,7 +97,12 @@ class MainActivity : ComponentActivity() {
         }
         setContent {
             TunerTheme {
-                TunerApp(vm)
+                // Settings › Text size: everything's text scaled up (on top of the device's own setting).
+                val density = androidx.compose.ui.platform.LocalDensity.current
+                val scaled = androidx.compose.ui.unit.Density(density.density, density.fontScale * vm.textScale / 100f)
+                androidx.compose.runtime.CompositionLocalProvider(androidx.compose.ui.platform.LocalDensity provides scaled) {
+                    TunerApp(vm)
+                }
             }
         }
     }
@@ -219,6 +224,11 @@ private fun TunerApp(vm: TunerViewModel) {
                 Screen.Languages -> com.titanejstudios.tuner.ui.LanguagesScreen(vm)
                 Screen.Recommendations -> com.titanejstudios.tuner.ui.RecommendationsScreen(vm)
                 Screen.Vpn -> com.titanejstudios.tuner.ui.VpnScreen(vm)
+                Screen.Link -> com.titanejstudios.tuner.ui.LinkScreen(vm)
+                Screen.Downloads -> com.titanejstudios.tuner.ui.DownloadsScreen(vm)
+                Screen.Teams -> com.titanejstudios.tuner.ui.TeamsScreen(vm)
+                Screen.Remote -> com.titanejstudios.tuner.ui.RemoteScreen(vm)
+                Screen.Christmas -> com.titanejstudios.tuner.ui.ChristmasScreen(vm)
             }
         }
         if (phone && !watching && vm.screen in PhoneTabs) PhoneBottomBar(vm)
@@ -248,6 +258,13 @@ private fun TunerApp(vm: TunerViewModel) {
                         if (c.iptv != null) add(MenuItem("Your IPTV provider") { vm.choosePlexCopy(null) })
                     },
                     onDismiss = { vm.cancelPlexCopyChoice() },
+                )
+            }
+            vm.tvChoice?.let { what ->
+                MenuDialog(
+                    title = "Watch on which TV?",
+                    items = vm.link.tvs.map { tv -> MenuItem("📺  " + tv.name) { vm.sendToTv(tv, what) } },
+                    onDismiss = { vm.cancelTvChoice() },
                 )
             }
             vm.pinPrompt?.let { p -> PinDialog(p, onCancel = { vm.cancelPin() }) }
@@ -314,7 +331,7 @@ private fun DeviceChoice(vm: TunerViewModel) {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(18.dp),
         ) {
-            Text("Welcome to Tuner", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.ExtraBold)
+            Text("Welcome to Flicker", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.ExtraBold)
             Text("What are you watching on?", color = TunerColors.TextSecondary, fontSize = 17.sp)
             listOf(
                 Triple("📱", "A phone or tablet", "phone"),
