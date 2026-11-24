@@ -3255,7 +3255,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     val whatsOnAt: Long
         get() = whatsOnMinute?.let { WhatsOn.timeOf(whatsOnDay, it, now) } ?: now
 
-    fun setWhatsOnDay(days: Int) {
+    fun chooseWhatsOnDay(days: Int) {
         whatsOnDay = days.coerceIn(0, 6)
         // Another day: start at 8pm. Today: now.
         whatsOnMinute = if (whatsOnDay == 0) null else (whatsOnMinute ?: 20 * 60)
@@ -3268,7 +3268,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         updateWhatsOn()
     }
 
-    fun setWhatsOnTime(minuteOfDay: Int) {
+    fun chooseWhatsOnTime(minuteOfDay: Int) {
         whatsOnMinute = minuteOfDay
         updateWhatsOn()
     }

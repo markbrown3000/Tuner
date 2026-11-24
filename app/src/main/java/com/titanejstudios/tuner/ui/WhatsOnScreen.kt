@@ -112,9 +112,9 @@ fun WhatsOnScreen(vm: TunerViewModel) {
                     )
                 }
                 item(key = "later") { PillButton("▶", { vm.stepWhatsOnTime(1) }, compact = true) }
-                item(key = "nine") { PillButton("9pm", { vm.setWhatsOnTime(21 * 60) }, selected = vm.whatsOnMinute == 21 * 60, compact = true) }
+                item(key = "nine") { PillButton("9pm", { vm.chooseWhatsOnTime(21 * 60) }, selected = vm.whatsOnMinute == 21 * 60, compact = true) }
                 items(7, key = { "day$it" }) { d ->
-                    PillButton(WhatsOn.dayName(d, vm.now), { vm.setWhatsOnDay(d) }, selected = vm.whatsOnDay == d && (d > 0 || vm.whatsOnMinute != null), compact = true)
+                    PillButton(WhatsOn.dayName(d, vm.now), { vm.chooseWhatsOnDay(d) }, selected = vm.whatsOnDay == d && (d > 0 || vm.whatsOnMinute != null), compact = true)
                 }
             }
             // What: kinds, favourites, tidy, preview.
