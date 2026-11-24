@@ -742,7 +742,8 @@ class Store(context: Context) {
     fun ytHistoryOf(profileId: String): String? = prefs.getString("ythist_$profileId", null)
     fun saveYtHistory(profileId: String, value: String) = prefs.edit().putString("ythist_$profileId", value).apply()
     fun ytRecsOf(profileId: String): String? = prefs.getString("ytrec_$profileId", null)
-    fun saveYtRecs(profileId: String, value: String?) = prefs.edit().putString("ytrec_$profileId", value).putLong("ytrec_at_$profileId", System.currentTimeMillis()).apply()
+    fun saveYtRecs(profileId: String, value: String?, at: Long = System.currentTimeMillis()) =
+        prefs.edit().putString("ytrec_$profileId", value).putLong("ytrec_at_$profileId", at).apply()
     fun ytRecsAtOf(profileId: String): Long = prefs.getLong("ytrec_at_$profileId", 0L)
     fun ytFeedAtOf(profileId: String): Long = prefs.getLong("yt_feed2_at_$profileId", 0L)
 

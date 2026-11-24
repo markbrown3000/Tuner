@@ -69,15 +69,24 @@ class YouTubeFeature(private val store: Store, private val scope: CoroutineScope
         store.saveYtHistory(pid, a.toString())
     }
 
-    /** A video was closed after [position] of [length] seconds. Trailers and quick looks aren't kept. */
-    fun watched(v: YouTube.Video, position: Float, length: Float) {
+    /** Something worth telling the other devices about (a sign-in, a video watched…). */
+    var onSyncWorthy: (() -> Unit)? = null
+
+    /**
+     * A video was closed (or, every half minute, is still playing) at [position] of [length]
+     * seconds. Trailers and quick looks aren't kept. [closed]: counts as one more viewing.
+     */
+    fun watched(v: YouTube.Video, position: Float, length: Float, closed: Boolean = true) {
         if (v.channel.isBlank() || position < 15f) return
         val before = history.firstOrNull { it.video.id == v.id }
-        val w = Watched(v, System.currentTimeMillis(), position, length, (before?.plays ?: 0) + 1)
+        // A new viewing (not seen for half an hour) counts once; saves during it just move the place.
+        val fresh = before == null || System.currentTimeMillis() - before.at > 30 * 60_000L
+        val plays = (before?.plays ?: 0) + if (fresh) 1 else 0
+        val w = Watched(v, System.currentTimeMillis(), position, length, plays)
         history = (listOf(w) + history.filter { it.video.id != v.id }).take(300)
         saveHistory()
         // Something new to go on: freshen the picks (soon, not on every video).
-        if (System.currentTimeMillis() - store.ytRecsAtOf(pid) > 30 * 60_000L) loadRecommended(force = true)
+        if (closed && System.currentTimeMillis() - store.ytRecsAtOf(pid) > 30 * 60_000L) loadRecommended(force = true)
     }
 
     /** Where to start [id] (carry on part-watched videos). */
@@ -180,7 +189,18 @@ class YouTubeFeature(private val store: Store, private val scope: CoroutineScope
     fun reload() {
         history = loadHistory(pid)
         loadLists()
-        recommended = recommended.filter { keep(it) }
+        // Picks and the sign-in may have come from another device too.
+        val recs = YouTube.fromJson(store.ytRecsOf(pid)).filter { keep(it) }
+        recommended = recs.ifEmpty { recommended.filter { keep(it) } }
+        val wasSignedIn = signedIn
+        signedIn = store.ytRefreshOf(pid) != null
+        email = store.ytEmailOf(pid)
+        if (signedIn && !wasSignedIn) {
+            access = null
+            loadFeed(force = true)
+            loadMine(force = true)
+        }
+        if (recommended.isEmpty() && history.isNotEmpty()) loadRecommended(force = true)
     }
 
     // ---------------- Watch later, "not interested", recent searches (per profile) ----------------
@@ -399,6 +419,8 @@ class YouTubeFeature(private val store: Store, private val scope: CoroutineScope
                         email = r.tokens.email
                         signedIn = r.tokens.refresh != null
                         status = "✓ Signed in to YouTube" + (r.tokens.email?.let { " as $it" } ?: "")
+                        store.saveYtData("tok_at", pid, System.currentTimeMillis().toString())
+                        onSyncWorthy?.invoke()
                         loadFeed(force = true)
                         return@launch
                     }
@@ -420,6 +442,9 @@ class YouTubeFeature(private val store: Store, private val scope: CoroutineScope
         store.saveYtRefresh(pid, null)
         store.saveYtEmail(pid, null)
         store.saveYtFeed(pid, null)
+        // Signed out everywhere (the sign-in is shared between your devices).
+        store.saveYtData("tok_at", pid, System.currentTimeMillis().toString())
+        onSyncWorthy?.invoke()
         access = null
         signedIn = false
         email = null

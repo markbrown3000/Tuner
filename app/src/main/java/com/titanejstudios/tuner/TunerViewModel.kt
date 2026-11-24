@@ -441,6 +441,11 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     }
 
     /** The YouTube player closed: remember how far this profile got (and learn what it likes). */
+    /** Every half minute while a YouTube video plays: keep its place (in case Flicker's closed mid-video). */
+    fun youTubeProgress(v: com.titanejstudios.tuner.integrations.YouTube.Video, position: Float, length: Float) {
+        youtube.watched(v, position, length, closed = false)
+    }
+
     fun youTubeStopped(v: com.titanejstudios.tuner.integrations.YouTube.Video, position: Float, length: Float) {
         youtube.watched(v, position, length)
         // Carry on from here on the other TVs and phones.
@@ -552,6 +557,14 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         isForeground = { inForeground },
         onSynced = { changed -> applyLinkChanges(changed) },
     )
+
+    /** YouTube sign-ins, history and Watch later go to the other devices as they change. */
+    private val youTubeSyncHook = run {
+        youtube.onSyncWorthy = {
+            link.tellOthers()
+            cloud.syncSoon()
+        }
+    }
     /** What this profile likes, learned from what it watches. */
     private var taste: Taste = Taste.fromJson(store.taste(store.activeProfileId))
     private val pendingTaste = HashMap<Pair<String, String?>, Long>()
@@ -1619,6 +1632,11 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
 
     fun onAppStopped() {
         inForeground = false
+        // Leaving mid-video: send where it got to (the player only reports when it closes).
+        if (screen == Screen.YouTubePlayer) {
+            link.tellOthers()
+            cloud.syncSoon(0L)
+        }
         finishLiveWatch()
         updateWidget()
         AppState.foreground = false

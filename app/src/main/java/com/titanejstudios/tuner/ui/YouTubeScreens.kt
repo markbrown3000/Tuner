@@ -232,6 +232,13 @@ fun YouTubePlayerScreen(vm: TunerViewModel) {
             }, true, options)
         }
     }
+    // Keep its place every half minute while it plays.
+    LaunchedEffect(video.id) {
+        while (true) {
+            delay(30_000)
+            if (playing && position >= 15f) vm.youTubeProgress(video, position, length)
+        }
+    }
     DisposableEffect(video.id) {
         onDispose {
             vm.youTubePlaying(false)

@@ -58,8 +58,16 @@ object LinkSync {
             val newest = JSONArray()
             for (i in 0 until minOf(60, h.length())) newest.put(h.get(i))
             val l = runCatching { JSONArray(store.ytData("later", p.id) ?: "[]") }.getOrDefault(JSONArray())
-            if (newest.length() == 0 && l.length() == 0) continue
-            yt.put(p.name.lowercase().trim(), JSONObject().put("h", newest).put("l", l).put("lat", store.ytData("later_at", p.id)?.toLongOrNull() ?: 0L))
+            val tokAt = store.ytData("tok_at", p.id)?.toLongOrNull() ?: 0L
+            if (newest.length() == 0 && l.length() == 0 && tokAt == 0L) continue
+            yt.put(
+                p.name.lowercase().trim(),
+                JSONObject().put("h", newest).put("l", l).put("lat", store.ytData("later_at", p.id)?.toLongOrNull() ?: 0L)
+                    // The profile's YouTube sign-in (read-only), so every device has it without signing in again.
+                    .put("tok", store.ytRefreshOf(p.id)).put("em", store.ytEmailOf(p.id)).put("tat", tokAt)
+                    // Its recommendations, so a device that's just started has them straight away.
+                    .put("rec", store.ytRecsOf(p.id)).put("rat", store.ytRecsAtOf(p.id)),
+            )
         }
         sections.put(YOUTUBE, yt)
         sections.put(
@@ -283,6 +291,24 @@ object LinkSync {
                     val merged = JSONArray()
                     byId.values.sortedByDescending { it.optLong("at") }.take(300).forEach { merged.put(it) }
                     store.saveYtHistory(p.id, merged.toString())
+                    changed += YOUTUBE
+                }
+                // Sign-in: the newer change wins (signing out on one device signs out everywhere).
+                val theirTokAt = theirs.optLong("tat")
+                val mineTokAt = store.ytData("tok_at", p.id)?.toLongOrNull() ?: 0L
+                val theirTok = theirs.optString("tok").takeIf { it.isNotBlank() && it != "null" }
+                if (theirTokAt > mineTokAt || (mineTokAt == 0L && store.ytRefreshOf(p.id) == null && theirTok != null)) {
+                    if (theirTok != store.ytRefreshOf(p.id)) {
+                        store.saveYtRefresh(p.id, theirTok)
+                        store.saveYtEmail(p.id, theirs.optString("em").takeIf { it.isNotBlank() && it != "null" })
+                        changed += YOUTUBE
+                    }
+                    store.saveYtData("tok_at", p.id, theirTokAt.toString())
+                }
+                // Recommendations: the newer list.
+                val theirRecs = theirs.optString("rec").takeIf { it.isNotBlank() && it != "null" }
+                if (theirRecs != null && theirs.optLong("rat") > store.ytRecsAtOf(p.id)) {
+                    store.saveYtRecs(p.id, theirRecs, theirs.optLong("rat"))
                     changed += YOUTUBE
                 }
                 val theirLaterAt = theirs.optLong("lat")
