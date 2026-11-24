@@ -35,11 +35,43 @@ object YouTube {
         val safe = if (strict) "strict" else "moderate"
         val o = get("$API/search?part=snippet&type=video&videoEmbeddable=true&safeSearch=$safe&maxResults=30&q=$q", apiKey, access)
         val items = o.optJSONArray("items") ?: return emptyList()
-        return (0 until items.length()).mapNotNull { i ->
+        val found = (0 until items.length()).mapNotNull { i ->
             val it = items.optJSONObject(i) ?: return@mapNotNull null
             val id = it.optJSONObject("id")?.optString("videoId")?.takeIf { v -> v.isNotBlank() } ?: return@mapNotNull null
             video(id, it.optJSONObject("snippet"))
         }
+        return withoutShorts(found, apiKey, access)
+    }
+
+    /**
+     * Drops YouTube Shorts: upright videos of 3 minutes or less (and anything titled #shorts).
+     * One unit per 50 videos. If YouTube can't say, everything's kept.
+     */
+    fun withoutShorts(list: List<Video>, apiKey: String?, access: String?): List<Video> {
+        val tagged = list.filterNot { "#short" in it.title.lowercase() }
+        val shorts = HashSet<String>()
+        for (batch in tagged.chunked(50)) {
+            val o = runCatching {
+                get("$API/videos?part=contentDetails,player&maxWidth=480&id=" + batch.joinToString(",") { it.id }, apiKey, access)
+            }.getOrNull() ?: continue
+            val items = o.optJSONArray("items") ?: continue
+            for (i in 0 until items.length()) {
+                val v = items.optJSONObject(i) ?: continue
+                val seconds = seconds(v.optJSONObject("contentDetails")?.optString("duration").orEmpty())
+                val player = v.optJSONObject("player")
+                val w = player?.optInt("embedWidth") ?: 0
+                val h = player?.optInt("embedHeight") ?: 0
+                if (seconds in 1..180 && h > w && w > 0) shorts += v.optString("id")
+            }
+        }
+        return tagged.filterNot { it.id in shorts }
+    }
+
+    /** "PT1H2M3S" → 3723. */
+    private fun seconds(iso: String): Int {
+        val m = Regex("P(?:(\\d+)D)?T?(?:(\\d+)H)?(?:(\\d+)M)?(?:(\\d+)S)?").find(iso) ?: return 0
+        val (d, h, mi, s) = m.destructured
+        return (d.toIntOrNull() ?: 0) * 86_400 + (h.toIntOrNull() ?: 0) * 3_600 + (mi.toIntOrNull() ?: 0) * 60 + (s.toIntOrNull() ?: 0)
     }
 
     /** The newest uploads from every channel you subscribe to, newest first. About 1 unit per channel. */
@@ -57,9 +89,14 @@ object YouTube {
             page = o.optString("nextPageToken").takeIf { it.isNotBlank() }
         } while (page != null && subs.size < channels)
         val out = ArrayList<Video>()
+        var maybeShorts = false
         for (ch in subs.take(channels)) {
-            // A channel's uploads playlist is its id with "UC" swapped for "UU".
-            val o = runCatching { get("$API/playlistItems?part=snippet&maxResults=$perChannel&playlistId=UU${ch.drop(2)}", null, access) }.getOrNull() ?: continue
+            // A channel's uploads playlist is its id with "UC" swapped for "UU"; "UULF" is the same
+            // without Shorts (or live streams). Not every channel has the second: then sort them out after.
+            val o = runCatching { get("$API/playlistItems?part=snippet&maxResults=$perChannel&playlistId=UULF${ch.drop(2)}", null, access) }.getOrNull()
+                ?: runCatching { get("$API/playlistItems?part=snippet&maxResults=$perChannel&playlistId=UU${ch.drop(2)}", null, access) }.getOrNull()
+                    ?.also { maybeShorts = true }
+                ?: continue
             val items = o.optJSONArray("items") ?: continue
             for (i in 0 until items.length()) {
                 val sn = items.optJSONObject(i)?.optJSONObject("snippet") ?: continue
@@ -67,7 +104,8 @@ object YouTube {
                 video(id, sn)?.let { out += it }
             }
         }
-        return out.distinctBy { it.id }.sortedByDescending { it.publishedAt }
+        val all = out.distinctBy { it.id }.sortedByDescending { it.publishedAt }
+        return if (maybeShorts) withoutShorts(all, null, access) else all.filterNot { "#short" in it.title.lowercase() }
     }
 
     fun toJson(list: List<Video>): String {

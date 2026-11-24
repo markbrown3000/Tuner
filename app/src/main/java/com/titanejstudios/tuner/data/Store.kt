@@ -723,10 +723,7 @@ class Store(context: Context) {
     // YouTube sign-ins are per profile. (The first, from before that, belongs to the main profile.)
     private fun ytKey(name: String, profileId: String): String {
         if (profileId == MAIN_PROFILE && !prefs.contains("${name}_$profileId") && prefs.contains(name)) {
-            when (name) {
-                "yt_feed_at" -> prefs.edit().putLong("${name}_$profileId", prefs.getLong(name, 0L)).remove(name).apply()
-                else -> prefs.edit().putString("${name}_$profileId", prefs.getString(name, null)).remove(name).apply()
-            }
+            prefs.edit().putString("${name}_$profileId", prefs.getString(name, null)).remove(name).apply()
         }
         return "${name}_$profileId"
     }
@@ -734,12 +731,12 @@ class Store(context: Context) {
     fun saveYtRefresh(profileId: String, value: String?) = prefs.edit().putString(ytKey("yt_refresh", profileId), value).apply()
     fun ytEmailOf(profileId: String): String? = prefs.getString(ytKey("yt_email", profileId), null)
     fun saveYtEmail(profileId: String, value: String?) = prefs.edit().putString(ytKey("yt_email", profileId), value).apply()
-    fun ytFeedOf(profileId: String): String? = prefs.getString(ytKey("yt_feed", profileId), null)
+    // ("yt_feed2": the subscriptions row without Shorts – older saved rows had them.)
+    fun ytFeedOf(profileId: String): String? = prefs.getString("yt_feed2_$profileId", null)
     fun saveYtFeed(profileId: String, value: String?) {
-        val at = ytKey("yt_feed_at", profileId)
-        prefs.edit().putString(ytKey("yt_feed", profileId), value).putLong(at, System.currentTimeMillis()).apply()
+        prefs.edit().putString("yt_feed2_$profileId", value).putLong("yt_feed2_at_$profileId", System.currentTimeMillis()).apply()
     }
-    fun ytFeedAtOf(profileId: String): Long = prefs.getLong(ytKey("yt_feed_at", profileId), 0L)
+    fun ytFeedAtOf(profileId: String): Long = prefs.getLong("yt_feed2_at_$profileId", 0L)
 
     // ---- Downloads (phones) ----
     var downloadsJson: String
