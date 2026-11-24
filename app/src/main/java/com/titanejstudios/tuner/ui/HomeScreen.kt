@@ -139,7 +139,7 @@ private fun channelCard(vm: TunerViewModel, c: Channel, list: List<Channel>, now
     val (cur, next) = vm.nowNext(c.id, now)
     val score = cur?.let { vm.liveScoreFor(it) }
     val yourTeam = cur != null && followed.any { com.titanejstudios.tuner.data.SportFollow.mentions(cur.title, it) }
-    val sport = cur != null && com.titanejstudios.tuner.data.Sports.classify(cur) != null
+    val sport = cur != null && com.titanejstudios.tuner.data.Sports.classify(cur, c.group) != null
     val tag = when {
         score != null -> "LIVE  $score"
         sport && cur != null && com.titanejstudios.tuner.data.Sports.looksLive(cur) -> "LIVE"

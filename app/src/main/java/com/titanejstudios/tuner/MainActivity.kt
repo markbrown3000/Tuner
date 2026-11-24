@@ -260,6 +260,7 @@ private fun TunerApp(vm: TunerViewModel) {
                 Screen.Cloud -> com.titanejstudios.tuner.ui.CloudScreen(vm)
                 Screen.YouTube -> com.titanejstudios.tuner.ui.YouTubeScreen(vm)
                 Screen.YouTubePlayer -> com.titanejstudios.tuner.ui.YouTubePlayerScreen(vm)
+                Screen.YouTubeList -> com.titanejstudios.tuner.ui.YouTubeListScreen(vm)
             }
         }
         if (phone && !watching && vm.screen in PhoneTabs) PhoneBottomBar(vm)

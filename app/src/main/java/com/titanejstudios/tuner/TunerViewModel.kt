@@ -107,7 +107,7 @@ enum class Screen {
     Home, Channels, Guide, Player, Search, Movies, Series, SeriesDetail, Settings, SourceEdit, Manage,
     ProfilePicker, ProfileEdit, PhoneSetup, EpgMap, Recordings, MultiView, Sports, Apps, Log,
     WhatsOn, Stats, ShareTv, Catchup, Categories, Plex, Football, Update, SelfTest, PlexLibrary, PlexShow, HomeRows, Languages, Recommendations, Vpn,
-    Link, Downloads, Teams, Remote, Christmas, Cloud, YouTube, YouTubePlayer,
+    Link, Downloads, Teams, Remote, Christmas, Cloud, YouTube, YouTubePlayer, YouTubeList,
 }
 
 const val FAVOURITES = "★ Favourites"
@@ -407,12 +407,88 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         if (youTubeApprovedOnly) youtube.loadApproved(activeProfile.ytChannelIds, force) else {
             youtube.loadFeed(force)
             youtube.loadRecommended(force)
+            youtube.loadMine(force)
         }
     }
 
     /** The YouTube player closed: remember how far this profile got (and learn what it likes). */
     fun youTubeStopped(v: com.titanejstudios.tuner.integrations.YouTube.Video, position: Float, length: Float) {
         youtube.watched(v, position, length)
+        // Carry on from here on the other TVs and phones.
+        if (position >= 15f && v.channel.isNotBlank()) {
+            link.tellOthers()
+            cloud.syncSoon()
+        }
+    }
+
+    /** The video id in a YouTube link ("youtu.be/ID", "watch?v=ID", "/shorts/ID", "/live/ID"). */
+    private fun youTubeIdIn(text: String): String? =
+        Regex("(?:youtu\\.be/|[?&]v=|/shorts/|/live/|/embed/)([A-Za-z0-9_-]{11})").find(text)?.groupValues?.get(1)
+
+    /** A shared YouTube link: on a phone linked to a TV it plays on the TV, otherwise here. */
+    private fun playSharedYouTube(id: String) {
+        viewModelScope.launch {
+            val v = youtube.lookup(id)
+            if (isPhone && link.linked) {
+                showNotice("Sending \"${v.title}\" to the TV…")
+                sendYouTubeToTv(v)
+            } else {
+                if (screen == Screen.YouTubePlayer) back()
+                playYouTube(v)
+            }
+        }
+    }
+
+    /** The hold-OK menu on a YouTube video. */
+    var ytMenu by mutableStateOf<com.titanejstudios.tuner.integrations.YouTube.Video?>(null); private set
+    var ytMenuRecommended by mutableStateOf(false); private set
+
+    fun openYouTubeMenu(v: com.titanejstudios.tuner.integrations.YouTube.Video, recommended: Boolean) {
+        ytMenuRecommended = recommended
+        ytMenu = v
+    }
+
+    fun closeYouTubeMenu() {
+        ytMenu = null
+    }
+
+    /** From the phone: play this YouTube video on the TV. */
+    fun sendYouTubeToTv(v: com.titanejstudios.tuner.integrations.YouTube.Video) {
+        watchOnTv(
+            JSONObject().put("kind", "youtube").put("id", v.id).put("title", v.title).put("channel", v.channel)
+                .put("thumb", v.thumb).put("cid", v.channelId).put("pos", youtube.resumeAt(v.id).toDouble())
+        )
+    }
+
+    fun toggleYouTubeLater(v: com.titanejstudios.tuner.integrations.YouTube.Video) {
+        val adding = !youtube.isLater(v.id)
+        youtube.toggleLater(v)
+        youtube.refreshLaterPage()
+        showNotice(if (adding) "Added to Watch later" else "Removed from Watch later")
+        link.tellOthers()
+        cloud.syncSoon()
+    }
+
+    /** A channel's page (newest videos, or most popular). Kids on "only channels I pick" stay on theirs. */
+    fun openYouTubeChannel(v: com.titanejstudios.tuner.integrations.YouTube.Video) {
+        val cid = v.channelId
+        if (youTubeApprovedOnly || cid == null) {
+            if (cid == null && !youTubeApprovedOnly) moreFromYouTubeChannel(v)
+            return
+        }
+        youtube.openChannel(cid, v.channel, activeProfile.kids)
+        if (screen == Screen.YouTubePlayer) back()
+        navigate(Screen.YouTubeList)
+    }
+
+    fun openYouTubePlaylist(p: com.titanejstudios.tuner.integrations.YouTube.Playlist) {
+        youtube.openPlaylist(p)
+        navigate(Screen.YouTubeList)
+    }
+
+    fun openYouTubeLater() {
+        youtube.openLater()
+        navigate(Screen.YouTubeList)
     }
 
     /** The real YouTube Kids app, if it's on this device (it keeps its own kids' profiles and parent settings). */
@@ -3893,6 +3969,17 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
             Intent.ACTION_SEARCH,
             "com.google.android.gms.actions.SEARCH_ACTION",
         )
+        // A YouTube link shared to Flicker (from the YouTube app's Share button, say).
+        if (intent.action == Intent.ACTION_SEND) {
+            val text = intent.getStringExtra(Intent.EXTRA_TEXT).orEmpty()
+            val id = youTubeIdIn(text)
+            if (id == null) {
+                showNotice("Flicker can play YouTube links shared to it – that wasn't one")
+                return
+            }
+            playSharedYouTube(id)
+            return
+        }
         if (intent.action in voiceActions) {
             val q = intent.getStringExtra(android.app.SearchManager.QUERY) ?: intent.getStringExtra("query") ?: return
             pendingLink = Uri.Builder().scheme("tuner").authority("voice").appendQueryParameter("q", q).build()
@@ -4634,8 +4721,17 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
 
     /** Another linked device sent something to play here. */
     private fun handleLinkPlay(from: String, j: JSONObject): Boolean {
-        if (allChannels.isEmpty() && j.optString("kind") != "vod") return false
+        if (allChannels.isEmpty() && j.optString("kind") != "vod" && j.optString("kind") != "youtube") return false
         val ok = when (j.optString("kind")) {
+            "youtube" -> {
+                fun str(k: String) = j.optString(k).takeIf { it.isNotBlank() && it != "null" }
+                val id = str("id") ?: return false
+                val v = com.titanejstudios.tuner.integrations.YouTube.Video(id, str("title") ?: "YouTube video", str("channel") ?: "", str("thumb"), 0L, str("cid"))
+                if (!youTubeAllowed) return false
+                if (screen == Screen.YouTubePlayer) back()
+                playYouTube(v)
+                true
+            }
             "live" -> {
                 val ch = linkedChannel(j) ?: return false
                 resetTo(Screen.Home)
@@ -4723,7 +4819,9 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         }
         if (com.titanejstudios.tuner.integrations.LinkSync.INTROS in changed) introEnds = store.introEnds
         val lists = changed - com.titanejstudios.tuner.integrations.LinkSync.INTROS - com.titanejstudios.tuner.integrations.LinkSync.TEAMS -
-            com.titanejstudios.tuner.integrations.LinkSync.STARTED - com.titanejstudios.tuner.integrations.LinkSync.PROFILES
+            com.titanejstudios.tuner.integrations.LinkSync.STARTED - com.titanejstudios.tuner.integrations.LinkSync.PROFILES -
+            com.titanejstudios.tuner.integrations.LinkSync.YOUTUBE
+        if (com.titanejstudios.tuner.integrations.LinkSync.YOUTUBE in changed) youtube.reload()
         if (lists.isNotEmpty()) applySyncedChanges(lists)
         if (com.titanejstudios.tuner.integrations.LinkSync.STARTED in changed) started = store.started(activeProfile.id)
         if (com.titanejstudios.tuner.integrations.LinkSync.TEAMS in changed) {

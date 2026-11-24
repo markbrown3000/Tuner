@@ -16,6 +16,7 @@ object LinkSync {
     const val TEAMS = "teams"
     const val STARTED = "started"
     const val PROFILES = "profiles"
+    const val YOUTUBE = "youtube"
     private const val DONE = "done"
 
     /** Remembers that [contentId] was finished (keeps the newest 200). */
@@ -50,6 +51,17 @@ object LinkSync {
             if (keys.isNotEmpty()) started.put(p.name.lowercase().trim(), JSONArray(keys.toList()))
         }
         sections.put(STARTED, started)
+        // Each profile's YouTube in Flicker: what it watched (newest 60) and its Watch later list.
+        val yt = JSONObject()
+        for (p in store.profiles) {
+            val h = runCatching { JSONArray(store.ytHistoryOf(p.id) ?: "[]") }.getOrDefault(JSONArray())
+            val newest = JSONArray()
+            for (i in 0 until minOf(60, h.length())) newest.put(h.get(i))
+            val l = runCatching { JSONArray(store.ytData("later", p.id) ?: "[]") }.getOrDefault(JSONArray())
+            if (newest.length() == 0 && l.length() == 0) continue
+            yt.put(p.name.lowercase().trim(), JSONObject().put("h", newest).put("l", l).put("lat", store.ytData("later_at", p.id)?.toLongOrNull() ?: 0L))
+        }
+        sections.put(YOUTUBE, yt)
         sections.put(
             TEAMS,
             JSONObject().put("at", store.syncStamp(TEAMS)).put("names", JSONArray(store.footballTeams.toList()))
@@ -245,6 +257,41 @@ object LinkSync {
                 if (!mine.containsAll(theirs)) {
                     store.setStarted(p.id, (mine + theirs).toList().takeLast(300).toSet())
                     changed += STARTED
+                }
+            }
+        }
+
+        // YouTube: history merged video by video (the newer viewing wins); Watch later: the newer list.
+        sections.optJSONObject(YOUTUBE)?.let { o ->
+            for (p in store.profiles) {
+                val theirs = o.optJSONObject(p.name.lowercase().trim()) ?: continue
+                val mineH = runCatching { JSONArray(store.ytHistoryOf(p.id) ?: "[]") }.getOrDefault(JSONArray())
+                val byId = LinkedHashMap<String, JSONObject>()
+                fun add(a: JSONArray?) {
+                    a ?: return
+                    for (i in 0 until a.length()) {
+                        val e = a.optJSONObject(i) ?: continue
+                        val id = e.optJSONObject("v")?.optString("id") ?: continue
+                        val have = byId[id]
+                        if (have == null || e.optLong("at") > have.optLong("at")) byId[id] = e
+                    }
+                }
+                add(mineH)
+                val before = byId.mapValues { it.value.optLong("at") }
+                add(theirs.optJSONArray("h"))
+                if (byId.mapValues { it.value.optLong("at") } != before) {
+                    val merged = JSONArray()
+                    byId.values.sortedByDescending { it.optLong("at") }.take(300).forEach { merged.put(it) }
+                    store.saveYtHistory(p.id, merged.toString())
+                    changed += YOUTUBE
+                }
+                val theirLaterAt = theirs.optLong("lat")
+                val mineLaterAt = store.ytData("later_at", p.id)?.toLongOrNull() ?: 0L
+                val theirLater = theirs.optJSONArray("l")
+                if (theirLater != null && theirLaterAt > mineLaterAt) {
+                    store.saveYtData("later", p.id, theirLater.toString())
+                    store.saveYtData("later_at", p.id, theirLaterAt.toString())
+                    changed += YOUTUBE
                 }
             }
         }

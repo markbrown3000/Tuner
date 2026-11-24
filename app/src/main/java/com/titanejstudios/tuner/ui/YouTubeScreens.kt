@@ -12,9 +12,11 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -107,11 +109,21 @@ fun YouTubePlayerScreen(vm: TunerViewModel) {
         if (playing) p.pause() else p.play()
         poke()
     }
+    // Chapters (from the description) and sponsor parts to skip (SponsorBlock).
+    var chapters by remember(video.id) { mutableStateOf<List<YouTube.Chapter>>(emptyList()) }
+    var segments by remember(video.id) { mutableStateOf<List<YouTube.Segment>>(emptyList()) }
+    val skipped = remember(video.id) { HashSet<Float>() }
+    LaunchedEffect(video.id) {
+        val (c, sg) = vm.youtube.extras(video.id)
+        chapters = c
+        segments = sg
+    }
+    fun chapterAt(t: Float): Int = chapters.indexOfLast { it.start <= t + 0.5f }
     // ▼ (or the ⋯ button on a phone): the options row along the bottom.
     var optionsOpen by remember { mutableStateOf(false) }
     val optionsFocus = remember { FocusRequester() }
     var speed by remember(video.id) { mutableFloatStateOf(1f) }
-    fun setSpeed(x: Float) {
+    fun changeSpeed(x: Float) {
         speed = x
         if (plainPage) js("v.playbackRate=$x;return '';")
         else player?.setPlaybackRate(
@@ -123,12 +135,38 @@ fun YouTubePlayerScreen(vm: TunerViewModel) {
             }
         )
     }
-    fun skip(seconds: Float) {
-        val to = (position + seconds).coerceIn(0f, if (length > 0f) length - 1f else Float.MAX_VALUE)
+    fun seekTo(to0: Float) {
+        val to = to0.coerceIn(0f, if (length > 0f) length - 1f else Float.MAX_VALUE)
         if (plainPage) js("v.currentTime=$to;return '';")
         else (player ?: return).seekTo(to)
         position = to
         poke()
+    }
+    fun skip(seconds: Float) = seekTo(position + seconds)
+    /** Next or previous chapter (back to this chapter's start if it's more than 3 seconds in). */
+    fun chapterJump(dir: Int) {
+        if (chapters.isEmpty()) return
+        val i = chapterAt(position)
+        val target = when {
+            dir > 0 -> chapters.getOrNull(i + 1)
+            i >= 0 && position - chapters[i].start > 3f -> chapters[i]
+            else -> chapters.getOrNull(i - 1) ?: chapters.first()
+        } ?: return
+        seekTo(target.start)
+    }
+    // Sponsor parts: jump past each one once (going back into it again is allowed).
+    LaunchedEffect(position, segments) {
+        if (!vm.youtube.skipSponsors) return@LaunchedEffect
+        val seg = segments.firstOrNull { position >= it.start && position < it.end - 0.5f && it.start !in skipped } ?: return@LaunchedEffect
+        skipped += seg.start
+        seekTo(seg.end)
+        vm.showNotice(
+            when (seg.category) {
+                "selfpromo" -> "⏭ Skipped self-promotion"
+                "interaction" -> "⏭ Skipped a subscribe reminder"
+                else -> "⏭ Skipped the sponsor"
+            }
+        )
     }
 
     // Part-watched before: carry on from there. (Turning subtitles on or off restarts the
@@ -252,12 +290,23 @@ fun YouTubePlayerScreen(vm: TunerViewModel) {
                         if (down) vm.playNextYouTube()
                         true
                     }
+                    // CH+ / CH−: next / previous chapter.
+                    AndroidKey.KEYCODE_CHANNEL_UP, AndroidKey.KEYCODE_PAGE_UP -> {
+                        if (down) chapterJump(1)
+                        true
+                    }
+                    AndroidKey.KEYCODE_CHANNEL_DOWN, AndroidKey.KEYCODE_PAGE_DOWN -> {
+                        if (down) chapterJump(-1)
+                        true
+                    }
                     else -> false
                 }
             }
             .focusable(),
     ) {
-        if (!plainPage) AndroidView(factory = { view }, modifier = Modifier.fillMaxSize())
+        // key(view): a new player (subtitles switched, or the next video) must replace the old one
+        // on screen – AndroidView otherwise keeps showing the first, released one (a blank screen).
+        if (!plainPage) androidx.compose.runtime.key(view) { AndroidView(factory = { view }, modifier = Modifier.fillMaxSize()) }
         else PlainYouTubePage(
             video.id,
             startAt,
@@ -324,12 +373,23 @@ fun YouTubePlayerScreen(vm: TunerViewModel) {
             ) {
                 Text(video.title, color = Color.White, fontSize = if (vm.isPhone) 17.sp else 22.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 if (video.channel.isNotBlank()) Text(video.channel, color = Color(0xFFCCCCCC), fontSize = 14.sp)
+                chapterAt(position).takeIf { it >= 0 }?.let { i ->
+                    Text("Chapter ${i + 1} of ${chapters.size}: ${chapters[i].title}", color = Color(0xFFFFD54F), fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
                 Spacer(Modifier.height(8.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(if (player == null) "Loading…" else if (playing) "⏸" else "▶", color = Color.White, fontSize = 18.sp)
                     Spacer(Modifier.width(12.dp))
                     Text(clock((position * 1000).toLong()), color = Color.White, fontSize = 13.sp)
-                    ProgressBar(if (length > 0f) (position / length).coerceIn(0f, 1f) else 0f, Modifier.weight(1f).padding(horizontal = 12.dp), color = Color(0xFFFF3B30))
+                    androidx.compose.foundation.layout.BoxWithConstraints(Modifier.weight(1f).padding(horizontal = 12.dp), contentAlignment = Alignment.CenterStart) {
+                        ProgressBar(if (length > 0f) (position / length).coerceIn(0f, 1f) else 0f, Modifier.fillMaxWidth(), color = Color(0xFFFF3B30))
+                        // Chapter marks along the bar.
+                        if (length > 0f) chapters.drop(1).forEach { c ->
+                            Box(
+                                Modifier.offset(x = maxWidth * (c.start / length).coerceIn(0f, 1f)).width(2.dp).height(10.dp).background(Color(0xFFFFD54F))
+                            )
+                        }
+                    }
                     Text(clock((length * 1000).toLong()), color = Color.White, fontSize = 13.sp)
                 }
                 if (optionsOpen || vm.isPhone) {
@@ -339,26 +399,33 @@ fun YouTubePlayerScreen(vm: TunerViewModel) {
                         item { PillButton(if (playing) "⏸ Pause" else "▶ Play", { toggle() }, Modifier.focusRequester(optionsFocus), compact = true) }
                         item { PillButton("⏪ 10 s", { skip(-10f) }, compact = true) }
                         item { PillButton("⏩ 10 s", { skip(10f) }, compact = true) }
-                        item { PillButton("↺ Start again", { skip(-position) }, compact = true) }
+                        item { PillButton("↺ Start again", { seekTo(0f) }, compact = true) }
+                        if (chapters.isNotEmpty()) {
+                            item { PillButton("⏮ Chapter", { chapterJump(-1) }, compact = true) }
+                            item { PillButton("⏭ Chapter", { chapterJump(1) }, compact = true) }
+                        }
+                        item { PillButton(if (vm.youtube.isLater(video.id)) "🕘 In Watch later" else "🕘 Watch later", { vm.toggleYouTubeLater(video) }, selected = vm.youtube.isLater(video.id), compact = true) }
+                        item { PillButton(if (vm.youtube.skipSponsors) "Skip sponsors: on" else "Skip sponsors: off", { vm.youtube.toggleSkipSponsors() }, selected = vm.youtube.skipSponsors, compact = true) }
                         item { PillButton(if (captions) "CC Subtitles: on" else "CC Subtitles: off", { toggleCaptions() }, selected = captions, compact = true) }
                         item {
                             PillButton("Speed ${if (speed == 1f) "1" else speed.toString().removeSuffix(".0")}×", {
                                 val choices = listOf(1f, 1.5f, 2f, 0.5f)
-                                setSpeed(choices[(choices.indexOf(speed) + 1).mod(choices.size)])
+                                changeSpeed(choices[(choices.indexOf(speed) + 1).mod(choices.size)])
                                 poke()
                             }, compact = true)
                         }
                         if (next != null) item { PillButton("⏭ Next: " + next.title.take(28), { vm.playNextYouTube() }, compact = true) }
                         if (!vm.youTubeApprovedOnly && video.channel.isNotBlank()) item {
-                            PillButton("More from ${video.channel.take(24)}", { vm.moreFromYouTubeChannel(video) }, compact = true)
+                            PillButton("More from ${video.channel.take(24)}", { vm.openYouTubeChannel(video) }, compact = true)
                         }
+                        if (vm.isPhone && vm.link.linked) item { PillButton("📺 Watch on TV", { vm.sendYouTubeToTv(video) }, compact = true) }
                         if (!vm.activeProfile.kids) item { PillButton("Open in YouTube app", { vm.watchInYouTubeApp(video.id) }, compact = true) }
                     }
                 }
                 Text(
                     if (vm.isPhone) "Tap to pause · double-tap a side to skip 10 s"
                     else if (optionsOpen) "BACK hides the options"
-                    else "OK play/pause  ·  ◀ ▶ 10 s  ·  ▼ options  ·  BACK close",
+                    else "OK play/pause  ·  ◀ ▶ 10 s" + (if (chapters.isNotEmpty()) "  ·  CH+/− chapters" else "") + "  ·  ▼ options  ·  BACK close",
                     color = Color(0xFF9A9A9A), fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp),
                 )
             }
@@ -422,7 +489,7 @@ private fun PlainYouTubePage(
             }
         }
     }
-    AndroidView(factory = { page }, modifier = Modifier.fillMaxSize())
+    androidx.compose.runtime.key(page) { AndroidView(factory = { page }, modifier = Modifier.fillMaxSize()) }
 }
 
 // ---------------- The YouTube section ----------------
@@ -462,6 +529,7 @@ fun YouTubeScreen(vm: TunerViewModel) {
                 Spacer(Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     PillButton(if (yt.query.isBlank()) "🔍 Search YouTube" else "🔍 ${yt.query}", { typing = true }, Modifier.focusRequester(first), compact = true)
+                    VoiceButton(vm) { yt.search(it, kids) }
                     if (yt.query.isNotBlank() || yt.results.isNotEmpty()) PillButton("✕ Clear search", { yt.clearSearch() }, compact = true)
                     run {
                         when {
@@ -493,30 +561,73 @@ fun YouTubeScreen(vm: TunerViewModel) {
                 }
             }
         }
+        // Filters, and recent searches when nothing's searched.
+        item(span = { GridItemSpan(maxLineSpan) }) {
+            androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                val filters = listOf("" to "Any", "long" to "Long videos", "live" to "● Live now", "week" to "This week")
+                items(filters.size, key = { "flt" + filters[it].first }) { i ->
+                    val (f, label) = filters[i]
+                    PillButton(label, { yt.setFilterAndSearch(f) }, selected = yt.searchFilter == f, compact = true)
+                }
+                if (yt.query.isBlank() && yt.recentSearches.isNotEmpty()) {
+                    items(yt.recentSearches.size, key = { "rs" + yt.recentSearches[it] }) { i ->
+                        val q = yt.recentSearches[i]
+                        PillButton("🕘 $q", { yt.search(q, kids) }, compact = true)
+                    }
+                    item(key = "rs-clear") { PillButton("Clear history", { yt.clearRecentSearches() }, compact = true) }
+                }
+            }
+        }
         if (yt.searching) item(span = { GridItemSpan(maxLineSpan) }) { Header("Searching…", narrow) }
         if (yt.results.isNotEmpty()) {
             item(span = { GridItemSpan(maxLineSpan) }) { Header("Results for \"${yt.query}\"", narrow) }
             items(yt.results.size, key = { "r" + yt.results[it].id }) { i -> VideoCard(vm, yt.results[i], narrow, yt.results) }
         }
+        val browsing = yt.results.isEmpty()
         val carryOn = yt.history.filter { it.unfinished }.take(8)
-        if (carryOn.isNotEmpty() && yt.results.isEmpty()) {
+        if (carryOn.isNotEmpty() && browsing) {
+            val vids = carryOn.map { it.video }
             item(span = { GridItemSpan(maxLineSpan) }) { Header("Carry on watching", narrow) }
-            items(carryOn.size, key = { "h" + carryOn[it].video.id }) { i -> VideoCard(vm, carryOn[i].video, narrow) }
+            items(vids.size, key = { "h" + vids[it].id }) { i -> VideoCard(vm, vids[i], narrow, vids) }
         }
-        if (yt.recommended.isNotEmpty() && yt.results.isEmpty()) {
+        if (yt.later.isNotEmpty() && browsing) {
+            item(span = { GridItemSpan(maxLineSpan) }) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Header("Watch later (${yt.later.size})", narrow)
+                    PillButton("▶ Play all", { vm.playYouTube(yt.later.first(), yt.later) }, compact = true)
+                    PillButton("See all", { vm.openYouTubeLater() }, compact = true)
+                }
+            }
+            val vids = yt.later.take(8)
+            items(vids.size, key = { "l" + vids[it].id }) { i -> VideoCard(vm, vids[i], narrow, yt.later) }
+        }
+        if (yt.recommended.isNotEmpty() && browsing) {
             item(span = { GridItemSpan(maxLineSpan) }) { Header("Recommended for you", narrow) }
-            items(yt.recommended.size, key = { "p" + yt.recommended[it].id }) { i -> VideoCard(vm, yt.recommended[i], narrow, yt.recommended) }
+            items(yt.recommended.size, key = { "p" + yt.recommended[it].id }) { i -> VideoCard(vm, yt.recommended[i], narrow, yt.recommended, recommended = true) }
         }
-        if (yt.signedIn) {
+        if (yt.signedIn && browsing) {
             item(span = { GridItemSpan(maxLineSpan) }) {
                 Header(if (yt.feed.isEmpty() && yt.loadingFeed) "Loading your subscriptions…" else "From your subscriptions", narrow)
             }
             items(yt.feed.size, key = { "f" + yt.feed[it].id }) { i -> VideoCard(vm, yt.feed[i], narrow, yt.feed) }
         }
-        if (!yt.signedIn && yt.results.isEmpty()) {
+        if (yt.playlists.isNotEmpty() && browsing) {
+            item(span = { GridItemSpan(maxLineSpan) }) { Header("Your playlists", narrow) }
+            items(yt.playlists.size, key = { "pl" + yt.playlists[it].id }) { i -> PlaylistCard(vm, yt.playlists[i], narrow) }
+        }
+        if (yt.liked.isNotEmpty() && browsing) {
+            item(span = { GridItemSpan(maxLineSpan) }) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Header("Liked videos", narrow)
+                    PillButton("▶ Play all", { vm.playYouTube(yt.liked.first(), yt.liked) }, compact = true)
+                }
+            }
+            items(yt.liked.size, key = { "lk" + yt.liked[it].id }) { i -> VideoCard(vm, yt.liked[i], narrow, yt.liked) }
+        }
+        if (!yt.signedIn && browsing) {
             item(span = { GridItemSpan(maxLineSpan) }) {
                 Text(
-                    "Search for anything, or sign in to YouTube to see the latest videos from the channels you subscribe to.",
+                    "Search for anything, or sign in to YouTube to see your subscriptions, liked videos and playlists. Hold OK on a video for Watch later, its channel and more.",
                     color = TunerColors.TextSecondary, fontSize = 15.sp,
                 )
             }
@@ -535,6 +646,7 @@ fun YouTubeScreen(vm: TunerViewModel) {
             yt.search(it, kids)
         }
     }
+    YouTubeVideoMenu(vm)
 }
 
 /**
@@ -579,6 +691,7 @@ private fun KidsApprovedYouTube(vm: TunerViewModel, first: FocusRequester, narro
             else -> items(videos.size, key = { "v" + videos[it].id }) { i -> VideoCard(vm, videos[i], narrow, videos) }
         }
     }
+    YouTubeVideoMenu(vm)
 }
 
 /**
@@ -657,15 +770,37 @@ private fun Header(text: String, narrow: Boolean) {
 }
 
 @Composable
-private fun VideoCard(vm: TunerViewModel, v: YouTube.Video, narrow: Boolean, queue: List<YouTube.Video> = emptyList()) {
+private fun VideoCard(vm: TunerViewModel, v: YouTube.Video, narrow: Boolean, queue: List<YouTube.Video> = emptyList(), recommended: Boolean = false) {
+    val watched = vm.youtube.history.firstOrNull { it.video.id == v.id }
     FocusSurface(
         onClick = { vm.playYouTube(v, queue) },
+        onLongClick = { vm.openYouTubeMenu(v, recommended) },
         baseColor = TunerColors.Panel,
         modifier = Modifier.padding(horizontal = if (narrow) 4.dp else 0.dp),
     ) { focused ->
         Column(Modifier.fillMaxWidth().padding(if (focused) 4.dp else 0.dp)) {
             Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(8.dp)).background(Color(0xFF0B0E12))) {
                 if (v.thumb != null) AsyncImage(model = v.thumb, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                // LIVE / PREMIERE, or the length, bottom right (like YouTube).
+                val corner = when (v.live) {
+                    "live" -> "● LIVE"
+                    "upcoming" -> "PREMIERE"
+                    else -> if (v.seconds > 0) clock(v.seconds * 1000L) else null
+                }
+                corner?.let {
+                    Text(
+                        it, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                        modifier = Modifier.align(Alignment.BottomEnd).padding(6.dp).clip(RoundedCornerShape(4.dp))
+                            .background(if (v.live == "live") Color(0xFFE5243B) else Color(0xCC000000)).padding(horizontal = 5.dp, vertical = 1.dp),
+                    )
+                }
+                if (vm.youtube.isLater(v.id)) Text("🕘", fontSize = 14.sp, modifier = Modifier.align(Alignment.TopEnd).padding(6.dp))
+                // Watched part way: a red bar along the bottom.
+                if (watched != null && watched.length > 0f) {
+                    Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(4.dp).background(Color(0x66FFFFFF))) {
+                        Box(Modifier.fillMaxWidth((watched.position / watched.length).coerceIn(0.03f, 1f)).fillMaxHeight().background(Color(0xFFFF0033)))
+                    }
+                }
             }
             Text(v.title, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
             Text(
@@ -675,6 +810,103 @@ private fun VideoCard(vm: TunerViewModel, v: YouTube.Video, narrow: Boolean, que
             )
         }
     }
+}
+
+@Composable
+private fun PlaylistCard(vm: TunerViewModel, p: YouTube.Playlist, narrow: Boolean) {
+    FocusSurface(
+        onClick = { vm.openYouTubePlaylist(p) },
+        baseColor = TunerColors.Panel,
+        modifier = Modifier.padding(horizontal = if (narrow) 4.dp else 0.dp),
+    ) { focused ->
+        Column(Modifier.fillMaxWidth().padding(if (focused) 4.dp else 0.dp)) {
+            Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(8.dp)).background(Color(0xFF0B0E12))) {
+                if (p.thumb != null) AsyncImage(model = p.thumb, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                Text(
+                    "☰ ${p.count}", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold,
+                    modifier = Modifier.align(Alignment.BottomEnd).padding(6.dp).clip(RoundedCornerShape(4.dp)).background(Color(0xCC000000)).padding(horizontal = 6.dp, vertical = 1.dp),
+                )
+            }
+            Text(p.title, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(8.dp))
+        }
+    }
+}
+
+/** 🎤: say what to search for. */
+@Composable
+private fun VoiceButton(vm: TunerViewModel, onHeard: (String) -> Unit) {
+    val voice = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()) { r ->
+        val heard = r.data?.getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
+        if (!heard.isNullOrBlank()) onHeard(heard)
+    }
+    PillButton("🎤", {
+        val intent = android.content.Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+            .putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL, android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            .putExtra(android.speech.RecognizerIntent.EXTRA_PROMPT, "What would you like to watch on YouTube?")
+        try {
+            voice.launch(intent)
+        } catch (e: android.content.ActivityNotFoundException) {
+            vm.showNotice("This device has no voice typing – press the microphone button on the remote instead")
+        }
+    }, compact = true)
+}
+
+/** Hold OK on a video: Watch later, its channel, and (for recommendations) not interested / fewer like this. */
+@Composable
+fun YouTubeVideoMenu(vm: TunerViewModel) {
+    val v = vm.ytMenu ?: return
+    val yt = vm.youtube
+    val items = buildList {
+        add(MenuItem("▶ Play") { vm.playYouTube(v) })
+        add(MenuItem(if (yt.isLater(v.id)) "Remove from Watch later" else "🕘 Watch later") { vm.toggleYouTubeLater(v) })
+        if (!vm.youTubeApprovedOnly && v.channel.isNotBlank()) add(MenuItem("Go to ${v.channel}") { vm.openYouTubeChannel(v) })
+        if (yt.history.any { it.video.id == v.id }) add(MenuItem("Remove from what I've watched") { yt.forget(v.id) })
+        if (vm.ytMenuRecommended) {
+            add(MenuItem("Not interested") { yt.notInterested(v) })
+            if (v.channelId != null) add(MenuItem("Fewer from ${v.channel}") { yt.lessFromChannel(v) })
+        }
+        if (vm.isPhone && vm.link.linked) add(MenuItem("📺 Watch on TV") { vm.sendYouTubeToTv(v) })
+    }
+    MenuDialog(v.title, items, onDismiss = { vm.closeYouTubeMenu() }, subtitle = v.channel)
+}
+
+/** A channel's videos (Newest / Most popular), one of your playlists, or Watch later. */
+@Composable
+fun YouTubeListScreen(vm: TunerViewModel) {
+    val yt = vm.youtube
+    val first = remember { FocusRequester() }
+    val narrow = narrowScreen()
+    LaunchedEffect(Unit) {
+        delay(80)
+        runCatching { first.requestFocus() }
+    }
+    val videos = yt.listVideos
+    LazyVerticalGrid(
+        columns = GridCells.Adaptive(if (narrow) 160.dp else 250.dp),
+        modifier = Modifier.fillMaxSize().skyBackground(),
+        contentPadding = PaddingValues(start = if (narrow) 10.dp else 56.dp, end = if (narrow) 10.dp else 56.dp, bottom = 24.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        item(span = { GridItemSpan(maxLineSpan) }) {
+            Column(Modifier.padding(top = if (narrow) 12.dp else 28.dp)) {
+                Text(yt.listTitle, fontSize = if (narrow) 24.sp else 30.sp, fontWeight = FontWeight.Bold, color = TunerColors.TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    PillButton("▶ Play all", { if (videos.isNotEmpty()) vm.playYouTube(videos.first(), videos) }, Modifier.focusRequester(first), compact = true)
+                    val cid = yt.listChannelId
+                    if (cid != null) {
+                        PillButton("Newest", { yt.openChannel(cid, yt.listTitle, vm.activeProfile.kids, popular = false) }, selected = !yt.listPopular, compact = true)
+                        PillButton("Most popular", { yt.openChannel(cid, yt.listTitle, vm.activeProfile.kids, popular = true) }, selected = yt.listPopular, compact = true)
+                    }
+                }
+                yt.listStatus?.let { Text(it, color = TunerColors.Gold, fontSize = 14.sp, modifier = Modifier.padding(top = 6.dp)) }
+            }
+        }
+        if (yt.listLoading) item(span = { GridItemSpan(maxLineSpan) }) { Header("Loading…", narrow) }
+        items(videos.size, key = { "v" + videos[it].id }) { i -> VideoCard(vm, videos[i], narrow, videos) }
+    }
+    YouTubeVideoMenu(vm)
 }
 
 /** The "type this code on google.com/device" panel, with the bold reminder to tick YouTube. */

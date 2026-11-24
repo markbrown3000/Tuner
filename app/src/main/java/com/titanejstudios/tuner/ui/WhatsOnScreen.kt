@@ -231,7 +231,7 @@ private fun WhatsOnSection(text: String) {
 private fun badgesFor(e: WhatsOn.Entry, now: Long): List<Pair<String, Color>> = buildList {
     val p = e.programme
     if (e.yourTeam) add("YOUR TEAM" to Color(0xFF2E9E5B))
-    if (com.titanejstudios.tuner.data.Sports.classify(p) != null && com.titanejstudios.tuner.data.Sports.looksLive(p) && p.start <= now) add("LIVE" to Color(0xFFE5243B))
+    if (com.titanejstudios.tuner.data.Sports.classify(p, e.channel.group) != null && com.titanejstudios.tuner.data.Sports.looksLive(p) && p.start <= now) add("LIVE" to Color(0xFFE5243B))
     if (p.isPremiere) add("PREMIERE" to Color(0xFF8E44AD))
     else if (p.isNew) add("NEW" to Color(0xFF1E88E5))
     if (p.isFinal) add("FINAL" to Color(0xFFD35400))

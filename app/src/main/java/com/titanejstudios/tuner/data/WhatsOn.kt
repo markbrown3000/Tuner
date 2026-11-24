@@ -146,7 +146,7 @@ object WhatsOn {
                     if (e.yourTeam) score += 20.0
                     if (e.favourite) score += 3.0
                     if (p.isNew || p.isPremiere) score += 1.5
-                    if (Sports.classify(p) != null && Sports.looksLive(p)) score += 1.0
+                    if (Sports.classify(p, c.group) != null && Sports.looksLive(p)) score += 1.0
                     main += Entry(e.channel, e.programme, e.next, e.alsoOn, why, e.yourTeam, e.favourite) to score
                 }
             }

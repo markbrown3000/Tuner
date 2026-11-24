@@ -44,7 +44,7 @@ object SportFollow {
             for (p in epg[c.id].orEmpty()) {
                 if (p.start < now - 10 * 60_000L || p.start > until) continue
                 if (teams.none { mentions(p.title, it) }) continue
-                if (Sports.classify(p) == null || !Sports.looksLive(p)) continue
+                if (Sports.classify(p, c.group) == null || !Sports.looksLive(p)) continue
                 best.putIfAbsent(keyFor(p), Match(c, p))
             }
         }

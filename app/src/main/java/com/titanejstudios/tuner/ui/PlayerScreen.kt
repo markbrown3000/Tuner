@@ -967,7 +967,7 @@ private fun InfoBanner(vm: TunerViewModel, channel: Channel, modifier: Modifier,
         if (vm.catchupVersion(channel) != null) add("↺ CATCH-UP")
         if (current != null && vm.recordingFor(channel, current) != null) add("● REC")
     }
-    val live = current != null && (score != null || (com.titanejstudios.tuner.data.Sports.classify(current) != null && com.titanejstudios.tuner.data.Sports.looksLive(current)))
+    val live = current != null && (score != null || (com.titanejstudios.tuner.data.Sports.classify(current, channel.group) != null && com.titanejstudios.tuner.data.Sports.looksLive(current)))
     Row(
         modifier
             .fillMaxWidth()

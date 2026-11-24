@@ -107,7 +107,7 @@ class YouTubeFeature(private val store: Store, private val scope: CoroutineScope
             channelScore[cid] = (channelScore[cid] ?: 0.0) + w.plays * (if (w.length > 0f) (w.position / w.length).coerceIn(0.2f, 1f) else 0.5f) / (1.0 + ageDays / 14.0)
             channelName[cid] = w.video.channel
         }
-        val topChannels = channelScore.entries.sortedByDescending { it.value }.take(8).map { it.key }
+        val topChannels = channelScore.entries.filter { it.key !in blocked }.sortedByDescending { it.value }.take(8).map { it.key }
         // A search on the latest few things watched, by their channel names and a title word or two.
         val queries = history.take(12).map { it.video.channel }.groupingBy { it }.eachCount().entries.sortedByDescending { it.value }.take(2).map { it.key }
         loadingRecs = true
@@ -131,7 +131,7 @@ class YouTubeFeature(private val store: Store, private val scope: CoroutineScope
                         repeat(2) { if (i < a.size) out += a[i++] }
                         if (j < b.size) out += b[j++]
                     }
-                    out.distinctBy { it.id }.take(40)
+                    out.distinctBy { it.id }.filter { keep(it) }.take(40)
                 }
             }
             loadingRecs = false
@@ -167,9 +167,198 @@ class YouTubeFeature(private val store: Store, private val scope: CoroutineScope
         email = store.ytEmailOf(pid)
         feed = YouTube.fromJson(store.ytFeedOf(pid))
         history = loadHistory(pid)
-        recommended = YouTube.fromJson(store.ytRecsOf(pid))
+        loadLists()
+        recommended = YouTube.fromJson(store.ytRecsOf(pid)).filter { keep(it) }
         results = emptyList()
         query = ""
+        liked = emptyList()
+        playlists = emptyList()
+        mineAt = 0L
+    }
+
+    /** Lists synced from another device: read them again. */
+    fun reload() {
+        history = loadHistory(pid)
+        loadLists()
+        recommended = recommended.filter { keep(it) }
+    }
+
+    // ---------------- Watch later, "not interested", recent searches (per profile) ----------------
+
+    var later by mutableStateOf<List<YouTube.Video>>(emptyList()); private set
+    private var hidden: Set<String> = emptySet()
+    private var blocked: Set<String> = emptySet()
+    var recentSearches by mutableStateOf<List<String>>(emptyList()); private set
+
+    init {
+        loadLists()
+    }
+
+    private fun strings(kind: String): List<String> = runCatching {
+        val a = org.json.JSONArray(store.ytData(kind, pid) ?: "[]")
+        (0 until a.length()).map { a.getString(it) }
+    }.getOrDefault(emptyList())
+
+    private fun saveStrings(kind: String, list: Collection<String>) = store.saveYtData(kind, pid, org.json.JSONArray(list.toList()).toString())
+
+    private fun loadLists() {
+        later = YouTube.fromJson(store.ytData("later", pid))
+        hidden = strings("hide").toSet()
+        blocked = strings("block").toSet()
+        recentSearches = strings("recent")
+    }
+
+    private fun keep(v: YouTube.Video) = v.id !in hidden && (v.channelId == null || v.channelId !in blocked)
+
+    fun isLater(id: String) = later.any { it.id == id }
+
+    fun toggleLater(v: YouTube.Video) {
+        later = if (isLater(v.id)) later.filter { it.id != v.id } else listOf(v) + later
+        store.saveYtData("later", pid, YouTube.toJson(later.take(200)))
+        store.saveYtData("later_at", pid, System.currentTimeMillis().toString())
+    }
+
+    /** "Not interested": never recommend this one again. */
+    fun notInterested(v: YouTube.Video) {
+        hidden = (hidden + v.id).toList().takeLast(500).toSet()
+        saveStrings("hide", hidden)
+        recommended = recommended.filter { keep(it) }
+        store.saveYtRecs(pid, YouTube.toJson(recommended))
+    }
+
+    /** "Fewer from this channel": its videos stop being recommended. */
+    fun lessFromChannel(v: YouTube.Video) {
+        val cid = v.channelId ?: return notInterested(v)
+        blocked = blocked + cid
+        saveStrings("block", blocked)
+        recommended = recommended.filter { keep(it) }
+        store.saveYtRecs(pid, YouTube.toJson(recommended))
+    }
+
+    private fun rememberSearch(q: String) {
+        recentSearches = (listOf(q) + recentSearches.filterNot { it.equals(q, ignoreCase = true) }).take(10)
+        saveStrings("recent", recentSearches)
+    }
+
+    fun clearRecentSearches() {
+        recentSearches = emptyList()
+        saveStrings("recent", recentSearches)
+    }
+
+    /** Search filter: "" any, "long", "live", "week". */
+    var searchFilter by mutableStateOf(""); private set
+    private var lastKids = false
+
+    fun setFilterAndSearch(filter: String) {
+        searchFilter = filter
+        if (query.length >= 2) search(query, lastKids)
+    }
+
+    // ---------------- Liked videos and your playlists ----------------
+
+    var liked by mutableStateOf<List<YouTube.Video>>(emptyList()); private set
+    var playlists by mutableStateOf<List<YouTube.Playlist>>(emptyList()); private set
+    private var mineAt = 0L
+
+    fun loadMine(force: Boolean = false) {
+        if (!signedIn) return
+        if (!force && System.currentTimeMillis() - mineAt < 3_600_000L) return
+        mineAt = System.currentTimeMillis()
+        val forProfile = pid
+        scope.launch {
+            val r = withContext(Dispatchers.IO) {
+                runCatching {
+                    val token = accessToken() ?: throw GoogleDrive.SignedOut()
+                    YouTube.liked(token) to runCatching { YouTube.myPlaylists(token) }.getOrDefault(emptyList())
+                }
+            }
+            if (forProfile != pid) return@launch
+            r.onSuccess { (l, p) ->
+                liked = l
+                playlists = p
+            }.onFailure { AppLog.warn("YouTube liked/playlists failed", it) }
+        }
+    }
+
+    // ---------------- A list page: a channel, a playlist, or Watch later ----------------
+
+    var listTitle by mutableStateOf(""); private set
+    var listVideos by mutableStateOf<List<YouTube.Video>>(emptyList()); private set
+    var listLoading by mutableStateOf(false); private set
+    var listStatus by mutableStateOf<String?>(null); private set
+    /** A channel page (with Newest / Most popular), else null. */
+    var listChannelId by mutableStateOf<String?>(null); private set
+    var listPopular by mutableStateOf(false); private set
+    var listIsLater by mutableStateOf(false); private set
+    private var listJob: Job? = null
+
+    fun openChannel(channelId: String, name: String, kids: Boolean, popular: Boolean = false) {
+        listTitle = name
+        listChannelId = channelId
+        listPopular = popular
+        listIsLater = false
+        loadList { YouTube.channelVideos(channelId, popular, apiKey, if (apiKey == null) runCatching { accessToken() }.getOrNull() else null, kids) }
+    }
+
+    fun openPlaylist(p: YouTube.Playlist) {
+        listTitle = p.title
+        listChannelId = null
+        listIsLater = false
+        loadList { YouTube.playlistVideos(p.id, apiKey, runCatching { accessToken() }.getOrNull()) }
+    }
+
+    fun openLater() {
+        listJob?.cancel()
+        listTitle = "Watch later"
+        listChannelId = null
+        listIsLater = true
+        listStatus = null
+        listLoading = false
+        listVideos = later
+    }
+
+    /** Watch later changed while its page is open. */
+    fun refreshLaterPage() {
+        if (listIsLater) listVideos = later
+    }
+
+    private fun loadList(load: () -> List<YouTube.Video>) {
+        listJob?.cancel()
+        listVideos = emptyList()
+        listStatus = null
+        listLoading = true
+        listJob = scope.launch {
+            val r = withContext(Dispatchers.IO) { runCatching { load() } }
+            listLoading = false
+            r.onSuccess {
+                listVideos = it
+                if (it.isEmpty()) listStatus = "No videos here"
+            }.onFailure { listStatus = it.message ?: "Couldn't load this" }
+        }
+    }
+
+    // ---------------- For the player and sharing ----------------
+
+    var skipSponsors by mutableStateOf(store.ytSkipSponsors); private set
+
+    fun toggleSkipSponsors() {
+        skipSponsors = !skipSponsors
+        store.ytSkipSponsors = skipSponsors
+    }
+
+    /** A video's chapters and its skippable sponsor parts (each may be empty). */
+    suspend fun extras(id: String): Pair<List<YouTube.Chapter>, List<YouTube.Segment>> = withContext(Dispatchers.IO) {
+        val chapters = runCatching {
+            if (!canSearch) emptyList() else YouTube.chapters(YouTube.videoInfo(id, apiKey, if (apiKey == null) runCatching { accessToken() }.getOrNull() else null).second)
+        }.getOrDefault(emptyList())
+        val segments = if (skipSponsors) runCatching { YouTube.sponsorSegments(id) }.getOrDefault(emptyList()) else emptyList()
+        chapters to segments
+    }
+
+    /** A shared link's video, with its title (or a plain one if YouTube can't say). */
+    suspend fun lookup(id: String): YouTube.Video = withContext(Dispatchers.IO) {
+        runCatching { YouTube.videoInfo(id, apiKey, if (apiKey == null) runCatching { accessToken() }.getOrNull() else null).first }.getOrNull()
+            ?: YouTube.Video(id, "YouTube video", "", "https://i.ytimg.com/vi/$id/hqdefault.jpg", 0L)
     }
 
     // ---------------- Signing in ----------------
@@ -313,6 +502,7 @@ class YouTubeFeature(private val store: Store, private val scope: CoroutineScope
     fun search(q: String, kids: Boolean) {
         val text = q.trim()
         query = text
+        lastKids = kids
         if (text.length < 2) {
             results = emptyList()
             return
@@ -327,11 +517,14 @@ class YouTubeFeature(private val store: Store, private val scope: CoroutineScope
             val r = withContext(Dispatchers.IO) {
                 runCatching {
                     val token = runCatching { accessToken() }.getOrNull()
-                    YouTube.search(text, apiKey, if (apiKey == null) token else null, strict = kids)
+                    YouTube.search(text, apiKey, if (apiKey == null) token else null, strict = kids, filter = searchFilter)
                 }
             }
             searching = false
-            r.onSuccess { results = it }.onFailure {
+            r.onSuccess {
+                results = it
+                rememberSearch(text)
+            }.onFailure {
                 status = it.message ?: "Couldn't search YouTube"
                 AppLog.warn("YouTube search failed", it)
             }

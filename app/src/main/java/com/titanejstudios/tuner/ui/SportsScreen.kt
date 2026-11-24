@@ -69,7 +69,7 @@ fun SportsScreen(vm: TunerViewModel) {
                     // Event channels list "Next: A v B — Sun 29 Nov 16:30" all day; turn that into the real event.
                     val p = Sports.normalise(raw, now) ?: continue
                     if (p.stop <= now || p.start > until) continue
-                    val type = Sports.classify(p) ?: continue
+                    val type = Sports.classify(p, c.group) ?: continue
                     // "Arsenal vs Man City" on one channel and "Arsenal v Man City" on another are the same match.
                     val key = p.title.lowercase().replace(Regex("\\s+"), " ").replace(" vs. ", " v ").replace(" vs ", " v ").trim() +
                         "@" + p.start / 60_000

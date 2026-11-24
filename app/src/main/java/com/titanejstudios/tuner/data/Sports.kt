@@ -34,8 +34,18 @@ object Sports {
     private const val CODES = "eng|aus|ind|sa|rsa|nz|pak|sl|si|ban|afg|wi|zim|ire|sco|ned|uae|nep|oma|usa|can"
     private val cricketCodes = Regex("\\b($CODES)\\s+(v|vs\\.?)\\s+($CODES)\\b", RegexOption.IGNORE_CASE)
 
-    /** @return the sport type, or null if this isn't sport */
-    fun classify(p: Programme): String? {
+    /** Guide categories and channel groups that are plainly not sport ("Alex vs. America" on Food Network). */
+    private val notSport = Regex(
+        "\\b(food|cook|cookery|lifestyle|entertainment|reality|drama|soap|comedy|film|movie|cinema|documentar|factual|" +
+            "kids|children|cartoon|animation|music|quiz|game ?show|talk|travel|home|property|history|nature|science|shopping|religio)",
+        RegexOption.IGNORE_CASE,
+    )
+
+    /**
+     * @return the sport type, or null if this isn't sport. [channelGroup] (the channel's group)
+     * helps rule out match-ups that aren't sport, like a cookery show called "Alex vs. America".
+     */
+    fun classify(p: Programme, channelGroup: String? = null): String? {
         val cat = p.category?.lowercase() ?: ""
         if ("news" in cat) return null
         val text = (p.title + " " + cat + " " + (p.desc ?: "").take(160)).lowercase()
@@ -45,6 +55,12 @@ object Sports {
         if (versus.containsMatchIn(p.title)) {
             // Match-ups: look at the description for a clue, otherwise football (the usual UK case).
             for ((name, re) in patterns) if (re.containsMatchIn(text)) return name
+            // …unless the guide or the channel says it's something else entirely.
+            if (!sportCategory) {
+                if (cat.isNotBlank() && notSport.containsMatchIn(cat)) return null
+                val group = channelGroup.orEmpty()
+                if (group.isNotBlank() && !group.contains("sport", ignoreCase = true) && notSport.containsMatchIn(group)) return null
+            }
             // "SA v BAN", "IND vs AUS" – short country codes are how cricket is listed.
             if (cricketCodes.containsMatchIn(p.title)) return "Cricket"
             return "Football"
@@ -56,10 +72,19 @@ object Sports {
         return null
     }
 
+    /** Highlights, repeats and shows about the sport, not the sport itself ("Brentford v Everton Hlts"). */
+    private val notLive = Regex(
+        "\\b(highlights?|h/?lts|hlts|hilights|hl|extended|review|replay|re-?run|repeat|classic|classics|preview|magazine|" +
+            "rewind|recap|reloaded|best of|goals|catch-?up|in \\d+ minutes|uncut|story of|retro|archive|vintage|build-?up|reaction|debate|show)\\b|\\(r\\)|\\[r\\]"
+    )
+
     /** Shown live rather than highlights/previews/replays (and a sensible match length). */
     fun looksLive(p: Programme): Boolean {
-        val t = (p.title + " " + (p.desc ?: "").take(80)).lowercase()
-        if (Regex("\\b(highlights|review|replay|classic|preview|magazine)\\b").containsMatchIn(t)) return false
+        val title = p.title.lowercase()
+        if (notLive.containsMatchIn(title)) return false
+        val t = (title + " " + (p.desc ?: "").take(160)).lowercase()
+        // The description gives it away: "Highlights of…", "Another chance to see…", "Action from yesterday's…".
+        if (Regex("\\b(highlights|another chance|action from (yesterday|last|saturday|sunday|monday|tuesday|wednesday|thursday|friday)|repeat of|first shown)\\b").containsMatchIn(t)) return false
         if (Regex("\\blive\\b").containsMatchIn(t)) return true
         return versus.containsMatchIn(p.title) && p.stop - p.start <= 4 * HOUR
     }

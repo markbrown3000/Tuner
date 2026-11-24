@@ -29,7 +29,7 @@ object HomeFeed {
         for (c in channels) {
             val raw = nowOn(epg[c.id], now) ?: continue
             val p = Sports.normalise(raw, now) ?: continue
-            if (p.start > now || p.stop <= now || Sports.classify(p) == null) continue
+            if (p.start > now || p.stop <= now || Sports.classify(p, c.group) == null) continue
             if (!seen.add(p.title.lowercase(Locale.ROOT))) continue
             out += c
             if (out.size >= max) break

@@ -164,7 +164,7 @@ object Football {
                 val home = inTitle(text, match.home)
                 val away = inTitle(text, match.away)
                 if (!home && !away) continue
-                if (Sports.classify(p) == null && !(home && away)) continue
+                if (Sports.classify(p, c.group) == null && !(home && away)) continue
                 var score = 1
                 if (home && away) score += 4
                 if (Sports.looksLive(p)) score += 2
@@ -242,7 +242,7 @@ object Football {
             val p = HomeFeed.nowOn(epg[c.id], now) ?: continue
             val t = key(p.title + " " + (p.desc ?: ""))
             if (t.contains(h) && t.contains(a)) return c
-            if (best == null && (t.contains(h) || t.contains(a)) && Sports.classify(p) != null) best = c
+            if (best == null && (t.contains(h) || t.contains(a)) && Sports.classify(p, c.group) != null) best = c
         }
         return best
     }
