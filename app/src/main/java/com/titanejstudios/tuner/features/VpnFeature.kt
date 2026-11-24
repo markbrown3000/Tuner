@@ -167,12 +167,70 @@ class VpnFeature(private val context: Context, private val store: Store, private
         val fixed = lines.map { l ->
             val m = Regex("(?i)^\\s*AllowedIPs\\s*=\\s*(.*)$").find(l) ?: return@map l
             val ips = m.groupValues[1].split(',').map { it.trim() }
-            if ("0.0.0.0/0" in ips) "AllowedIPs = " + (PUBLIC_V4 + ips.filter { it != "0.0.0.0/0" }).joinToString(", ") else l
+            if ("0.0.0.0/0" in ips) "AllowedIPs = " + (OUTSIDE_HOME_AND_GOOGLE + ips.filter { it != "0.0.0.0/0" }).joinToString(", ") else l
         }
         return Config.parse(fixed.joinToString("\n").byteInputStream())
     }
 
     companion object {
+        /**
+         * Google and YouTube stay outside the VPN: YouTube asks "Sign in to confirm you're not a bot"
+         * to anyone arriving from a VPN server, so its videos won't play in Flicker through one.
+         * (Google's own addresses – not its cloud hosting, which IPTV services may use.)
+         */
+        private val GOOGLE_V4 = listOf(
+            "8.8.4.0/24", "8.8.8.0/24", "64.233.160.0/19", "66.102.0.0/20", "66.249.64.0/19", "72.14.192.0/18",
+            "74.125.0.0/16", "108.177.0.0/17", "142.250.0.0/15", "172.217.0.0/16", "172.253.0.0/16",
+            "173.194.0.0/16", "192.178.0.0/15", "207.223.160.0/20", "208.65.152.0/22", "208.117.224.0/19",
+            "209.85.128.0/17", "216.58.192.0/19", "216.239.32.0/19",
+        )
+
+        private fun range(cidr: String): LongRange {
+            val (ip, bits) = cidr.split('/')
+            val n = ip.split('.').fold(0L) { acc, p -> (acc shl 8) or p.toLong() }
+            val size = 1L shl (32 - bits.toInt())
+            val start = n and (size - 1).inv() and 0xFFFFFFFFL
+            return start until start + size
+        }
+
+        private fun cidr(start: Long, bits: Int): String =
+            listOf(24, 16, 8, 0).joinToString(".") { ((start shr it) and 0xFF).toString() } + "/" + bits
+
+        /** The smallest list of CIDR blocks covering start..end (inclusive). */
+        private fun blocks(startIn: Long, end: Long): List<String> {
+            val out = ArrayList<String>()
+            var start = startIn
+            while (start <= end) {
+                var bits = 32
+                // Grow the block while it stays aligned and inside the range.
+                while (bits > 0) {
+                    val size = 1L shl (33 - bits)
+                    if (start % size != 0L || start + size - 1 > end) break
+                    bits--
+                }
+                out += cidr(start, bits)
+                start += 1L shl (32 - bits)
+            }
+            return out
+        }
+
+        /** Every public IPv4 address except Google's – what goes through the tunnel. */
+        val OUTSIDE_HOME_AND_GOOGLE: List<String> by lazy {
+            val holes = GOOGLE_V4.map { range(it) }.sortedBy { it.first }
+            PUBLIC_V4.flatMap { block ->
+                val r = range(block)
+                var from = r.first
+                val pieces = ArrayList<String>()
+                for (h in holes) {
+                    if (h.last < from || h.first > r.last) continue
+                    if (h.first > from) pieces += blocks(from, h.first - 1)
+                    from = maxOf(from, h.last + 1)
+                }
+                if (from <= r.last) pieces += blocks(from, r.last)
+                pieces
+            }
+        }
+
         /** Every IPv4 address except home networks (the WireGuard app's "Exclude private IPs"). */
         private val PUBLIC_V4 = listOf(
             "0.0.0.0/5", "8.0.0.0/7", "11.0.0.0/8", "12.0.0.0/6", "16.0.0.0/4", "32.0.0.0/3", "64.0.0.0/2",

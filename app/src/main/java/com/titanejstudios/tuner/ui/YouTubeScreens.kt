@@ -151,7 +151,8 @@ fun YouTubePlayerScreen(vm: TunerViewModel) {
                         plainPage || failed != null -> Unit
                         // The owner doesn't allow other apps, or it's gone: no point trying again.
                         error == PlayerConstants.PlayerError.VIDEO_NOT_PLAYABLE_IN_EMBEDDED_PLAYER ->
-                            failed = "The video's owner only lets it play on YouTube itself."
+                            failed = if (vm.vpn.connected) "YouTube won't play it here while Flicker's VPN is on (it asks to confirm you're not a bot). Turn the VPN off in Settings and try again."
+                            else "YouTube won't play this one inside other apps (the owner's choice, or YouTube checking you're not a bot)."
                         error == PlayerConstants.PlayerError.VIDEO_NOT_FOUND ->
                             failed = "This video has been removed or made private."
                         else -> {
