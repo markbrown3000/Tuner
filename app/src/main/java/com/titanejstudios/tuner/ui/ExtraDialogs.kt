@@ -114,7 +114,7 @@ fun FilmInfoDialog(vm: TunerViewModel) {
                 Spacer(Modifier.height(18.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     val trailer = info.trailerKey
-                    if (trailer != null) PillButton("▶ Trailer", { vm.playTrailer(trailer) }, Modifier.focusRequester(first))
+                    if (trailer != null) PillButton("▶ Trailer", { vm.playTrailer(trailer, info.title) }, Modifier.focusRequester(first))
                     PillButton("Close", { vm.closeFilmInfo() }, if (trailer == null) Modifier.focusRequester(first) else Modifier)
                 }
                 Spacer(Modifier.height(4.dp))

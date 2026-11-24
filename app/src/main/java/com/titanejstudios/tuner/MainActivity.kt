@@ -173,7 +173,7 @@ private fun TunerApp(vm: TunerViewModel) {
 
         // Phones: upright for browsing, sideways and full screen for watching.
         val phone = vm.isPhone
-        val watching = vm.screen == Screen.Player || vm.screen == Screen.MultiView
+        val watching = vm.screen == Screen.Player || vm.screen == Screen.MultiView || vm.screen == Screen.YouTubePlayer
         LaunchedEffect(phone, watching) {
             val a = activity ?: return@LaunchedEffect
             if (!phone) return@LaunchedEffect
@@ -230,6 +230,8 @@ private fun TunerApp(vm: TunerViewModel) {
                 Screen.Remote -> com.titanejstudios.tuner.ui.RemoteScreen(vm)
                 Screen.Christmas -> com.titanejstudios.tuner.ui.ChristmasScreen(vm)
                 Screen.Cloud -> com.titanejstudios.tuner.ui.CloudScreen(vm)
+                Screen.YouTube -> com.titanejstudios.tuner.ui.YouTubeScreen(vm)
+                Screen.YouTubePlayer -> com.titanejstudios.tuner.ui.YouTubePlayerScreen(vm)
             }
         }
         if (phone && !watching && vm.screen in PhoneTabs) PhoneBottomBar(vm)

@@ -16,7 +16,10 @@ class GoogleDrive(private val clientId: String, private val clientSecret: String
 
     class DeviceCode(val deviceCode: String, val userCode: String, val url: String, val expiresAt: Long, val intervalSec: Int)
 
-    class Tokens(val access: String, val refresh: String?, val expiresAt: Long, val email: String?)
+    class Tokens(val access: String, val refresh: String?, val expiresAt: Long, val email: String?, val scope: String? = null) {
+        /** Google lets you untick permissions on its sign-in page: did the Drive one get through? */
+        val hasDrive: Boolean get() = scope == null || scope.contains(SCOPE)
+    }
 
     /** "Waiting for you to approve", or a final answer. */
     sealed class Poll {
@@ -30,10 +33,11 @@ class GoogleDrive(private val clientId: String, private val clientSecret: String
 
     // ---------------- Sign-in (OAuth 2.0 for TVs) ----------------
 
-    fun startSignIn(): DeviceCode {
+    /** Starts the TV sign-in for [scope] (Drive for sync, or YouTube). */
+    fun startSignIn(scope: String = "$SCOPE email"): DeviceCode {
         val (code, body) = post(
             "https://oauth2.googleapis.com/device/code",
-            mapOf("client_id" to clientId, "scope" to "$SCOPE email"),
+            mapOf("client_id" to clientId, "scope" to scope),
         )
         val o = JSONObject(body)
         if (code != 200) throw IllegalStateException(o.optString("error_description").ifBlank { o.optString("error", "Google said $code") })
@@ -46,7 +50,8 @@ class GoogleDrive(private val clientId: String, private val clientSecret: String
         )
     }
 
-    fun poll(d: DeviceCode): Poll {
+    /** [required]: the permission that must have been ticked on Google's page. */
+    fun poll(d: DeviceCode, required: String = SCOPE, missing: String = NO_DRIVE): Poll {
         val (code, body) = post(
             "https://oauth2.googleapis.com/token",
             mapOf(
@@ -55,7 +60,15 @@ class GoogleDrive(private val clientId: String, private val clientSecret: String
             ),
         )
         val o = JSONObject(body)
-        if (code == 200) return Poll.Done(tokens(o, null))
+        if (code == 200) {
+            val t = tokens(o, null)
+            if (t.scope != null && !t.scope.contains(required)) {
+                // Signed in, but the box for what we need was left unticked.
+                t.refresh?.let { revoke(it) }
+                return Poll.Failed(missing)
+            }
+            return Poll.Done(t)
+        }
         return when (o.optString("error")) {
             "authorization_pending" -> Poll.Waiting
             "slow_down" -> Poll.SlowDown
@@ -93,6 +106,7 @@ class GoogleDrive(private val clientId: String, private val clientSecret: String
             o.optString("refresh_token").takeIf { it.isNotBlank() } ?: oldRefresh,
             System.currentTimeMillis() + (o.optLong("expires_in", 3600) - 60) * 1000,
             email,
+            o.optString("scope").takeIf { it.isNotBlank() },
         )
     }
 
@@ -119,7 +133,7 @@ class GoogleDrive(private val clientId: String, private val clientSecret: String
             .optJSONArray("files")?.optJSONObject(0)?.optString("id")?.takeIf { it.isNotBlank() }?.let { return it }
         val meta = JSONObject().put("name", FOLDER).put("mimeType", "application/vnd.google-apps.folder").toString()
         val (code, body) = send("https://www.googleapis.com/drive/v3/files?fields=id", "POST", access, "application/json; charset=UTF-8", meta.toByteArray())
-        if (code !in 200..299) throw IllegalStateException("Google Drive said $code: ${body.take(120)}")
+        if (code !in 200..299) throw IllegalStateException("Google Drive said $code: " + googleMessage(body))
         return JSONObject(body).getString("id")
     }
 
@@ -128,7 +142,7 @@ class GoogleDrive(private val clientId: String, private val clientSecret: String
         if (id != null) {
             val (code, body) = send("https://www.googleapis.com/upload/drive/v3/files/$id?uploadType=media", "PATCH", access, "application/json", text.toByteArray())
             if (code in 200..299) return id
-            if (code != 404) throw IllegalStateException("Google Drive said $code: ${body.take(120)}")
+            if (code != 404) throw IllegalStateException("Google Drive said $code: " + googleMessage(body))
         }
         val boundary = "flicker" + System.currentTimeMillis()
         val meta = JSONObject().put("name", FILE).put("description", "Flicker keeps your devices in step with this file – please don't delete it.")
@@ -139,7 +153,7 @@ class GoogleDrive(private val clientId: String, private val clientSecret: String
             "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id", "POST", access,
             "multipart/related; boundary=$boundary", multipart.toByteArray(),
         )
-        if (code !in 200..299) throw IllegalStateException("Google Drive said $code: ${body.take(120)}")
+        if (code !in 200..299) throw IllegalStateException("Google Drive said $code: " + googleMessage(body))
         return JSONObject(body).getString("id")
     }
 
@@ -165,7 +179,8 @@ class GoogleDrive(private val clientId: String, private val clientSecret: String
         c.setRequestProperty("Authorization", "Bearer $access")
         val (code, body) = finish(c) {}
         if (code == 401) throw Unauthorised()
-        if (code !in 200..299) throw IllegalStateException("Google Drive said $code: ${body.take(120)}")
+        if (code == 403 && "insufficient" in body.lowercase()) throw NoDrivePermission()
+        if (code !in 200..299) throw IllegalStateException("Google Drive said $code: " + googleMessage(body))
         return body
     }
 
@@ -176,6 +191,7 @@ class GoogleDrive(private val clientId: String, private val clientSecret: String
         c.setRequestProperty("Content-Type", type)
         val r = finish(c) { c.outputStream.use { it.write(bytes) } }
         if (r.first == 401) throw Unauthorised()
+        if (r.first == 403 && "insufficient" in r.second.lowercase()) throw NoDrivePermission()
         return r
     }
 
@@ -188,6 +204,13 @@ class GoogleDrive(private val clientId: String, private val clientSecret: String
         c.disconnect()
     }
 
+    /** Just Google's "message" from an error reply, not the whole JSON. */
+    private fun googleMessage(body: String): String =
+        runCatching { JSONObject(body).getJSONObject("error").getString("message") }.getOrNull() ?: body.take(120)
+
+    /** Signed in without the Google Drive permission (its box was unticked on Google's page). */
+    class NoDrivePermission : Exception(NO_DRIVE)
+
     /** The access token has run out (refresh it and try again). */
     class Unauthorised : Exception("Google needs a fresh sign-in token")
 
@@ -195,5 +218,7 @@ class GoogleDrive(private val clientId: String, private val clientSecret: String
         const val SCOPE = "https://www.googleapis.com/auth/drive.file"
         const val FILE = "flicker-sync.json"
         const val FOLDER = "Flicker"
+        const val NO_DRIVE = "Google didn't give Flicker the Google Drive permission – the Drive box was probably left unticked. " +
+            "Sign in again and tick it (or press Select all) on Google's page."
     }
 }

@@ -93,6 +93,7 @@ enum class HomeRow(val title: String) {
     PlexNew("New on Plex"),
     TopPicks("Top picks for you"),
     Missed("Missed it?"),
+    YouTube("New on your YouTube"),
     Because("Because you watched"),
     Favourites("Favourites"),
     Recordings("Recordings"),
@@ -316,6 +317,23 @@ private fun unfinishedCard(vm: TunerViewModel, u: com.titanejstudios.tuner.Unfin
     )
 }
 
+/** A video from a channel you subscribe to on YouTube. */
+private fun youTubeCard(vm: TunerViewModel, v: com.titanejstudios.tuner.integrations.YouTube.Video): HomeCard = HomeCard(
+    key = "yt" + v.id,
+    tag = "YOUTUBE", tagBg = Color(0xE6FF0033), tagFg = Color.White,
+    title = v.title,
+    line1 = v.channel,
+    line2 = com.titanejstudios.tuner.integrations.YouTube.age(v.publishedAt),
+    image = v.thumb,
+    poster = false,
+    channel = null,
+    progress = null,
+    progressColor = TunerColors.Accent,
+    onClick = { vm.playYouTube(v) },
+    onLongClick = null,
+    hero = HeroInfo(v.title, v.channel + "  ·  " + com.titanejstudios.tuner.integrations.YouTube.age(v.publishedAt), null, null, v.thumb, label = "NEW ON YOUR YOUTUBE"),
+)
+
 /** Missed it? A programme from the last week you'd probably like, on catch-up. */
 private fun missedCard(vm: TunerViewModel, pick: HomeFeed.Pick): HomeCard {
     val p = pick.programme
@@ -434,7 +452,7 @@ fun HomeScreen(vm: TunerViewModel) {
         minute, recent, favourites, allChannels, vm.sportNow, vm.topPicks, vm.plexItems, vm.plexRecent, vm.started, vm.activeProfile.id,
         vm.yourShows, vm.plexFeature.similar, vm.becauseFilms, vm.trending,
         vm.resume, vm.recordings, vm.followedSeries, vm.watchlist, vm.football.matches, vm.reminders,
-        vm.missed, vm.unfinished,
+        vm.missed, vm.unfinished, vm.youtube.feed,
     ) {
         buildMap {
             put(HomeRow.Continue, buildList {
@@ -449,6 +467,7 @@ fun HomeScreen(vm: TunerViewModel) {
             put(HomeRow.TopPicks, vm.topPicks.let { picks -> val chans = picks.map { it.channel }; picks.map { pk -> pickCard(vm, pk, chans, now) { pickMenu = pk } } })
             put(HomeRow.YourShows, vm.yourShows.let { picks -> val chans = picks.map { it.channel }; picks.map { pk -> pickCard(vm, pk, chans, now) { pickMenu = pk } } })
             put(HomeRow.Missed, vm.missed.map { missedCard(vm, it) })
+            if (!vm.activeProfile.kids) put(HomeRow.YouTube, vm.youtube.feed.take(20).map { youTubeCard(vm, it) })
             put(HomeRow.Because, buildList {
                 vm.plexFeature.similar.take(20).forEach { add(plexEntryCard(vm, it, "LIKE THIS")) }
                 if (vm.hasVod) vm.becauseFilms.forEach { m -> add(filmCard(vm, m)) }
@@ -586,6 +605,7 @@ fun HomeScreen(vm: TunerViewModel) {
                 item { PillButton("TV Guide", { vm.navigate(Screen.Channels) }, compact = true) }
                 item { PillButton("Sport", { vm.navigate(Screen.Sports) }, compact = true) }
                 if (vm.christmasSeason) item { PillButton("🎄 Christmas TV", { vm.navigate(Screen.Christmas) }, compact = true) }
+                item { PillButton("▶ YouTube", { vm.navigate(Screen.YouTube) }, compact = true) }
                 item { PillButton("Search", { vm.navigate(Screen.Search) }, compact = true) }
                 item { PillButton("🎤  Say it", { vm.startVoiceSearch() }, compact = true) }
             }
@@ -730,6 +750,7 @@ private fun PhoneHomeBody(
                 vm.usualOffer?.let { u -> item { PillButton("★  Your usual: ${u.name}", { vm.playUsual() }, compact = true, selected = true) } }
                 if (vm.matchDay == null) vm.nextTeamFixture?.let { f -> item { PillButton(fixturePill(f), { vm.navigate(Screen.Teams) }, compact = true) } }
                 if (vm.christmasSeason) item { PillButton("🎄 Christmas TV", { vm.navigate(Screen.Christmas) }, compact = true) }
+                item { PillButton("▶ YouTube", { vm.navigate(Screen.YouTube) }, compact = true) }
                 vm.lastChannel?.takeIf { it.id != vm.usualOffer?.id }?.let { last -> item { PillButton("▶  ${last.name}", { vm.play(last, allChannels) }, compact = true) } }
                 if (vm.link.linked) item { PillButton("📺 TV remote", { vm.navigate(Screen.Remote) }, compact = true) }
                 if (vm.downloads.isNotEmpty()) item { PillButton("⬇ Downloads", { vm.navigate(Screen.Downloads) }, compact = true) }

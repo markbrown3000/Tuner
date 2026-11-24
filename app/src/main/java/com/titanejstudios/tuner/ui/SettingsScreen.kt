@@ -177,6 +177,15 @@ fun SettingsScreen(vm: TunerViewModel) {
 
             item {
                 SettingRow(
+                    "▶ YouTube",
+                    subtitle = "Search YouTube and play it here; sign in for your subscriptions on Home",
+                    detail = if (vm.youtube.signedIn) (vm.youtube.email ?: "Signed in") else "Not signed in",
+                    onClick = { vm.navigate(Screen.YouTube) },
+                )
+            }
+
+            item {
+                SettingRow(
                     "☁ Sync between houses",
                     subtitle = "Through your own Google Drive: carry on films and episodes, My list and your teams at another house",
                     detail = when {

@@ -26,6 +26,8 @@ fun builtInKey(env: String, name: String): String = System.getenv(env)?.takeIf {
 // "TVs and Limited Input devices". GitHub secrets GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET.
 val googleClientId: String = builtInKey("TUNER_GOOGLE_CLIENT_ID", "google_client_id")
 val googleClientSecret: String = builtInKey("TUNER_GOOGLE_CLIENT_SECRET", "google_client_secret")
+// YouTube Data API key (search). GitHub secret YOUTUBE_KEY.
+val youtubeKey: String = builtInKey("TUNER_YOUTUBE_KEY", "youtube_key")
 
 fun versionCodeFor(v: String): Int {
     val p = v.split('.', '-').mapNotNull { it.toIntOrNull() } + listOf(0, 0, 0)
@@ -45,6 +47,7 @@ android {
         buildConfigField("String", "TMDB_KEY", "\"$tmdbDefaultKey\"")
         buildConfigField("String", "GOOGLE_CLIENT_ID", "\"$googleClientId\"")
         buildConfigField("String", "GOOGLE_CLIENT_SECRET", "\"$googleClientSecret\"")
+        buildConfigField("String", "YOUTUBE_KEY", "\"$youtubeKey\"")
     }
 
     signingConfigs {
@@ -121,6 +124,9 @@ dependencies {
     implementation("eu.agno3.jcifs:jcifs-ng:2.1.10")
     // Built-in VPN (WireGuard – Surfshark, ProtonVPN, Mullvad… config files).
     implementation("com.wireguard.android:tunnel:1.0.20230706")
+    // YouTube's own embedded player (trailers and the YouTube section).
+    // (13.x needs compileSdk 36; 12.1.2 with our own origin does the same job – see YouTubeScreens.)
+    implementation("com.pierfrancescosoffritti.androidyoutubeplayer:core:12.1.2")
 
     // Tests of the pure logic (run with ./gradlew testDebugUnitTest, and on GitHub with every build).
     testImplementation("junit:junit:4.13.2")

@@ -180,6 +180,10 @@ class CloudSyncFeature(
         } catch (e: GoogleDrive.SignedOut) {
             signOut()
             status = "Google signed this device out – sign in again"
+        } catch (e: GoogleDrive.NoDrivePermission) {
+            // Signed in without the Drive box ticked: start again so it can be ticked.
+            signOut()
+            status = GoogleDrive.NO_DRIVE
         } catch (e: Exception) {
             status = "Couldn't sync: ${e.message ?: e.javaClass.simpleName}"
             AppLog.warn("Google Drive sync failed", e)

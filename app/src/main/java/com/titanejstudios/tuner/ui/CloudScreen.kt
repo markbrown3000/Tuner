@@ -29,6 +29,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.titanejstudios.tuner.TunerViewModel
@@ -94,7 +95,19 @@ fun CloudScreen(vm: TunerViewModel) {
                             modifier = Modifier.clip(RoundedCornerShape(10.dp)).background(TunerColors.Panel).padding(horizontal = 14.dp, vertical = 4.dp),
                         )
                         Spacer(Modifier.height(6.dp))
-                        Text("Pick the Google account to share, then allow Flicker. This screen carries on by itself.", color = TunerColors.TextSecondary, fontSize = 13.sp)
+                        Text("Pick the Google account to share. This screen carries on by itself.", color = TunerColors.TextSecondary, fontSize = 13.sp)
+                        Spacer(Modifier.height(8.dp))
+                        // Google lets people untick the Drive permission – then sync can't work. Make it hard to miss.
+                        Text(
+                            androidx.compose.ui.text.buildAnnotatedString {
+                                withStyle(androidx.compose.ui.text.SpanStyle(color = Color(0xFFFFD66B), fontWeight = FontWeight.ExtraBold)) { append("⚠ IMPORTANT: ") }
+                                withStyle(androidx.compose.ui.text.SpanStyle(fontWeight = FontWeight.Bold)) {
+                                    append("on Google's page, tick the Google Drive box (or press Select all) – without it, sync can't work.")
+                                }
+                            },
+                            color = Color.White, fontSize = if (narrow) 15.sp else 17.sp,
+                            modifier = Modifier.clip(RoundedCornerShape(10.dp)).background(Color(0x33FFD66B)).padding(horizontal = 12.dp, vertical = 8.dp),
+                        )
                     }
                 }
                 Spacer(Modifier.height(10.dp))

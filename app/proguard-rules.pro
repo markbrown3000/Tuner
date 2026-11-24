@@ -23,3 +23,8 @@
 -keep class com.wireguard.android.backend.** { *; }
 -keep class com.wireguard.crypto.** { *; }
 -keep class com.wireguard.config.** { *; }
+
+# YouTube player: the web page inside calls back into these through a JavaScript bridge.
+-keep class com.pierfrancescosoffritti.androidyoutubeplayer.** { *; }
+-keepattributes JavascriptInterface
+-keepclassmembers class * { @android.webkit.JavascriptInterface <methods>; }

@@ -107,7 +107,7 @@ enum class Screen {
     Home, Channels, Guide, Player, Search, Movies, Series, SeriesDetail, Settings, SourceEdit, Manage,
     ProfilePicker, ProfileEdit, PhoneSetup, EpgMap, Recordings, MultiView, Sports, Apps, Log,
     WhatsOn, Stats, ShareTv, Catchup, Categories, Plex, Football, Update, SelfTest, PlexLibrary, PlexShow, HomeRows, Languages, Recommendations, Vpn,
-    Link, Downloads, Teams, Remote, Christmas, Cloud,
+    Link, Downloads, Teams, Remote, Christmas, Cloud, YouTube, YouTubePlayer,
 }
 
 const val FAVOURITES = "★ Favourites"
@@ -394,6 +394,10 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         onSynced = { changed -> applyLinkChanges(changed) },
         remote = this,
     )
+    /** YouTube: search, your subscriptions, and the player (trailers too). */
+    val youtube = com.titanejstudios.tuner.features.YouTubeFeature(store, viewModelScope)
+    /** The YouTube video on screen. */
+    var ytVideo by mutableStateOf<com.titanejstudios.tuner.integrations.YouTube.Video?>(null); private set
     /** Sync between houses through your own Google Drive. */
     val cloud = com.titanejstudios.tuner.features.CloudSyncFeature(
         store, viewModelScope,
@@ -1480,6 +1484,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
             cloud.start()
             cloud.syncSoon(4_000L)
         }
+        if (!activeProfile.kids) youtube.loadFeed()
         if (extrasStarted) refreshPlex()
         AppState.foreground = true
         loadApps()
@@ -4167,19 +4172,62 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     }
 
     /** Opens the trailer in the YouTube app. */
-    fun playTrailer(youtubeKey: String) {
+    /** Trailers play inside Flicker, in YouTube's own player (the YouTube app if the video won't allow that). */
+    fun playTrailer(youtubeKey: String, title: String? = null) {
+        closeFilmInfo()
+        playYouTube(com.titanejstudios.tuner.integrations.YouTube.Video(youtubeKey, title?.let { "$it – trailer" } ?: "Trailer", "", null, 0L))
+    }
+
+    /** Plays a YouTube video full screen inside Flicker. */
+    fun playYouTube(v: com.titanejstudios.tuner.integrations.YouTube.Video) {
+        // Whatever Flicker was playing pauses (films keep their place).
+        when (mode) {
+            is PlayMode.Vod -> {
+                saveResume(syncHome = false)
+                playback.pause()
+            }
+            null -> Unit
+            else -> playback.pause()
+        }
+        ytVideo = v
+        navigate(Screen.YouTubePlayer)
+    }
+
+    /** The video won't play inside other apps (its owner's choice): open it in the YouTube app instead. */
+    fun youTubeFailed(id: String, reason: String) {
+        AppLog.warn("YouTube video $id wouldn't play here ($reason) – opening the YouTube app")
+        if (screen == Screen.YouTubePlayer) back()
+        openInYouTubeApp(id)
+    }
+
+    /**
+     * Opens a video in YouTube. Each YouTube app is asked by name, with the full watch address:
+     * the Google TV app ignores a general "vnd.youtube:" link (it opens without playing).
+     */
+    fun openInYouTubeApp(youtubeKey: String) {
+        val watch = Uri.parse("https://www.youtube.com/watch?v=$youtubeKey")
         val intents = listOf(
-            Intent(Intent.ACTION_VIEW, Uri.parse("vnd.youtube:$youtubeKey")),
-            Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/watch?v=$youtubeKey")),
+            // YouTube for Google TV / Android TV (and the Fire TV version).
+            Intent(Intent.ACTION_VIEW, watch).setPackage("com.google.android.youtube.tv"),
+            Intent(Intent.ACTION_VIEW, watch).setPackage("com.amazon.firetv.youtube"),
+            // SmartTube, a popular YouTube app for TVs.
+            Intent(Intent.ACTION_VIEW, watch).setPackage("com.teamsmart.videomanager.tv"),
+            Intent(Intent.ACTION_VIEW, watch).setPackage("com.liskovsoft.smarttubetv.beta"),
+            // YouTube on phones.
+            Intent(Intent.ACTION_VIEW, Uri.parse("vnd.youtube:$youtubeKey")).setPackage("com.google.android.youtube"),
+            Intent(Intent.ACTION_VIEW, watch).setPackage("com.google.android.youtube"),
+            // Anything else that can open YouTube links (a browser, at worst).
+            Intent(Intent.ACTION_VIEW, watch),
         )
         for (i in intents) {
             try {
-                app.startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                app.startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra("force_fullscreen", true))
+                AppLog.info("Trailer opened with " + (i.`package` ?: "the default app"))
                 return
             } catch (_: Exception) {
             }
         }
-        showNotice("Couldn't open YouTube on this TV")
+        showNotice("Couldn't open YouTube on this device")
     }
 
     /** Player menu › Find subtitles online: searches OpenSubtitles for the film/episode on screen. */

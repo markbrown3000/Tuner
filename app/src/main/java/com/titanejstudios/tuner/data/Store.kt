@@ -719,6 +719,18 @@ class Store(context: Context) {
         get() = prefs.getLong("cloud_synced_at", 0L)
         set(value) = prefs.edit().putLong("cloud_synced_at", value).apply()
 
+    // ---- YouTube (sign-in kept on each device, never in backups) ----
+    var ytRefresh: String?
+        get() = prefs.getString("yt_refresh", null)
+        set(value) = prefs.edit().putString("yt_refresh", value).apply()
+    var ytEmail: String?
+        get() = prefs.getString("yt_email", null)
+        set(value) = prefs.edit().putString("yt_email", value).apply()
+    var ytFeed: String?
+        get() = prefs.getString("yt_feed", null)
+        set(value) = prefs.edit().putString("yt_feed", value).putLong("yt_feed_at", System.currentTimeMillis()).apply()
+    val ytFeedAt: Long get() = prefs.getLong("yt_feed_at", 0L)
+
     // ---- Downloads (phones) ----
     var downloadsJson: String
         get() = prefs.getString("downloads", "[]") ?: "[]"
@@ -824,7 +836,7 @@ class Store(context: Context) {
 
     // ---------------- Backup & restore ----------------
 
-    private val notBackedUp = listOf("preview_channel_id", "watch_next_ids", "last_refresh_", "usage_", "bonus_", "schema", "dead_channels", "health_checked_at", "recordings", "watch_stats", "live_tab_rows", "plex_client_id", "flaky_streams", "db_tidy_at", "new_eps_checked_at", "crash_reported_at", "sport_auto_done", "sync_stamp_", "synced_at", "nas_backup_at", "update_checked_at", "update_dismissed", "vpn_", "device_mode", "link_device_id", "link_name", "downloads", "habits_", "widget_now", "football_team_list", "football_fixtures", "team_announced", "text_scale", "gdrive_", "cloud_")
+    private val notBackedUp = listOf("preview_channel_id", "watch_next_ids", "last_refresh_", "usage_", "bonus_", "schema", "dead_channels", "health_checked_at", "recordings", "watch_stats", "live_tab_rows", "plex_client_id", "flaky_streams", "db_tidy_at", "new_eps_checked_at", "crash_reported_at", "sport_auto_done", "sync_stamp_", "synced_at", "nas_backup_at", "update_checked_at", "update_dismissed", "vpn_", "device_mode", "link_device_id", "link_name", "downloads", "habits_", "widget_now", "football_team_list", "football_fixtures", "team_announced", "text_scale", "gdrive_", "cloud_", "yt_")
 
     /** Every setting as JSON (playlists, profiles, favourites, PIN, reminders, guide fixes…). */
     fun exportBackup(): String {

@@ -27,6 +27,8 @@ jobs:
       # Optional: Google sign-in for "Sync between houses" (see README › Google Drive sync).
       TUNER_GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
       TUNER_GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+      # Optional: YouTube search (see README › YouTube).
+      TUNER_YOUTUBE_KEY: ${{ secrets.YOUTUBE_KEY }}
     steps:
       - uses: actions/checkout@v5
 

@@ -32,6 +32,7 @@ A TiviMate-style live TV app for Google TV / Android TV. Built with Kotlin, Jetp
 **Added since 5.4.0**
 - **Plex libraries**: Films & TV › **Plex ›** (or **Plex** in the top menu if you have no Xtream films) shows all your Plex film and TV libraries. Shows open to seasons and episodes, and episodes carry on to the next one automatically.
 - **Open Tuner when the TV turns on** (Settings, near the top). Android only allows this with "Display over other apps" allowed for Tuner. If your TV hides that setting, run this once from a computer: `adb shell appops set com.titanejstudios.tuner SYSTEM_ALERT_WINDOW allow`. It works after a full restart; Google TV doesn't tell apps when it simply wakes from standby.
+- **YouTube** (Home › ▶ YouTube, or Settings): search YouTube and play it inside Flicker in YouTube's own player (remote: OK play/pause, ◀ ▶ 10 s, BACK closes; phone: tap, double-tap a side). Sign in to YouTube (a code on google.com/device, tick the YouTube box) for "New on your YouTube" on Home – the latest from the channels you subscribe to. Film trailers play here too; a video whose owner doesn't allow other apps opens in the YouTube app instead. Kids' profiles get strict SafeSearch and no subscriptions row. Needs the one-off setup below.
 - **Each profile's own Continue watching**: profiles other than "Everyone" start empty – Plex's Continue watching and your films and episodes only show what that profile has started in Flicker (on any of your linked or synced devices, matched by profile name), with Plex's own progress. "Everyone" still shows everything. Hold OK on a Plex tile › Remove from my Continue watching.
 - **Sync between houses** (Settings › ☁ Sync between houses): sign each device in to the same Google account (type a code on google.com/device). Where you got to in films and episodes, My list, followed series, your teams and learned intros sync through one small file in a "Flicker" folder in that account's own Google Drive (a few KB; Flicker can only see files it made), every 10 minutes and whenever you stop something. Name each house; favourites stay per house unless you turn on sharing. Needs the Google sign-in set up once – see "Google Drive sync" below.
 - **Buttons on live TV**: press OK while watching a channel for the info bar with buttons – ⏸ Pause / ▶ Play, ⏪ ⏩ 30s and ● Live (when paused or behind), ⏮ From the start (catch-up), ● Record, ☰ Guide, 📺 Channels, ★ Favourite, Subtitles, Audio and ⋮ More. ◀ ▶ to move, OK to press, ▲ ▼ still change channel, BACK or 8 seconds hides them.
@@ -510,3 +511,13 @@ Flicker signs in to Google with the "TV" sign-in (a code you type on your phone)
 6. Push and make a release. Then on each device: Settings › ☁ Sync between houses › Sign in with Google.
 
 Sign-in is kept on each device and never put in backups or copied between TVs.
+
+## YouTube (one-off setup)
+
+In the same Google Cloud project as Google Drive sync:
+
+1. **APIs & Services › Library**: search for **YouTube Data API v3** and press **Enable**.
+2. **APIs & Services › Credentials › Create credentials › API key**. Edit the key: under **API restrictions** pick **Restrict key › YouTube Data API v3**, and **Save**. Copy the key into a GitHub secret called `YOUTUBE_KEY` (or `youtube_key=…` in `keys.properties`). This is for searching.
+3. **Google Auth Platform › Data access › Add or remove scopes**: add `.../auth/youtube.readonly` and **Save**. It's a "sensitive" permission, so Google shows "Google hasn't verified this app" when you sign in – press **Advanced › Go to Flicker** (fine for your own family; up to 100 people can sign in like this).
+
+Searches use about 100 of the project's 10,000 free daily units each (roughly 100 searches a day); playing videos uses none, and the subscriptions row uses about one unit per channel every few hours.
