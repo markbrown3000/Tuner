@@ -33,6 +33,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.foundation.layout.offset
 import com.titanejstudios.tuner.data.WhatsOn
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.ui.graphics.Brush
@@ -49,15 +52,18 @@ import com.titanejstudios.tuner.data.WatchStats
 import kotlinx.coroutines.delay
 
 /**
- * What's On: any day this week and any time (◀ ▶ half an hour at a time), "for you" order,
- * shows starting soon, and the highlighted show's details – with its channel live in the corner.
+ * What's On: a slim strip about the highlighted show, one row of controls, then picture tiles –
+ * "Tonight's best", "Starting soon" and a row per kind (or a grid for one kind) – or a timeline.
  */
 @Composable
 fun WhatsOnScreen(vm: TunerViewModel) {
     val result = vm.whatsOnResult
     val restorer = rememberFocusRestorer()
     var menuFor by remember { mutableStateOf<WhatsOn.Entry?>(null) }
-    RestoreFocusWhenClosed(menuFor != null, restorer)
+    var pickDay by remember { mutableStateOf(false) }
+    var pickKind by remember { mutableStateOf(false) }
+    var timeline by remember { mutableStateOf(false) }
+    RestoreFocusWhenClosed(menuFor != null || pickDay || pickKind, restorer)
     var focusedEntry by remember { mutableStateOf<WhatsOn.Entry?>(null) }
     val first = remember { FocusRequester() }
     val narrow = narrowScreen()
@@ -68,141 +74,140 @@ fun WhatsOnScreen(vm: TunerViewModel) {
     }
     // "Now" keeps up with the clock.
     LaunchedEffect(vm.now / 300_000) { if (vm.whatsOnMinute == null) vm.updateWhatsOn() }
-    val nowList = remember(result) { result?.main.orEmpty() }
-    val channels = remember(result) { nowList.map { it.channel } }
-    val shown = focusedEntry ?: result?.soon?.firstOrNull() ?: nowList.firstOrNull()
+    val main = remember(result) { result?.main.orEmpty() }
+    val soon = remember(result) { result?.soon.orEmpty() }
+    val channels = remember(result) { main.map { it.channel } }
+    val shown = focusedEntry ?: soon.firstOrNull() ?: main.firstOrNull()
     val shownFilm = shown?.let { vm.filmLookups[it.programme.title.trim()] }
-    val heroImage = shownFilm?.backdrop ?: shown?.programme?.image
+    val heroImage = shown?.let { pictureFor(vm, it) }
     val bgTop = rememberPictureTint(heroImage, vm.tintFromPicture)
     val context = androidx.compose.ui.platform.LocalContext.current
+
+    // Rows: the best picks, then one per kind (with "Everything"), or a grid of one kind.
+    val best = remember(result, vm.filmLookups.size) {
+        main.filter { e ->
+            val p = e.programme
+            val rating = vm.filmLookups[p.title.trim()]?.rating ?: 0.0
+            e.yourTeam || p.isPremiere || p.isNew || e.reason != null || rating >= 7.0 ||
+                (com.titanejstudios.tuner.data.Sports.classify(p, e.channel.group) != null && com.titanejstudios.tuner.data.Sports.looksLive(p))
+        }.take(16)
+    }
+    val byKind = remember(result) {
+        main.groupBy { Genres.of(it.programme.category, it.programme.title, it.channel.group) ?: "Other" }
+    }
+    val kindOrder = listOf("Sport", "Film", "Drama", "Entertainment", "Factual", "Kids", "Music", "News", "Other")
 
     fun open(e: WhatsOn.Entry) {
         restorer.key = e.channel.id + "|" + e.programme.start
         menuFor = e
     }
+    val onTile: (WhatsOn.Entry) -> Unit = { e ->
+        val p = e.programme
+        if (p.start <= vm.now && p.stop > vm.now) vm.watchFromWhatsOn(e.channel, channels) else vm.toggleReminder(e.channel, p)
+    }
+    val onFocus: (WhatsOn.Entry) -> Unit = { e ->
+        focusedEntry = e
+        vm.whatsOnFocused(e.channel, e.programme)
+    }
 
     Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(bgTop, TunerColors.BackgroundBottom)))) {
-        // The highlighted show's picture, top right, fading into the background.
         if (!narrow && heroImage != null) {
-            Box(Modifier.align(Alignment.TopEnd).fillMaxWidth(0.62f).height(330.dp)) {
+            Box(Modifier.align(Alignment.TopEnd).fillMaxWidth(0.55f).height(230.dp)) {
                 AsyncImage(
                     model = coil.request.ImageRequest.Builder(context).data(heroImage).crossfade(400).build(),
                     contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize(),
                 )
-                Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(listOf(bgTop, bgTop.copy(alpha = 0.7f), Color.Transparent))))
-                Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0.4f to Color.Transparent, 1f to bgTop)))
+                Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(listOf(bgTop, bgTop.copy(alpha = 0.6f), Color.Transparent))))
+                Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0.35f to Color.Transparent, 1f to bgTop)))
             }
         }
-        Column(Modifier.fillMaxSize().padding(horizontal = if (narrow) 12.dp else 44.dp, vertical = if (narrow) 10.dp else 22.dp)) {
+        Column(Modifier.fillMaxSize().padding(horizontal = if (narrow) 12.dp else 44.dp, vertical = if (narrow) 10.dp else 18.dp)) {
             TopNav(vm, Screen.WhatsOn)
-            if (!narrow) {
-                Spacer(Modifier.height(6.dp))
-                WhatsOnHero(vm, shown, shownFilm, Modifier.fillMaxWidth().height(170.dp))
-            }
-            Spacer(Modifier.height(6.dp))
-            // When: Now, ◀ time ▶, the days of the week.
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically, contentPadding = PaddingValues(vertical = 4.dp)) {
+            if (!narrow) WhatsOnStrip(vm, shown, shownFilm, Modifier.fillMaxWidth().height(104.dp))
+            // One row of controls.
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically, contentPadding = PaddingValues(vertical = 6.dp)) {
                 item(key = "now") { PillButton("Now", { vm.whatsOnNow() }, Modifier.focusRequester(first), selected = vm.whatsOnMinute == null, compact = true) }
                 item(key = "earlier") { PillButton("◀", { vm.stepWhatsOnTime(-1) }, compact = true) }
                 item(key = "time") {
-                    Text(
-                        if (vm.whatsOnMinute == null) "Now · " + hhmm(vm.now) else hhmm(vm.whatsOnAt),
-                        color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(horizontal = 4.dp),
-                    )
+                    Text(hhmm(vm.whatsOnAt), color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 2.dp))
                 }
                 item(key = "later") { PillButton("▶", { vm.stepWhatsOnTime(1) }, compact = true) }
                 item(key = "nine") { PillButton("9pm", { vm.chooseWhatsOnTime(21 * 60) }, selected = vm.whatsOnMinute == 21 * 60, compact = true) }
-                items(7, key = { "day$it" }) { d ->
-                    PillButton(WhatsOn.dayName(d, vm.now), { vm.chooseWhatsOnDay(d) }, selected = vm.whatsOnDay == d && (d > 0 || vm.whatsOnMinute != null), compact = true)
+                item(key = "day") { PillButton(WhatsOn.dayName(vm.whatsOnDay, vm.now) + " ▾", { pickDay = true }, compact = true) }
+                item(key = "kind") { PillButton((vm.whatsOnGenre ?: "Everything") + " ▾", { pickKind = true }, selected = vm.whatsOnGenre != null, compact = true) }
+                item(key = "fav") {
+                    PillButton(if (vm.whatsOnFavouritesOnly) "★" else "☆", {
+                        vm.whatsOnFavouritesOnly = !vm.whatsOnFavouritesOnly
+                        vm.updateWhatsOn()
+                    }, selected = vm.whatsOnFavouritesOnly, compact = true)
                 }
+                item(key = "tidy") { PillButton("🧹", { vm.toggleWhatsOnTidy() }, selected = vm.whatsOnTidy, compact = true) }
+                item(key = "timeline") { PillButton("🕒 Timeline", { timeline = !timeline }, selected = timeline, compact = true) }
+                if (!narrow) item(key = "preview") { PillButton("📺", { vm.toggleWhatsOnPreview() }, selected = vm.whatsOnPreview, compact = true) }
+                if (vm.catchupChannels.isNotEmpty()) item(key = "catchup") { PillButton("⏪ Catch-up", { vm.navigate(Screen.Catchup) }, compact = true) }
             }
-            // What: kinds, favourites, tidy, preview.
-            val genres = listOf<String?>(null) + Genres.all
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(vertical = 4.dp)) {
-                items(genres.size, key = { "genre" + (genres[it] ?: "all") }) { i ->
-                    val g = genres[i]
-                    PillButton(
-                        g ?: "Everything",
-                        {
-                            vm.whatsOnGenre = g
-                            vm.updateWhatsOn()
-                        },
-                        selected = g == vm.whatsOnGenre,
-                        compact = true,
-                    )
-                }
-                item(key = "favonly") {
-                    PillButton(
-                        if (vm.whatsOnFavouritesOnly) "★ Favourites only" else "☆ All channels",
-                        {
-                            vm.whatsOnFavouritesOnly = !vm.whatsOnFavouritesOnly
-                            vm.updateWhatsOn()
-                        },
-                        compact = true,
-                    )
-                }
-                item(key = "tidy") {
-                    PillButton(if (vm.whatsOnTidy) "🧹 Tidy" else "Showing every channel", { vm.toggleWhatsOnTidy() }, selected = vm.whatsOnTidy, compact = true)
-                }
-                if (!narrow) item(key = "preview") {
-                    PillButton(if (vm.whatsOnPreview) "📺 Preview on" else "📺 Preview off", { vm.toggleWhatsOnPreview() }, selected = vm.whatsOnPreview, compact = true)
-                }
-                if (vm.catchupChannels.isNotEmpty()) item(key = "catchup") {
-                    PillButton("⏪ Catch-up", { vm.navigate(Screen.Catchup) }, compact = true)
-                }
-            }
-            Spacer(Modifier.height(6.dp))
             when {
                 result == null -> CenterMessage("⟳  Looking through the guide…")
-                result.soon.isEmpty() && result.main.isEmpty() -> CenterMessage(
+                soon.isEmpty() && main.isEmpty() -> CenterMessage(
                     if (vm.epg.isEmpty()) "No TV guide yet – it loads after the channels" else "Nothing found for that – try another time or kind"
                 )
-                else -> LazyColumn(Modifier.widthIn(max = 1200.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    if (result.soon.isNotEmpty()) {
-                        item(key = "h-soon") { WhatsOnSection("Starting soon") }
-                        items(result.soon.size, key = { "s" + result.soon[it].channel.id + "|" + result.soon[it].programme.start }) { i ->
-                            val e = result.soon[i]
-                            WhatsOnRow(
-                                vm, e, restorer,
-                                onFocused = {
-                                    focusedEntry = e
-                                    vm.whatsOnFocused(e.channel, e.programme)
-                                },
-                                // One press: remind me (or cancel it).
-                                onClick = { vm.toggleReminder(e.channel, e.programme) },
-                                onLongClick = { open(e) },
-                            )
-                        }
-                    }
-                    if (nowList.isNotEmpty()) {
-                        item(key = "h-main") {
-                            WhatsOnSection(
-                                when {
-                                    vm.whatsOnMinute == null -> "On now · for you"
-                                    else -> "On at ${hhmm(vm.whatsOnAt)} " + WhatsOn.dayName(vm.whatsOnDay, vm.now).let { if (vm.whatsOnDay <= 1) it.lowercase() else "on $it" } + " · for you"
+                timeline -> WhatsOnTimeline(vm, main, restorer, onFocus, onTile) { open(it) }
+                else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp), contentPadding = PaddingValues(bottom = 24.dp)) {
+                    fun row(title: String, list: List<WhatsOn.Entry>) {
+                        if (list.isEmpty()) return
+                        item(key = "h-$title") { WhatsOnSection(title) }
+                        item(key = "r-$title") {
+                            LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(vertical = 6.dp, horizontal = 4.dp)) {
+                                items(list.size, key = { list[it].channel.id + "|" + list[it].programme.start }) { i ->
+                                    val e = list[i]
+                                    WhatsOnTile(vm, e, restorer, narrow, onFocused = { onFocus(e) }, onClick = { onTile(e) }, onLongClick = { open(e) })
                                 }
-                            )
+                            }
                         }
                     }
-                    items(nowList.size, key = { "m" + nowList[it].channel.id + "|" + nowList[it].programme.start }) { i ->
-                        val e = nowList[i]
-                        val onNow = e.programme.start <= vm.now && e.programme.stop > vm.now
-                        WhatsOnRow(
-                            vm, e, restorer,
-                            onFocused = {
-                                focusedEntry = e
-                                vm.whatsOnFocused(e.channel, e.programme)
-                            },
-                            onClick = { if (onNow) vm.watchFromWhatsOn(e.channel, channels) else open(e) },
-                            onLongClick = { open(e) },
-                        )
+                    val at = if (vm.whatsOnMinute == null) "now" else "at ${hhmm(vm.whatsOnAt)}"
+                    if (vm.whatsOnGenre == null) {
+                        row("Tonight's best · for you", best)
+                        row("Starting soon", soon)
+                        for (k in kindOrder) row(if (k == "Other") "Everything else $at" else "$k $at", byKind[k].orEmpty())
+                    } else {
+                        row("Starting soon", soon)
+                        // One kind: a grid, a few to a row.
+                        val per = if (narrow) 2 else 5
+                        item(key = "h-grid") { WhatsOnSection("${vm.whatsOnGenre} $at · for you") }
+                        val chunks = main.chunked(per)
+                        items(chunks.size, key = { "g$it" }) { r ->
+                            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.padding(vertical = 6.dp, horizontal = 4.dp)) {
+                                chunks[r].forEach { e ->
+                                    WhatsOnTile(vm, e, restorer, narrow, onFocused = { onFocus(e) }, onClick = { onTile(e) }, onLongClick = { open(e) })
+                                }
+                            }
+                        }
                     }
                 }
             }
         }
     }
 
+    if (pickDay) {
+        MenuDialog(
+            "Which day?",
+            (0..6).map { d -> MenuItem(WhatsOn.dayName(d, vm.now), if (d == vm.whatsOnDay) "✓" else null) { vm.chooseWhatsOnDay(d) } },
+            onDismiss = { pickDay = false },
+        )
+    }
+    if (pickKind) {
+        MenuDialog(
+            "What kind?",
+            (listOf<String?>(null) + Genres.all).map { g ->
+                MenuItem(g ?: "Everything", if (g == vm.whatsOnGenre) "✓" else null) {
+                    vm.whatsOnGenre = g
+                    vm.updateWhatsOn()
+                }
+            },
+            onDismiss = { pickKind = false },
+        )
+    }
     menuFor?.let { e ->
         val ch = e.channel
         val p = e.programme
@@ -222,16 +227,23 @@ fun WhatsOnScreen(vm: TunerViewModel) {
     }
 }
 
-@Composable
-private fun WhatsOnSection(text: String) {
-    Text(text, color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 6.dp, bottom = 2.dp))
+/** The best picture for a show: the guide's own, a film's backdrop, or a TV show's from TMDB. */
+private fun pictureFor(vm: TunerViewModel, e: WhatsOn.Entry): String? {
+    val t = e.programme.title.trim()
+    return e.programme.image ?: vm.filmLookups[t]?.backdrop ?: vm.showPictures[t]
 }
 
-/** The NEW / PREMIERE / FINAL / JUST STARTED / YOUR TEAM labels for a show. */
+@Composable
+private fun WhatsOnSection(text: String) {
+    Text(text, color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 6.dp, start = 4.dp))
+}
+
+/** The NEW / PREMIERE / FINAL / JUST STARTED / LIVE / YOUR TEAM labels for a show. */
 private fun badgesFor(e: WhatsOn.Entry, now: Long): List<Pair<String, Color>> = buildList {
     val p = e.programme
     if (e.yourTeam) add("YOUR TEAM" to Color(0xFF2E9E5B))
-    if (com.titanejstudios.tuner.data.Sports.classify(p, e.channel.group) != null && com.titanejstudios.tuner.data.Sports.looksLive(p) && p.start <= now) add("LIVE" to Color(0xFFE5243B))
+    // A live broadcast says so before it starts too ("Live: Champions League" in Starting soon).
+    if (com.titanejstudios.tuner.data.Sports.classify(p, e.channel.group) != null && com.titanejstudios.tuner.data.Sports.looksLive(p)) add("LIVE" to Color(0xFFE5243B))
     if (p.isPremiere) add("PREMIERE" to Color(0xFF8E44AD))
     else if (p.isNew) add("NEW" to Color(0xFF1E88E5))
     if (p.isFinal) add("FINAL" to Color(0xFFD35400))
@@ -241,8 +253,8 @@ private fun badgesFor(e: WhatsOn.Entry, now: Long): List<Pair<String, Color>> = 
 @Composable
 private fun Badge(text: String, colour: Color) {
     Text(
-        text, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1,
-        modifier = Modifier.clip(RoundedCornerShape(5.dp)).background(colour).padding(horizontal = 6.dp, vertical = 1.dp),
+        text, color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold, maxLines = 1,
+        modifier = Modifier.clip(RoundedCornerShape(5.dp)).background(colour).padding(horizontal = 5.dp, vertical = 1.dp),
     )
 }
 
@@ -260,48 +272,42 @@ private fun detailLine(e: WhatsOn.Entry, film: com.titanejstudios.tuner.integrat
     return bits.takeIf { it.isNotEmpty() }?.joinToString("  ·  ")
 }
 
-/** The big area at the top: everything about the highlighted show, and the live preview. */
+/** The slim strip at the top: the highlighted show, and the live preview beside it. */
 @Composable
-private fun WhatsOnHero(vm: TunerViewModel, e: WhatsOn.Entry?, film: com.titanejstudios.tuner.integrations.Tmdb.Info?, modifier: Modifier) {
+private fun WhatsOnStrip(vm: TunerViewModel, e: WhatsOn.Entry?, film: com.titanejstudios.tuner.integrations.Tmdb.Info?, modifier: Modifier) {
     Box(modifier) {
         if (e == null) return@Box
         val p = e.programme
-        Column(Modifier.fillMaxWidth(0.56f).fillMaxHeight()) {
-            val badges = badgesFor(e, vm.now)
-            val label = e.reason?.uppercase()
-            if (badges.isNotEmpty() || label != null) {
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    badges.forEach { (t, c) -> Badge(t, c) }
-                    label?.let { Text(it, color = Color(0xFFFFB648), fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) }
-                }
-                Spacer(Modifier.height(4.dp))
+        Column(Modifier.fillMaxWidth(0.6f).fillMaxHeight().padding(top = 4.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                badgesFor(e, vm.now).forEach { (t, c) -> Badge(t, c) }
+                e.reason?.let { Text(it.uppercase(), color = Color(0xFFFFB648), fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) }
             }
-            Text(p.title, color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(p.title, color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(
-                "${e.channel.name}  ·  ${dayLabel(p.start)} ${hhmm(p.start)} – ${hhmm(p.stop)}" + (detailLine(e, film)?.let { "  ·  $it" } ?: ""),
-                color = Color(0xFFD4DDF5), fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                listOfNotNull(
+                    e.channel.name, "${hhmm(p.start)} – ${hhmm(p.stop)}", detailLine(e, film),
+                    e.next?.let { "then ${it.title}" }, e.alsoOn,
+                ).joinToString("  ·  "),
+                color = Color(0xFFD4DDF5), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
-            Spacer(Modifier.height(6.dp))
-            AutoScrollText(p.desc ?: film?.overview ?: "", Modifier.weight(1f).fillMaxWidth(), fontSize = 15.sp)
-            val after = listOfNotNull(e.next?.let { "Next: ${it.title} at ${hhmm(it.start)}" }, e.alsoOn)
-            if (after.isNotEmpty()) Text(after.joinToString("   ·   "), color = TunerColors.TextSecondary, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(p.desc ?: film?.overview ?: "", color = Color(0xFFBFC9E8), fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
-        when {
-            vm.whatsOnPreview && vm.mode != null -> MiniPreview(vm, Modifier.align(Alignment.TopEnd).fillMaxHeight().aspectRatio(16f / 9f))
-            film?.poster != null -> AsyncImage(
-                model = film.poster, contentDescription = null, contentScale = ContentScale.Fit,
-                modifier = Modifier.align(Alignment.TopEnd).fillMaxHeight().aspectRatio(2f / 3f).clip(RoundedCornerShape(10.dp)),
-            )
-            p.image == null -> ChannelLogo(e.channel.logo, e.channel.name, Modifier.align(Alignment.TopEnd).padding(top = 12.dp).size(width = 200.dp, height = 100.dp))
+        if (vm.whatsOnPreview && vm.mode != null) {
+            MiniPreview(vm, Modifier.align(Alignment.TopEnd).fillMaxHeight().aspectRatio(16f / 9f))
         }
     }
 }
 
+private val TILE_WIDE = 214.dp
+
+/** A show as a picture tile: OK watches (on now) or reminds (later); ▶ records; hold OK for more. */
 @Composable
-private fun WhatsOnRow(
+private fun WhatsOnTile(
     vm: TunerViewModel,
     e: WhatsOn.Entry,
     restorer: FocusRestorer,
+    narrow: Boolean,
     onFocused: () -> Unit,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
@@ -310,53 +316,120 @@ private fun WhatsOnRow(
     val key = e.channel.id + "|" + p.start
     val now = vm.now
     val onNow = p.start <= now && p.stop > now
+    val picture = pictureFor(vm, e)
     val film = vm.filmLookups[p.title.trim()]
-    val narrow = narrowScreen()
+    val width = if (narrow) 160.dp else TILE_WIDE
     FocusSurface(
         onClick = onClick,
         onLongClick = onLongClick,
         onFocused = onFocused,
         baseColor = TunerColors.Panel,
-        modifier = Modifier.fillMaxWidth().height(if (narrow) 84.dp else 78.dp).then(restorer.mod(key)),
+        zoom = true,
+        modifier = Modifier.width(width).then(restorer.mod(key)).onPreviewKeyEvent { ev ->
+            val code = ev.nativeKeyEvent.keyCode
+            val record = code == android.view.KeyEvent.KEYCODE_MEDIA_PLAY || code == android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE ||
+                code == android.view.KeyEvent.KEYCODE_MEDIA_RECORD || code == android.view.KeyEvent.KEYCODE_PROG_RED
+            if (record && !vm.activeProfile.kids) {
+                if (ev.type == androidx.compose.ui.input.key.KeyEventType.KeyUp) vm.toggleRecordFromWhatsOn(e.channel, p)
+                true
+            } else false
+        },
     ) { focused ->
-        Row(Modifier.fillMaxSize().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(width = 112.dp, height = 63.dp).clip(RoundedCornerShape(6.dp)).background(Color(0x22FFFFFF))) {
+        Column(Modifier.fillMaxWidth()) {
+            Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(topStart = 10.dp, topEnd = 10.dp)).background(Color(0x22FFFFFF))) {
                 when {
-                    film?.poster != null -> Row(Modifier.fillMaxSize()) {
-                        AsyncImage(model = film.poster, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxHeight().aspectRatio(2f / 3f))
-                        ChannelLogo(e.channel.logo, e.channel.name, Modifier.fillMaxSize().padding(4.dp))
+                    picture != null -> AsyncImage(model = picture, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                    film?.poster != null -> AsyncImage(model = film.poster, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize())
+                    else -> ChannelLogo(e.channel.logo, e.channel.name, Modifier.fillMaxSize().padding(18.dp))
+                }
+                // The channel in the corner (when the picture isn't its logo).
+                if (picture != null || film?.poster != null) {
+                    Box(Modifier.align(Alignment.TopStart).padding(5.dp).size(width = 52.dp, height = 28.dp).clip(RoundedCornerShape(5.dp)).background(Color(0xCC0B0E12))) {
+                        ChannelLogo(e.channel.logo, e.channel.name, Modifier.fillMaxSize().padding(2.dp))
                     }
-                    p.image != null -> AsyncImage(model = p.image, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-                    else -> ChannelLogo(e.channel.logo, e.channel.name, Modifier.fillMaxSize())
+                }
+                Column(Modifier.align(Alignment.TopEnd).padding(5.dp), horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    badgesFor(e, now).take(2).forEach { (t, c) -> Badge(t, c) }
+                }
+                Row(Modifier.align(Alignment.BottomEnd).padding(5.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    if (vm.hasReminder(e.channel, p)) Text("🔔", fontSize = 13.sp)
+                    if (vm.recordingFor(e.channel, p) != null) Text("●", color = Color(0xFFFF4D4D), fontSize = 14.sp)
+                }
+                if (onNow) {
+                    Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(4.dp).background(Color(0x55FFFFFF))) {
+                        Box(Modifier.fillMaxWidth(progressOf(p, now).coerceIn(0.02f, 1f)).fillMaxHeight().background(if (focused) Color.White else TunerColors.Accent))
+                    }
                 }
             }
-            Spacer(Modifier.width(14.dp))
-            Column(Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(p.title, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
-                    badgesFor(e, now).take(if (narrow) 1 else 3).forEach { (t, c) -> Badge(t, c) }
-                    if (!narrow) GenreChip(p.category)
-                }
+            Column(Modifier.padding(horizontal = 8.dp, vertical = 6.dp)) {
+                Text(p.title, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 val starts = if (p.start > now && p.start - now <= 60 * 60_000L) "in ${(p.start - now + 59_999) / 60_000} min" else null
                 Text(
-                    listOfNotNull(
-                        e.channel.name,
-                        "${hhmm(p.start)} – ${hhmm(p.stop)}",
-                        starts,
-                        detailLine(e, film),
-                        e.alsoOn,
-                        if (narrow) null else p.desc,
-                    ).joinToString("  ·  "),
-                    color = if (focused) Color(0xDDFFFFFF) else TunerColors.TextSecondary,
-                    fontSize = 14.sp,
-                    maxLines = if (narrow) 2 else 1,
-                    overflow = TextOverflow.Ellipsis,
+                    listOfNotNull(if (onNow) "until ${hhmm(p.stop)}" else hhmm(p.start), starts, film?.rating?.let { com.titanejstudios.tuner.integrations.Tmdb.ratingText(it) }, p.episodeLabel)
+                        .joinToString("  ·  "),
+                    color = if (focused) Color(0xEEFFFFFF) else TunerColors.TextSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 )
-                if (onNow) ProgressBar(progressOf(p, now), Modifier.padding(top = 5.dp).width(if (narrow) 120.dp else 220.dp), color = if (focused) Color.White else TunerColors.Accent)
             }
-            if (vm.hasReminder(e.channel, p)) Text("🔔", fontSize = 18.sp)
-            if (vm.recordingFor(e.channel, p) != null) Text("  ●", color = TunerColors.NowLine, fontSize = 18.sp)
-            if (p.start > now && focused && !narrow) Text(if (vm.hasReminder(e.channel, p)) "  OK: cancel reminder" else "  OK: remind me", color = Color.White, fontSize = 13.sp)
+        }
+    }
+}
+
+/** 🕒 Timeline: what's on each channel for the next three hours, as bars. */
+@Composable
+private fun WhatsOnTimeline(
+    vm: TunerViewModel,
+    entries: List<WhatsOn.Entry>,
+    restorer: FocusRestorer,
+    onFocus: (WhatsOn.Entry) -> Unit,
+    onClick: (WhatsOn.Entry) -> Unit,
+    onMenu: (WhatsOn.Entry) -> Unit,
+) {
+    val from = vm.whatsOnAt / (30 * 60_000L) * (30 * 60_000L)
+    val span = 3 * 3_600_000L
+    val to = from + span
+    val chans = remember(entries) { entries.map { it.channel }.distinctBy { it.id }.take(60) }
+    androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize()) {
+        val logoW = 110.dp
+        val barW = maxWidth - logoW - 12.dp
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp), contentPadding = PaddingValues(bottom = 24.dp)) {
+            // Times along the top.
+            item(key = "times") {
+                Row(Modifier.padding(start = logoW + 12.dp)) {
+                    for (h in 0 until 6) {
+                        Text(hhmm(from + h * 30 * 60_000L), color = TunerColors.TextSecondary, fontSize = 12.sp, modifier = Modifier.width(barW / 6))
+                    }
+                }
+            }
+            items(chans.size, key = { "t" + chans[it].id }) { i ->
+                val c = chans[i]
+                val progs = vm.programmesFor(c.id).filter { it.stop > from && it.start < to }
+                Row(Modifier.height(48.dp), verticalAlignment = Alignment.CenterVertically) {
+                    ChannelLogo(c.logo, c.name, Modifier.width(logoW).fillMaxHeight().padding(4.dp))
+                    Spacer(Modifier.width(12.dp))
+                    Box(Modifier.width(barW).fillMaxHeight()) {
+                        progs.forEach { p ->
+                            val s = maxOf(p.start, from)
+                            val e2 = minOf(p.stop, to)
+                            val x = barW * ((s - from).toFloat() / span)
+                            val w = barW * ((e2 - s).toFloat() / span)
+                            val entry = WhatsOn.Entry(c, p, null, null, null, false, c.id in vm.favouriteSet)
+                            FocusSurface(
+                                onClick = { onClick(entry) },
+                                onLongClick = { onMenu(entry) },
+                                onFocused = { onFocus(entry) },
+                                baseColor = if (p.start <= vm.now && p.stop > vm.now) Color(0x553D7BFF) else TunerColors.Panel,
+                                shape = RoundedCornerShape(6.dp),
+                                modifier = Modifier.offset(x = x).width((w - 3.dp).coerceAtLeast(6.dp)).fillMaxHeight().then(restorer.mod(c.id + "|" + p.start)),
+                            ) { focused ->
+                                Text(
+                                    p.title, color = if (focused) Color.White else Color(0xFFDDE4FA), fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }

@@ -198,17 +198,46 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     val canGoBack: Boolean get() = stack.size > 1
 
     fun navigate(to: Screen) {
-        if (to == Screen.Settings && activeProfile.kids && pin != null) {
-            requestPin { if (stack.last() != to) stack.add(to); afterNavigation() }
+        // Kids get their own small Settings page; everything else needs a grown-up.
+        if (to == Screen.Settings) grownUpSettings = false
+        if (activeProfile.kids && !grownUpSettings && to in grownUpScreens) {
+            unlockGrownUpSettings { if (stack.last() != to) stack.add(to); afterNavigation() }
             return
         }
         if (stack.last() != to) stack.add(to)
         afterNavigation()
     }
 
+    /** A grown-up has unlocked the full Settings on a kids' profile (until they leave Settings). */
+    var grownUpSettings by mutableStateOf(false); private set
+
+    /** Screens only reachable from the full Settings. */
+    private val grownUpScreens = setOf(
+        Screen.SourceEdit, Screen.ProfileEdit, Screen.PhoneSetup, Screen.EpgMap, Screen.Log, Screen.Stats, Screen.ShareTv,
+        Screen.Update, Screen.SelfTest, Screen.HomeRows, Screen.Languages, Screen.Recommendations, Screen.Vpn, Screen.Link,
+        Screen.Cloud, Screen.Recordings, Screen.Apps, Screen.Manage,
+    )
+
+    /** "Grown-up settings" on a kids' profile: the parental PIN, or (with no PIN set) a nudge to set one. */
+    fun unlockGrownUpSettings(then: () -> Unit = {}) {
+        if (!activeProfile.kids) {
+            then()
+            return
+        }
+        if (pin == null) {
+            showNotice("Grown-ups: switch to your own profile and set a PIN in Settings › Parental controls")
+            return
+        }
+        requestPin {
+            grownUpSettings = true
+            then()
+        }
+    }
+
     fun back() {
         if (stack.size <= 1) return
         val left = stack.removeAt(stack.size - 1)
+        if (Screen.Settings !in stack) grownUpSettings = false
         when (left) {
             Screen.Player -> when (mode) {
                 is PlayMode.Vod -> { saveResume(syncHome = true); stopPlayback() }
@@ -3411,7 +3440,12 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         whatsOnJob = viewModelScope.launch {
             val r = withContext(Dispatchers.Default) { WhatsOn.build(chans, guide, at, isNow, genre, favs, favOnly, tidy, tasteNow, teams) }
             whatsOnResult = r
-            lookUpFilms((r.soon + r.main).filter { Genres.of(it.programme.category, it.programme.title, it.channel.group) == "Film" }.take(24).map { it.programme.title })
+            val all = r.soon + r.main
+            lookUpFilms(all.filter { Genres.of(it.programme.category, it.programme.title, it.channel.group) == "Film" }.take(24).map { it.programme.title })
+            lookUpShowPictures(
+                all.filter { it.programme.image == null && Genres.of(it.programme.category, it.programme.title, it.channel.group).let { g -> g != "Film" && g != "News" && g != "Sport" } }
+                    .map { it.programme.title }
+            )
         }
     }
 
@@ -3426,6 +3460,33 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
                 filmLookups[title] = info
             }
         }
+    }
+
+    /** Pictures for TV shows the guide has none for (TMDB, if there's a key): title → wide picture. */
+    val showPictures = androidx.compose.runtime.mutableStateMapOf<String, String?>()
+    private val showPicturesAsked = HashSet<String>()
+
+    fun lookUpShowPictures(titles: List<String>) {
+        val key = tmdbKey ?: return
+        val todo = titles.map { it.trim() }.filter { it.isNotEmpty() && showPicturesAsked.add(it) }.take(40)
+        if (todo.isEmpty()) return
+        viewModelScope.launch {
+            for (title in todo) {
+                val info = withContext(Dispatchers.IO) { runCatching { Tmdb.lookup(key, title, true) }.getOrNull() }
+                showPictures[title] = info?.backdrop ?: info?.poster
+            }
+        }
+    }
+
+    /** ▶ on a What's On tile: record it (or stop recording). Grown-ups only. */
+    fun toggleRecordFromWhatsOn(c: Channel, p: Programme) {
+        if (activeProfile.kids) return
+        if (p.stop <= System.currentTimeMillis()) return
+        val rec = recordingFor(c, p)
+        if (rec != null) {
+            stopRecording(rec)
+            showNotice("Recording cancelled: ${p.title}")
+        } else recordProgramme(c, p)
     }
 
     /**

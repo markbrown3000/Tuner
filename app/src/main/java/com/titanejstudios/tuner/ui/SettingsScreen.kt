@@ -45,6 +45,11 @@ import kotlinx.coroutines.delay
 
 @Composable
 fun SettingsScreen(vm: TunerViewModel) {
+    // Kids' profiles get a small page of their own; the rest needs a grown-up (the parental PIN).
+    if (vm.activeProfile.kids && !vm.grownUpSettings) {
+        KidsSettingsScreen(vm)
+        return
+    }
     var menuFor by remember { mutableStateOf<Source?>(null) }
     var confirmDelete by remember { mutableStateOf<Source?>(null) }
     var profileMenu by remember { mutableStateOf<Profile?>(null) }
@@ -894,6 +899,45 @@ fun SettingRow(
             }
             detail?.let {
                 Text(it, color = if (focused) Color.White else TunerColors.Catchup, fontSize = 15.sp)
+            }
+        }
+    }
+}
+
+
+/** Settings on a kids' profile: just the safe bits, and a PIN-locked way in for grown-ups. */
+@Composable
+private fun KidsSettingsScreen(vm: TunerViewModel) {
+    val first = remember { FocusRequester() }
+    LaunchedEffect(Unit) {
+        delay(60)
+        runCatching { first.requestFocus() }
+    }
+    Column(
+        Modifier
+            .fillMaxSize()
+            .skyBackground()
+            .padding(horizontal = if (narrowScreen()) 12.dp else 64.dp, vertical = if (narrowScreen()) 12.dp else 32.dp)
+    ) {
+        Text("Settings", fontSize = 32.sp, fontWeight = FontWeight.Bold, color = TunerColors.TextPrimary)
+        Spacer(Modifier.height(16.dp))
+        LazyColumn(Modifier.widthIn(max = 980.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            item {
+                SettingRow(
+                    "👤 Change profile", subtitle = "Who's watching?", detail = vm.activeProfile.name,
+                    modifier = Modifier.focusRequester(first), onClick = { vm.navigate(Screen.ProfilePicker) },
+                )
+            }
+            item { SettingRow("Subtitle size", detail = vm.subtitleSizeLabel, onClick = { vm.cycleSubtitleSize() }) }
+            item { SettingRow("Text size", detail = vm.textScaleLabel, onClick = { vm.cycleTextScale() }) }
+            item { SettingRow("Clearer speech", subtitle = "Makes voices easier to hear", detail = if (vm.clearSpeech) "On" else "Off", onClick = { vm.toggleClearSpeech() }) }
+            item { Spacer(Modifier.height(10.dp)) }
+            item {
+                SettingRow(
+                    "🔒 Grown-up settings",
+                    subtitle = if (vm.pin != null) "Needs the parental PIN" else "Grown-ups: set a PIN on your own profile first (Settings › Parental controls)",
+                    onClick = { vm.unlockGrownUpSettings() },
+                )
             }
         }
     }
