@@ -36,6 +36,17 @@ class Plex(private val clientId: String) {
 
     private val PAGE = 200
 
+    /**
+     * The file address for a film or episode. Search results sometimes leave it out, so this
+     * asks the server for the item itself. Null if Plex won't say.
+     */
+    fun playUrlFor(server: Server, ratingKey: String): String? {
+        val root = JSONObject(read(open("${server.uri}/library/metadata/$ratingKey", token = server.token, timeoutMs = 10_000)))
+        val m = root.optJSONObject("MediaContainer")?.optJSONArray("Metadata")?.optJSONObject(0) ?: return null
+        val part = m.optJSONArray("Media")?.optJSONObject(0)?.optJSONArray("Part")?.optJSONObject(0)?.optString("key")
+        return part?.takeIf { it.isNotBlank() }?.let { "${server.uri}$it?X-Plex-Token=${server.token}" }
+    }
+
     private fun open(url: String, method: String = "GET", token: String? = null, timeoutMs: Int = 10_000): HttpURLConnection =
         (URL(url).openConnection() as HttpURLConnection).apply {
             requestMethod = method

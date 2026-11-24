@@ -90,6 +90,7 @@ import com.titanejstudios.tuner.ui.hhmm
 import com.titanejstudios.tuner.ui.dayLabel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.collectLatest
@@ -2454,13 +2455,16 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         if (viaPlex && plexLinked && preferPlexFilms) {
             viewModelScope.launch {
                 val (title, year) = FilmName.parse(m.name)
-                val copies = withTimeoutOrNull(5_000) { plexFeature.copiesOf(title, year) }.orEmpty()
+                showNotice("Starting ${m.name}…")
+                // The lookup runs on its own, so a slow Plex server can't hold the film up for more than 5 seconds.
+                val lookup = viewModelScope.async { plexFeature.copiesOf(title, year) }
+                val copies = withTimeoutOrNull(5_000) { lookup.await() }.orEmpty()
                     .filter { !activeProfile.kids || plexFeature.isKidsEntry(it) }
                 when {
                     copies.isEmpty() -> playMovie(m, fromStart, viaPlex = false)
                     copies.size == 1 -> {
                         showNotice("Playing from Plex" + (copies[0].library?.let { " ($it)" } ?: "") + " – hold OK on the film for the IPTV copy")
-                        playPlexEntry(copies[0], fromStart, chosen = true)
+                        playPlexEntry(copies[0], fromStart, chosen = true) { playMovie(m, fromStart, viaPlex = false) }
                     }
                     else -> plexCopyChoice = PlexCopyChoice(m.name, copies, fromStart, m)
                 }
@@ -2497,7 +2501,11 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
 
     private fun startVod(m: PlayMode.Vod, fromStart: Boolean, startAt: Long? = null) {
         // Downloads play from the phone itself, so the VPN kill switch doesn't apply.
-        if (!m.url.startsWith("file:") && vpnBlocks()) return
+        if (!m.url.startsWith("file:") && vpnBlocks()) {
+            AppLog.info("Didn't play ${m.title}: the VPN kill switch is on and the VPN isn't connected")
+            return
+        }
+        AppLog.info("Playing ${m.title}" + (m.subtitle?.let { " ($it)" } ?: ""))
         if (mode is PlayMode.Vod) saveResume(syncHome = false)
         mode = m
         val start = if (fromStart) 0L else startAt ?: resume[m.contentId]?.positionMs ?: 0L
@@ -3229,10 +3237,28 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         plexFeature.refresh(force)
     }
 
-    fun playPlex(item: Plex.Item, fromStart: Boolean = false) {
+    fun playPlex(item: Plex.Item, fromStart: Boolean = false, fallback: (() -> Unit)? = null) {
         val url = item.playUrl
         if (url == null) {
-            openPlexApp()
+            // Search results can leave out the file's address: ask Plex for it.
+            viewModelScope.launch {
+                val found = withContext(Dispatchers.IO) {
+                    runCatching { Plex(store.plexClientId).playUrlFor(item.server, item.ratingKey) }
+                        .onFailure { AppLog.warn("Plex didn't give the file for ${item.title}", it) }
+                        .getOrNull()
+                }
+                when {
+                    found != null -> playPlex(
+                        Plex.Item(item.ratingKey, item.title, item.subtitle, item.image, found, item.viewOffsetMs, item.durationMs, item.server),
+                        fromStart,
+                    )
+                    fallback != null -> {
+                        showNotice("Plex wouldn't play ${item.title} – playing your provider's copy")
+                        fallback()
+                    }
+                    else -> showNotice("Plex wouldn't play ${item.title} – is the Plex server on?")
+                }
+            }
             return
         }
         if (mode is PlayMode.Vod) saveResume(syncHome = false)
@@ -3261,22 +3287,29 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     }
 
     /** Plays a Plex film or episode. Episodes queue up the rest of the show after them. */
-    fun playPlexEntry(entry: com.titanejstudios.tuner.integrations.Plex.Entry, fromStart: Boolean = false, chosen: Boolean = false) {
+    fun playPlexEntry(
+        entry: com.titanejstudios.tuner.integrations.Plex.Entry,
+        fromStart: Boolean = false,
+        chosen: Boolean = false,
+        /** What to play instead if Plex won't give the file (the IPTV copy). */
+        fallback: (() -> Unit)? = null,
+    ) {
         // "Because you watched…": the film, or the show an episode belongs to.
         (if (entry.type == "episode") plexFeature.show else entry)?.let { rememberWatched("plex", it.ratingKey, it.title, it.server.machineId) }
         if (entry.type == "movie" && !chosen) {
             // In Films and Films 4K? Ask which copy to play.
             viewModelScope.launch {
-                val copies = withTimeoutOrNull(5_000) { plexFeature.copiesOf(entry.title, entry.year) }.orEmpty()
+                val lookup = viewModelScope.async { plexFeature.copiesOf(entry.title, entry.year) }
+                val copies = withTimeoutOrNull(5_000) { lookup.await() }.orEmpty()
                     .filter { !activeProfile.kids || plexFeature.isKidsEntry(it) }
                 if (copies.size > 1) plexCopyChoice = PlexCopyChoice(entry.title, copies, fromStart, null)
-                else playPlexEntry(entry, fromStart, chosen = true)
+                else playPlexEntry(entry, fromStart, chosen = true, fallback = fallback)
             }
             return
         }
         val show = plexFeature.show
         val item = entry.toItem(if (entry.type == "episode") show?.title else null)
-        playPlex(item, fromStart)
+        playPlex(item, fromStart, fallback)
         if (entry.type == "episode") {
             plexEpisodeQueue = plexFeature.showEpisodes.orEmpty().dropWhile { it.ratingKey != entry.ratingKey }.drop(1)
         }
@@ -3287,7 +3320,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     fun choosePlexCopy(copy: com.titanejstudios.tuner.integrations.Plex.Entry?) {
         val c = plexCopyChoice ?: return
         plexCopyChoice = null
-        if (copy != null) playPlexEntry(copy, c.fromStart, chosen = true)
+        if (copy != null) playPlexEntry(copy, c.fromStart, chosen = true, fallback = c.iptv?.let { m -> { playMovie(m, c.fromStart, viaPlex = false) } })
         else c.iptv?.let { playMovie(it, c.fromStart, viaPlex = false) }
     }
 

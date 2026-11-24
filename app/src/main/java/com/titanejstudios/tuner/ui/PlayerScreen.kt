@@ -67,7 +67,7 @@ import com.titanejstudios.tuner.data.Programme
 import kotlinx.coroutines.delay
 import android.view.KeyEvent as AndroidKey
 
-private enum class Overlay { None, Channels, Options, Audio, Subtitles, MiniGuide, Favourites, Sleep, LipSync, Versions, Send }
+private enum class Overlay { None, Channels, Options, Audio, Subtitles, MiniGuide, Favourites, Sleep, LipSync, Versions, Send, Controls }
 
 @Composable
 fun PlayerScreen(vm: TunerViewModel) {
@@ -92,6 +92,8 @@ fun PlayerScreen(vm: TunerViewModel) {
     var position by remember { mutableLongStateOf(0L) }
     var duration by remember { mutableLongStateOf(0L) }
     var behind by remember { mutableLongStateOf(0L) }
+    // The on-screen buttons (OK on live TV) hide after 8 seconds without a button press.
+    var controlsTick by remember { mutableIntStateOf(0) }
     var okDown by remember { mutableStateOf(false) }
     var okLong by remember { mutableStateOf(false) }
     // ▼ changes channel when let go; holding it opens the favourites strip.
@@ -118,6 +120,11 @@ fun PlayerScreen(vm: TunerViewModel) {
         pokeInfo()
         delay(4_000)
         zapStrip = false
+    }
+    LaunchedEffect(controlsTick, overlay) {
+        if (overlay != Overlay.Controls) return@LaunchedEffect
+        delay(8_000)
+        if (overlay == Overlay.Controls) overlay = Overlay.None
     }
     LaunchedEffect(infoToken) {
         delay(5_000)
@@ -245,6 +252,24 @@ fun PlayerScreen(vm: TunerViewModel) {
                 if (e.type == KeyEventType.KeyUp) overlay = Overlay.None
                 return true
             }
+            if (overlay == Overlay.Controls) {
+                // ▲ ▼ and CH +/− still change channel (and put the buttons away).
+                val k = e.nativeKeyEvent.keyCode
+                val zapBy = when (k) {
+                    AndroidKey.KEYCODE_DPAD_UP, AndroidKey.KEYCODE_CHANNEL_UP -> -1
+                    AndroidKey.KEYCODE_DPAD_DOWN, AndroidKey.KEYCODE_CHANNEL_DOWN -> 1
+                    else -> 0
+                }
+                if (zapBy != 0) {
+                    if (e.type == KeyEventType.KeyDown && e.nativeKeyEvent.repeatCount == 0) {
+                        overlay = Overlay.None
+                        vm.zap(zapBy)
+                    }
+                    return true
+                }
+                // Using the on-screen buttons keeps them up.
+                controlsTick++
+            }
             return false
         }
         val code = e.nativeKeyEvent.keyCode
@@ -279,11 +304,10 @@ fun PlayerScreen(vm: TunerViewModel) {
                         return true
                     }
                     if (okDown && !okLong) {
-                        if (isLive && paused) {
-                            playback.resume()
-                        } else if (isLive) {
-                            // First OK shows the info bar, a second OK opens the mini guide.
-                            if (showInfo) overlay = Overlay.MiniGuide else pokeInfo()
+                        if (isLive) {
+                            // OK shows the info bar with buttons: pause, start over, record, guide…
+                            overlay = Overlay.Controls
+                            controlsTick++
                         } else {
                             playback.togglePause()
                             pokeInfo()
@@ -601,6 +625,15 @@ fun PlayerScreen(vm: TunerViewModel) {
 
             when (overlay) {
                 Overlay.None -> Unit
+                Overlay.Controls -> when (mode) {
+                    is PlayMode.Live -> InfoBanner(
+                        vm, mode.channel, Modifier.align(Alignment.BottomCenter),
+                        controls = {
+                            LiveControls(vm, mode.channel, onOverlay = { overlay = it }, onClose = { overlay = Overlay.None })
+                        },
+                    )
+                    else -> LaunchedEffect(Unit) { overlay = Overlay.None }
+                }
                 Overlay.MiniGuide -> channel?.let { ch ->
                     MiniGuideOverlay(vm, ch, Modifier.align(Alignment.BottomCenter)) { overlay = Overlay.None }
                 }
@@ -918,7 +951,7 @@ private fun ChannelListOverlay(vm: TunerViewModel, modifier: Modifier, onClose: 
 }
 
 @Composable
-private fun InfoBanner(vm: TunerViewModel, channel: Channel, modifier: Modifier) {
+private fun InfoBanner(vm: TunerViewModel, channel: Channel, modifier: Modifier, controls: (@Composable () -> Unit)? = null) {
     val now = vm.now
     val (current, next) = vm.nowNext(channel.id, now)
     val isFavourite = channel.id in vm.favouriteSet
@@ -1006,12 +1039,16 @@ private fun InfoBanner(vm: TunerViewModel, channel: Channel, modifier: Modifier)
                 Text(it, color = TunerColors.TextSecondary, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             Spacer(Modifier.height(6.dp))
-            val prev = vm.previousChannel
-            Text(
-                "◀ channels  ·  ▶ " + (prev?.name?.let { "back to $it" } ?: "previous") +
-                    "  ·  OK mini guide  ·  hold OK menu" + (if (vm.catchupVersion(channel) != null) "  ·  ⏪ from the start" else ""),
-                color = Color(0xFF8FA3D4), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
-            )
+            if (controls != null) {
+                controls()
+            } else {
+                val prev = vm.previousChannel
+                Text(
+                    "◀ channels  ·  ▶ " + (prev?.name?.let { "back to $it" } ?: "previous") +
+                        "  ·  OK buttons  ·  hold OK menu" + (if (vm.catchupVersion(channel) != null) "  ·  ⏪ from the start" else ""),
+                    color = Color(0xFF8FA3D4), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     }
 }
@@ -1427,5 +1464,49 @@ private fun ScrubBubble(target: Long, duration: Long, frame: androidx.compose.ui
             Spacer(Modifier.height(4.dp))
         }
         Text(clock(target) + "  /  " + clock(duration), color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp))
+    }
+}
+
+/** OK on live TV: buttons along the info bar – ◀ ▶ to move, OK to press. */
+@Composable
+private fun LiveControls(vm: TunerViewModel, channel: Channel, onOverlay: (Overlay) -> Unit, onClose: () -> Unit) {
+    val playback = vm.playback
+    val first = remember { FocusRequester() }
+    LaunchedEffect(Unit) {
+        delay(60)
+        runCatching { first.requestFocus() }
+    }
+    val current = vm.nowNext(channel.id, vm.now).first
+    val audio = remember(channel.id) { playback.tracks(C.TRACK_TYPE_AUDIO, includeUnsupported = true) }
+    val text = remember(channel.id) { playback.tracks(C.TRACK_TYPE_TEXT) }
+    val rec = current?.let { vm.recordingFor(channel, it) }
+    val fav = channel.id in vm.favouriteSet
+    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(vertical = 4.dp)) {
+        item {
+            PillButton(if (playback.isPaused) "▶  Play" else "⏸  Pause", { playback.togglePause() }, Modifier.focusRequester(first), compact = true)
+        }
+        if (playback.canSeek) {
+            item { PillButton("⏪ 30s", { playback.seekBy(-30_000L) }, compact = true) }
+            item { PillButton("⏩ 30s", { playback.seekBy(30_000L) }, compact = true) }
+            item { PillButton("● Live", { playback.goLive(); onClose() }, compact = true) }
+        }
+        if (current != null && vm.canCatchup(channel, current)) {
+            item { PillButton("⏮  From the start", { onClose(); vm.playCatchup(channel, current, vm.zapChannels) }, compact = true) }
+        }
+        if (current != null && !vm.activeProfile.kids) {
+            item {
+                PillButton(
+                    if (rec == null) "●  Record" else "■  Stop recording",
+                    { if (rec == null) vm.recordProgramme(channel, current) else vm.stopRecording(rec) },
+                    compact = true, selected = rec != null,
+                )
+            }
+        }
+        item { PillButton("☰  Guide", { onOverlay(Overlay.MiniGuide) }, compact = true) }
+        item { PillButton("📺  Channels", { onOverlay(Overlay.Channels) }, compact = true) }
+        item { PillButton(if (fav) "★  Favourite" else "☆  Favourite", { vm.toggleFavourite(channel.id) }, compact = true, selected = fav) }
+        if (text.isNotEmpty()) item { PillButton("CC  Subtitles", { onOverlay(Overlay.Subtitles) }, compact = true) }
+        if (audio.size > 1) item { PillButton("🔈  Audio", { onOverlay(Overlay.Audio) }, compact = true) }
+        item { PillButton("⋮  More", { onOverlay(Overlay.Options) }, compact = true) }
     }
 }
