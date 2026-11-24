@@ -115,6 +115,8 @@ class PlaybackController(private val context: Context) {
     var onEnded: (() -> Unit)? = null
     /** Told when Tuner quietly fixes a stream (reconnect, backup link) – shown as a short notice. */
     var onRecovery: ((String) -> Unit)? = null
+    /** Told the address of the backup link being switched to (Flicker names it and watches for the main one to come back). */
+    var onAlternate: ((String) -> Unit)? = null
     /** Told (once per channel visit) when a stream stalls, reconnects or needs a backup link. */
     var onStreamTrouble: ((String) -> Unit)? = null
     /** Extra milliseconds to buffer before a channel starts (bigger for channels that keep stalling). */
@@ -470,6 +472,11 @@ class PlaybackController(private val context: Context) {
                 useHls = true
                 load(0L)
             }
+            // The provider says this stream isn't there (404, 403, 5xx…): on live TV go straight to a backup.
+            live && (code == PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS || code == PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND) -> {
+                AppLog.warn("Stream refused (${e.errorCodeName}): ${short(u)}")
+                if (!tryAlternate()) scheduleReconnect()
+            }
             code in 1000..2999 -> scheduleReconnect()
             else -> {
                 AppLog.warn("Can't play ${short(u)}: ${e.errorCodeName}")
@@ -484,7 +491,8 @@ class PlaybackController(private val context: Context) {
         if (!live || ts != null || player.playbackState != Player.STATE_BUFFERING || !player.playWhenReady) return
         AppLog.info("Stream stalled, reconnecting: ${short(u)}")
         reportTrouble()
-        if (retries >= 2 && tryAlternate()) return
+        // Frozen twice: try a backup rather than keep waiting.
+        if (retries >= 1 && tryAlternate()) return
         scheduleReconnect()
     }
 
@@ -502,7 +510,8 @@ class PlaybackController(private val context: Context) {
         reconnecting = true
         handler.removeCallbacksAndMessages(null)
         handler.postDelayed({ if (url != null) load(0L) }, 300)
-        onRecovery?.invoke("Trying a backup link for this channel")
+        val named = onAlternate
+        if (named != null) named(next) else onRecovery?.invoke("Trying a backup link for this channel")
         return true
     }
 
@@ -514,7 +523,8 @@ class PlaybackController(private val context: Context) {
 
     private fun scheduleReconnect() {
         val delays = longArrayOf(1_000, 2_000, 4_000, 8_000, 15_000, 30_000)
-        if (retries == 3 && tryAlternate()) return
+        // Live TV moves to a backup after one failed reconnect; films and catch-up keep trying a while.
+        if (retries == (if (live) 1 else 3) && tryAlternate()) return
         if (retries >= delays.size) {
             reconnecting = false
             if (tryAlternate()) return
@@ -534,7 +544,7 @@ class PlaybackController(private val context: Context) {
     }
 
     private companion object {
-        const val STALL_MS = 12_000L
+        const val STALL_MS = 8_000L
     }
 
     // ---------------- Timeshift ----------------

@@ -290,9 +290,9 @@ class LinkServer(private val handler: Host) {
         }.getOrNull()
 
         /** Asks the other device to play [what]. Blocking; true when it started. */
-        fun sendPlay(host: String, port: Int, key: String, from: String, what: JSONObject): Boolean {
+        fun sendPlay(host: String, port: Int, key: String, from: String, what: JSONObject): Int {
             val (status, _) = call("http://$host:$port/link/play?k=${enc(key)}&from=${enc(from)}", "POST", what.toString(), timeout = 8_000)
-            return status == 200
+            return status
         }
     }
 }

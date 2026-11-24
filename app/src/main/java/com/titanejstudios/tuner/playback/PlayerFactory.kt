@@ -78,7 +78,8 @@ object PlayerFactory {
         val http = DefaultHttpDataSource.Factory()
             .setUserAgent(Http.USER_AGENT)
             .setAllowCrossProtocolRedirects(true)
-            .setConnectTimeoutMs(15_000)
+            // A server that doesn't answer within 7 seconds is treated as down (backups get tried sooner).
+            .setConnectTimeoutMs(7_000)
             .setReadTimeoutMs(20_000)
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(

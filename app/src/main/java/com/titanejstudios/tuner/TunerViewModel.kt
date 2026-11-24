@@ -608,6 +608,11 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     var scrubPreviewsIptv by mutableStateOf(store.scrubPreviewsIptv); private set
     /** The channel you usually watch at this time, offered on Home. */
     var usualOffer by mutableStateOf<Channel?>(null); private set
+    /** A better version of the channel you're on is working again (shown once, as a message on the picture). */
+    var qualityBack by mutableStateOf<Channel?>(null); private set
+    private var upgradeJob: Job? = null
+    /** Channels already told about this session ("only display the message once"). */
+    private val upgradeTold = HashSet<String>()
     /** The Christmas TV planner's programmes (null until loaded). */
     var festive by mutableStateOf<List<FestiveItem>?>(null); private set
     /** Missed it? Programmes from the last week you'd probably like, ready on catch-up. */
@@ -657,6 +662,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         loadSettingsFromStore()
         playback.onEnded = { onPlaybackEnded() }
         playback.onRecovery = { showNotice(it) }
+        playback.onAlternate = { url -> onBackupLink(url) }
         playback.cushionFor = { id -> cushion.cushionMs(id) }
         playback.onStreamTrouble = { id -> cushion.trouble(id) }
         playback.timeshiftDir = {
@@ -1266,7 +1272,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         startLive(channel)
     }
 
-    private fun startLive(channel: Channel) {
+    private fun startLive(channel: Channel, force: Boolean = false) {
         if (vpnBlocks()) return
         if (zapPreview != null) {
             zapJob?.cancel()
@@ -1275,8 +1281,10 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         cleanPlaySeconds = 0
         usualOffer = null
         val current = mode
-        if (current is PlayMode.Live && current.channel.id == channel.id && playback.isActive) return
-        if (current is PlayMode.Live) previousChannel = current.channel
+        if (!force && current is PlayMode.Live && current.channel.id == channel.id && playback.isActive) return
+        upgradeJob?.cancel()
+        qualityBack = null
+        if (current is PlayMode.Live && current.channel.id != channel.id) previousChannel = current.channel
         if (current is PlayMode.Vod) saveResume(syncHome = true)
         mode = PlayMode.Live(channel)
         focusChannelId = channel.id
@@ -1423,6 +1431,8 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     fun stopPlayback() {
         trackStats(flush = true)
         finishLiveWatch()
+        upgradeJob?.cancel()
+        qualityBack = null
         val wasPlaying = mode != null
         playback.stop()
         mode = null
@@ -4226,8 +4236,9 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     private fun sendable(): JSONObject? {
         val pos = playback.positionMs
         return when (val m = mode) {
-            is PlayMode.Live -> JSONObject().put("kind", "live").put("channel", m.channel.id)
+            is PlayMode.Live -> liveJson(m.channel)
             is PlayMode.CatchupPlay -> JSONObject().put("kind", "catchup").put("channel", m.channel.id)
+                .put("name", m.channel.name).put("url", m.channel.url).put("number", m.channel.number)
                 .put("start", m.programme.start).put("stop", m.programme.stop).put("title", m.programme.title)
                 .put("category", m.programme.category).put("pos", pos)
             is PlayMode.Vod -> {
@@ -4249,12 +4260,12 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         }
         if (mode is PlayMode.Vod) saveResume(syncHome = true)
         showNotice("Sending to ${peer.name}…")
-        link.send(peer, what) { ok ->
-            if (ok) {
+        link.send(peer, what) { problem ->
+            if (problem == null) {
                 stopPlayback()
                 if (screen == Screen.Player) back()
                 showNotice("▶ Now playing on ${peer.name}")
-            } else showNotice("${peer.name} didn't answer – is Flicker open on it?")
+            } else showNotice(problem)
         }
     }
 
@@ -4263,13 +4274,13 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         if (allChannels.isEmpty() && j.optString("kind") != "vod") return false
         val ok = when (j.optString("kind")) {
             "live" -> {
-                val ch = allChannelsById(j.optString("channel")) ?: return false
+                val ch = linkedChannel(j) ?: return false
                 resetTo(Screen.Home)
                 play(ch, channelsFor(ALL))
                 true
             }
             "catchup" -> {
-                val ch = allChannelsById(j.optString("channel")) ?: return false
+                val ch = linkedChannel(j) ?: return false
                 val start = j.optLong("start")
                 val p = programmesFor(ch.id).firstOrNull { it.start == start } ?: Programme(
                     start = start, stop = j.optLong("stop"), title = j.optString("title"), desc = null,
@@ -4305,6 +4316,20 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         return ok
     }
 
+    /**
+     * The channel another device means: the same id (playlists copied between them), else the
+     * same stream address, else the same name (ignoring HD / FHD / 1080p labels).
+     */
+    private fun linkedChannel(j: JSONObject): Channel? {
+        allChannelsById(j.optString("channel"))?.let { return it }
+        val url = j.optString("url").takeIf { it.isNotBlank() && it != "null" }
+        if (url != null) allChannels.firstOrNull { it.url == url }?.let { return it }
+        val name = j.optString("name").takeIf { it.isNotBlank() && it != "null" } ?: return null
+        allChannels.firstOrNull { it.name.equals(name, ignoreCase = true) }?.let { return it }
+        val key = com.titanejstudios.tuner.data.ChannelMerge.key(name)
+        return allChannels.firstOrNull { com.titanejstudios.tuner.data.ChannelMerge.key(it.name) == key }
+    }
+
     private fun applyLinkChanges(changed: Set<String>) {
         if (com.titanejstudios.tuner.integrations.LinkSync.INTROS in changed) introEnds = store.introEnds
         val lists = changed - com.titanejstudios.tuner.integrations.LinkSync.INTROS
@@ -4313,6 +4338,76 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
             val entries = resume.values.toList()
             viewModelScope.launch(Dispatchers.IO) { HomeScreen.syncContinueWatching(app, store, entries) }
         }
+    }
+
+    // ---------------- Backup links: say which, and watch for the better one ----------------
+
+    /** The player switched to a backup link: name it, and if it's a lower quality, keep checking the main one. */
+    private fun onBackupLink(url: String) {
+        val m = mode as? PlayMode.Live ?: return showNotice("Trying a backup link")
+        val original = m.channel
+        val alt = altIndex[StreamAlternates.nameKey(original.name)]?.firstOrNull { it.url == url }
+        if (alt == null) {
+            // The same stream in its other format: same quality, nothing to watch for.
+            showNotice("${original.name} wasn't working – trying it another way")
+            return
+        }
+        val label = ChannelMerge.versionLabel(alt).ifBlank { alt.name }
+        showNotice("${original.name} isn't working – switched to $label")
+        if (ChannelMerge.quality(alt.name) < ChannelMerge.quality(original.name)) watchForUpgrade(original)
+    }
+
+    /**
+     * While you watch the lower-quality backup, checks every 2 minutes (for up to 3 hours) whether
+     * the channel's own stream works again, and says so once.
+     */
+    private fun watchForUpgrade(original: Channel) {
+        upgradeJob?.cancel()
+        if (original.id in upgradeTold) return
+        upgradeJob = viewModelScope.launch {
+            val started = System.currentTimeMillis()
+            while (System.currentTimeMillis() - started < 3 * 3_600_000L) {
+                delay(2 * 60_000L)
+                val m = mode as? PlayMode.Live ?: return@launch
+                if (m.channel.id != original.id || playback.currentUrl == original.url) return@launch
+                if (!inForeground) continue
+                if (withContext(Dispatchers.IO) { streamWorks(original.url) }) {
+                    upgradeTold += original.id
+                    qualityBack = original
+                    AppLog.info("Main stream working again: ${original.name}")
+                    delay(20_000)
+                    if (qualityBack?.id == original.id) qualityBack = null
+                    return@launch
+                }
+            }
+        }
+    }
+
+    /** A quick look at a stream: does the server send video back? (Opens and closes a connection.) */
+    private fun streamWorks(url: String): Boolean = runCatching {
+        val c = (java.net.URL(url).openConnection() as java.net.HttpURLConnection).apply {
+            connectTimeout = 6_000
+            readTimeout = 6_000
+            instanceFollowRedirects = true
+            setRequestProperty("User-Agent", com.titanejstudios.tuner.data.Http.USER_AGENT)
+        }
+        try {
+            c.responseCode in 200..299 && c.inputStream.use { it.read(ByteArray(2048)) > 0 }
+        } finally {
+            c.disconnect()
+        }
+    }.getOrDefault(false)
+
+    /** "▲ BBC One FHD is working again" – switch back to it. */
+    fun switchToBetterQuality() {
+        val c = qualityBack ?: return
+        qualityBack = null
+        val m = mode as? PlayMode.Live ?: return
+        if (m.channel.id == c.id) startLive(c, force = true)
+    }
+
+    fun dismissQualityBack() {
+        qualityBack = null
     }
 
     // ---------------- Christmas TV planner ----------------
@@ -4614,7 +4709,10 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     /** Something waiting for you to choose which TV it goes to (more than one found). */
     var tvChoice by mutableStateOf<JSONObject?>(null); private set
 
+    // A channel is sent with its id, stream address and name: devices that added the playlist
+    // separately give the same channel different ids, so the other device matches on the rest.
     fun liveJson(ch: Channel): JSONObject = JSONObject().put("kind", "live").put("channel", ch.id)
+        .put("name", ch.name).put("url", ch.url).put("number", ch.number)
 
     fun filmJson(m: VodItem): JSONObject = JSONObject().put("kind", "vod").put("id", m.id).put("title", m.name)
         .put("sub", m.category).put("poster", m.poster).put("url", m.url).put("pos", resume[m.id]?.positionMs ?: 0L)
@@ -4627,6 +4725,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     }
 
     fun catchupJson(ch: Channel, p: Programme): JSONObject = JSONObject().put("kind", "catchup").put("channel", ch.id)
+        .put("name", ch.name).put("url", ch.url).put("number", ch.number)
         .put("start", p.start).put("stop", p.stop).put("title", p.title).put("category", p.category).put("pos", 0L)
 
     /** Plays [what] on a linked TV (asks which, if there are several). */
@@ -4651,7 +4750,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
 
     fun sendToTv(tv: com.titanejstudios.tuner.features.LinkFeature.Peer, what: JSONObject) {
         tvChoice = null
-        link.send(tv, what) { ok -> showNotice(if (ok) "▶ Playing on ${tv.name}" else "${tv.name} didn't answer – is Flicker open on it?") }
+        link.send(tv, what) { problem -> showNotice(problem ?: "▶ Playing on ${tv.name}") }
     }
 
     fun cancelTvChoice() {

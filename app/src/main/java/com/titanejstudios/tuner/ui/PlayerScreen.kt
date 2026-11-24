@@ -267,6 +267,12 @@ fun PlayerScreen(vm: TunerViewModel) {
                         overlay = Overlay.Options
                     }
                 } else if (e.type == KeyEventType.KeyUp) {
+                    // "Better quality is back" showing: OK switches to it.
+                    if (okDown && !okLong && vm.qualityBack != null) {
+                        okDown = false
+                        vm.switchToBetterQuality()
+                        return true
+                    }
                     if (okDown && !okLong && upNextVisible) {
                         okDown = false
                         vm.playNextEpisodeNow()
@@ -495,6 +501,25 @@ fun PlayerScreen(vm: TunerViewModel) {
                 }
             }
 
+            vm.qualityBack?.let { better ->
+                Row(
+                    Modifier.align(Alignment.TopCenter).padding(top = if (vm.isPhone) 70.dp else 40.dp)
+                        .clip(RoundedCornerShape(14.dp)).background(Color(0xF00E2A5C))
+                        .tvClickable({ vm.switchToBetterQuality() })
+                        .padding(horizontal = 18.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("▲", color = Color(0xFF6FE3A1), fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.width(10.dp))
+                    Column {
+                        Text("${better.name} is working again", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            if (vm.isPhone) "Tap to switch back to the better picture" else "Press OK to switch back to the better picture",
+                            color = Color(0xFFD4DDF5), fontSize = 13.sp,
+                        )
+                    }
+                }
+            }
             if (!vm.isPhone) scrubTarget?.let { t ->
                 ScrubBubble(t, duration, scrubFrame, Modifier.align(Alignment.BottomCenter).padding(bottom = 190.dp))
             }

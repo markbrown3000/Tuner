@@ -18,10 +18,17 @@ object StreamAlternates {
     fun index(channels: List<Channel>): Map<String, List<Channel>> =
         channels.groupBy { nameKey(it.name) }.filter { it.key.length >= 3 && it.value.size > 1 }
 
+    /**
+     * Backups in the order to try: the same stream in the other format first (same quality), then
+     * the other versions best quality first – so FHD falls back to HD before SD.
+     */
     fun forChannel(channel: Channel, index: Map<String, List<Channel>>, max: Int = 4): List<String> {
         val out = LinkedHashSet<String>()
-        index[nameKey(channel.name)]?.forEach { if (it.url != channel.url) out += it.url }
         otherFormat(channel.url)?.let { out += it }
+        index[nameKey(channel.name)]
+            ?.filter { it.url != channel.url }
+            ?.sortedByDescending { ChannelMerge.quality(it.name) }
+            ?.forEach { out += it.url }
         out.remove(channel.url)
         return out.take(max)
     }

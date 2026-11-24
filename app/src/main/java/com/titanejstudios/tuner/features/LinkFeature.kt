@@ -170,11 +170,19 @@ class LinkFeature(
 
     // ---- Send to TV ----
 
-    fun send(peer: Peer, what: JSONObject, onDone: (Boolean) -> Unit) {
-        val k = store.linkKey ?: return onDone(false)
+    /** Sends [what] to [peer]; [onDone] gets null when it's playing there, or what went wrong. */
+    fun send(peer: Peer, what: JSONObject, onDone: (String?) -> Unit) {
+        val k = store.linkKey ?: return onDone("This device isn't linked")
         scope.launch {
-            val ok = withContext(Dispatchers.IO) { runCatching { LinkServer.sendPlay(peer.host, peer.port, k, name, what) }.getOrDefault(false) }
-            onDone(ok)
+            val status = withContext(Dispatchers.IO) { runCatching { LinkServer.sendPlay(peer.host, peer.port, k, name, what) }.getOrDefault(-1) }
+            onDone(
+                when (status) {
+                    200 -> null
+                    409 -> "${peer.name} couldn't find that on its own channel list"
+                    403 -> "${peer.name} isn't linked any more – link them again in Settings › Linked devices"
+                    else -> "${peer.name} didn't answer – is Flicker open on it?"
+                }
+            )
         }
     }
 
