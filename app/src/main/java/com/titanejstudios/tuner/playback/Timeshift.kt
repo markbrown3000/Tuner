@@ -86,6 +86,11 @@ class TimeshiftSession(private val url: String, val file: File, private val maxM
     var recording = false
         private set
 
+    /** The recorder has let go of the provider connection (after [stop]). */
+    @Volatile
+    var finished = false
+        private set
+
     /** Starts recording. Returns false if there isn't room or the file can't be created. */
     fun start(): Boolean {
         val dir = file.parentFile ?: return false
@@ -102,6 +107,7 @@ class TimeshiftSession(private val url: String, val file: File, private val maxM
                 // fall through – playback simply reaches the end of what was saved
             }
             recording = false
+            finished = true
         }
         thread(isDaemon = true, name = "timeshift-index") {
             while (recording) {

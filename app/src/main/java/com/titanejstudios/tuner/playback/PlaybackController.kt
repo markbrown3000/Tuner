@@ -688,6 +688,13 @@ class PlaybackController(private val context: Context) {
             return
         }
         if (player.playbackState == Player.STATE_IDLE && url != null) {
+            if (live) {
+                // Reconnecting after a plain pause: a fresh start, not one already "frozen".
+                retries = 0
+                stalls = 0
+                stuckSince = 0L
+                lastPosition = -1L
+            }
             player.playWhenReady = true
             load(if (live) 0L else player.currentPosition)
         } else {
@@ -724,11 +731,37 @@ class PlaybackController(private val context: Context) {
     fun seekTo(positionMs: Long) = player.seekTo(positionMs.coerceAtLeast(0L))
 
     fun goLive() {
-        if (ts != null) {
+        val session = ts
+        if (session != null) {
+            // Back to live: start the channel afresh, as if it had just been picked (a leftover
+            // "frozen" count or backup link used to leave it buffering for ever).
             stopTimeshift()
+            handler.removeCallbacksAndMessages(null)
+            stallHandler.removeCallbacks(stallCheck)
+            endPriming()
             retries = 0
-            player.playWhenReady = true
-            load(0L)
+            stalls = 0
+            stuckSince = 0L
+            lastPosition = -1L
+            useHls = false
+            triedHls = false
+            player.stop()
+            isBuffering = true
+            // One-connection accounts: wait (up to 3 s) for the recorder to let go of the stream
+            // first, or the provider turns the new connection away.
+            val started = SystemClock.uptimeMillis()
+            val reconnect = object : Runnable {
+                override fun run() {
+                    if (url == null || ts != null) return
+                    if (!session.finished && SystemClock.uptimeMillis() - started < 3_000) {
+                        handler.postDelayed(this, 150)
+                        return
+                    }
+                    player.playWhenReady = true
+                    load(0L)
+                }
+            }
+            handler.postDelayed(reconnect, 250)
             return
         }
         player.seekToDefaultPosition()
