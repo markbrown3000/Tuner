@@ -258,8 +258,8 @@ fun MoviesScreen(vm: TunerViewModel) {
     LaunchedEffect(Unit) { vm.loadMovies() }
     var resumeAsk by remember { mutableStateOf<com.titanejstudios.tuner.data.VodItem?>(null) }
     var menuFor by remember { mutableStateOf<com.titanejstudios.tuner.data.VodItem?>(null) }
-    val continueEntries = remember(vm.resume) {
-        vm.resume.values.filter { it.seriesId == null }.sortedByDescending { it.updatedAt }
+    val continueEntries = remember(vm.resume, vm.started, vm.activeProfile.id) {
+        vm.myResume.values.filter { it.seriesId == null }.sortedByDescending { it.updatedAt }
     }
     CatalogueScreen(
         title = "Films",
@@ -324,8 +324,8 @@ fun MoviesScreen(vm: TunerViewModel) {
 fun SeriesScreen(vm: TunerViewModel) {
     LaunchedEffect(Unit) { vm.loadSeries() }
     var menuFor by remember { mutableStateOf<com.titanejstudios.tuner.data.SeriesItem?>(null) }
-    val continueEntries = remember(vm.resume) {
-        vm.resume.values.filter { it.seriesId != null }.sortedByDescending { it.updatedAt }
+    val continueEntries = remember(vm.resume, vm.started, vm.activeProfile.id) {
+        vm.myResume.values.filter { it.seriesId != null }.sortedByDescending { it.updatedAt }
     }
     CatalogueScreen(
         title = "Series",

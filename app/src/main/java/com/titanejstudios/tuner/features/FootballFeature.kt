@@ -77,6 +77,7 @@ class FootballFeature(
     fun follow(team: Football.Team) {
         teams = teams + team.shortName
         store.footballTeams = teams
+        store.setSyncStamp(com.titanejstudios.tuner.integrations.LinkSync.TEAMS, System.currentTimeMillis())
         teamIds = teamIds + (team.shortName to team.id.toString())
         store.footballTeamIds = teamIds
         notify("Following ${team.shortName} – their fixtures and channels are under My teams")
@@ -172,6 +173,7 @@ class FootballFeature(
     fun toggleTeam(team: String) {
         teams = if (team in teams) teams - team else teams + team
         store.footballTeams = teams
+        store.setSyncStamp(com.titanejstudios.tuner.integrations.LinkSync.TEAMS, System.currentTimeMillis())
         if (team !in teams) {
             teamIds = teamIds - team
             store.footballTeamIds = teamIds

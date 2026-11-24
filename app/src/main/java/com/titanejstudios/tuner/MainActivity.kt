@@ -229,6 +229,7 @@ private fun TunerApp(vm: TunerViewModel) {
                 Screen.Teams -> com.titanejstudios.tuner.ui.TeamsScreen(vm)
                 Screen.Remote -> com.titanejstudios.tuner.ui.RemoteScreen(vm)
                 Screen.Christmas -> com.titanejstudios.tuner.ui.ChristmasScreen(vm)
+                Screen.Cloud -> com.titanejstudios.tuner.ui.CloudScreen(vm)
             }
         }
         if (phone && !watching && vm.screen in PhoneTabs) PhoneBottomBar(vm)

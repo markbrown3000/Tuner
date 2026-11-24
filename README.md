@@ -32,6 +32,8 @@ A TiviMate-style live TV app for Google TV / Android TV. Built with Kotlin, Jetp
 **Added since 5.4.0**
 - **Plex libraries**: Films & TV › **Plex ›** (or **Plex** in the top menu if you have no Xtream films) shows all your Plex film and TV libraries. Shows open to seasons and episodes, and episodes carry on to the next one automatically.
 - **Open Tuner when the TV turns on** (Settings, near the top). Android only allows this with "Display over other apps" allowed for Tuner. If your TV hides that setting, run this once from a computer: `adb shell appops set com.titanejstudios.tuner SYSTEM_ALERT_WINDOW allow`. It works after a full restart; Google TV doesn't tell apps when it simply wakes from standby.
+- **Each profile's own Continue watching**: profiles other than "Everyone" start empty – Plex's Continue watching and your films and episodes only show what that profile has started in Flicker (on any of your linked or synced devices, matched by profile name), with Plex's own progress. "Everyone" still shows everything. Hold OK on a Plex tile › Remove from my Continue watching.
+- **Sync between houses** (Settings › ☁ Sync between houses): sign each device in to the same Google account (type a code on google.com/device). Where you got to in films and episodes, My list, followed series, your teams and learned intros sync through a hidden Flicker folder in that account's own Google Drive (a few KB), every 10 minutes and whenever you stop something. Name each house; favourites stay per house unless you turn on sharing. Needs the Google sign-in set up once – see "Google Drive sync" below.
 - **Buttons on live TV**: press OK while watching a channel for the info bar with buttons – ⏸ Pause / ▶ Play, ⏪ ⏩ 30s and ● Live (when paused or behind), ⏮ From the start (catch-up), ● Record, ☰ Guide, 📺 Channels, ★ Favourite, Subtitles, Audio and ⋮ More. ◀ ▶ to move, OK to press, ▲ ▼ still change channel, BACK or 8 seconds hides them.
 - **Faster backups** (live TV): if the provider says a channel isn't there, Flicker switches to a backup at once; a frozen picture gets one reconnect (after 8 seconds) before switching; a server that doesn't answer within 7 seconds counts as down. Backups go best quality first (FHD → HD → SD), and a message says which one it switched to. On a lower-quality backup it checks the main stream every 2 minutes, and says once when it's working again – OK (or tap) switches back. Films and catch-up keep the more patient reconnecting.
 - **TV remote on your phone** (phones, once linked): Home › 📺 TV remote or Settings. Buttons (▲▼◀▶ OK, Back, Home, Guide, ⋮, CH ±, ⏯ ⏪ ⏩) and the TV's channels with what's on – tap one to put it on the TV. Shows what the TV is playing.
@@ -495,3 +497,16 @@ app/src/test/                tests of the pure logic (run on GitHub with every b
   tv/GuideRefreshWorker.kt   nightly refresh
   ui/                        Channels, Guide, Player, Search, Films/Series, Settings, Manage, dialogs
 ```
+
+## Google Drive sync (one-off setup)
+
+Flicker signs in to Google with the "TV" sign-in (a code you type on your phone) and only asks for its own hidden app folder in Drive (`drive.appdata` – a non-sensitive permission, so Google doesn't need to review the app).
+
+1. Go to https://console.cloud.google.com and create a project (e.g. "Flicker").
+2. **APIs & Services › Library**: search for **Google Drive API** and press **Enable**.
+3. **APIs & Services › OAuth consent screen** (Google Auth Platform): choose **External**, app name **Flicker**, your email for support and developer contact. Under **Data access / Scopes**, add `.../auth/drive.appdata`. Then **Publish app** (to "In production") – in "Testing" Google signs devices out every 7 days.
+4. **Credentials › Create credentials › OAuth client ID**, application type **TVs and Limited Input devices**, name it "Flicker TV". Copy the **Client ID** and **Client secret**.
+5. On GitHub: **Settings › Secrets and variables › Actions › New repository secret** – add `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`. (For builds on your PC, put `google_client_id=…` and `google_client_secret=…` lines in `keys.properties`.)
+6. Push and make a release. Then on each device: Settings › ☁ Sync between houses › Sign in with Google.
+
+Sign-in is kept on each device and never put in backups or copied between TVs.

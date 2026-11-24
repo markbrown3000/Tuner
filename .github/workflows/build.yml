@@ -24,6 +24,9 @@ jobs:
       KEYSTORE_B64: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
       # Optional: your TMDB key, built in so film info works without typing it on the TV.
       TUNER_TMDB_KEY: ${{ secrets.TMDB_KEY }}
+      # Optional: Google sign-in for "Sync between houses" (see README › Google Drive sync).
+      TUNER_GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+      TUNER_GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
     steps:
       - uses: actions/checkout@v5
 

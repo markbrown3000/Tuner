@@ -177,6 +177,18 @@ fun SettingsScreen(vm: TunerViewModel) {
 
             item {
                 SettingRow(
+                    "☁ Sync between houses",
+                    subtitle = "Through your own Google Drive: carry on films and episodes, My list and your teams at another house",
+                    detail = when {
+                        vm.cloud.signedIn -> vm.cloud.house
+                        else -> "Off"
+                    },
+                    onClick = { vm.navigate(Screen.Cloud) },
+                )
+            }
+
+            item {
+                SettingRow(
                     "🔗 Linked devices",
                     subtitle = "Send what's playing to another TV or phone, and carry on where you left off",
                     detail = when {

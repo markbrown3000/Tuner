@@ -431,7 +431,7 @@ fun HomeScreen(vm: TunerViewModel) {
     // Every row's tiles (minute by minute, as programmes change).
     val minute = now / 60_000
     val cards: Map<HomeRow, List<HomeCard>> = remember(
-        minute, recent, favourites, allChannels, vm.sportNow, vm.topPicks, vm.plexItems, vm.plexRecent,
+        minute, recent, favourites, allChannels, vm.sportNow, vm.topPicks, vm.plexItems, vm.plexRecent, vm.started, vm.activeProfile.id,
         vm.yourShows, vm.plexFeature.similar, vm.becauseFilms, vm.trending,
         vm.resume, vm.recordings, vm.followedSeries, vm.watchlist, vm.football.matches, vm.reminders,
         vm.missed, vm.unfinished,
@@ -439,8 +439,8 @@ fun HomeScreen(vm: TunerViewModel) {
         buildMap {
             put(HomeRow.Continue, buildList {
                 vm.finishable.take(4).forEach { add(unfinishedCard(vm, it)) }
-                vm.plexItems.take(8).forEach { item -> add(plexItemCard(vm, item) { plexMenu = item }) }
-                if (vm.hasVod) vm.resume.values.sortedByDescending { it.updatedAt }.take(8).forEach { add(resumeCard(vm, it)) }
+                vm.myPlexItems.take(8).forEach { item -> add(plexItemCard(vm, item) { plexMenu = item }) }
+                if (vm.hasVod) vm.myResume.values.sortedByDescending { it.updatedAt }.take(8).forEach { add(resumeCard(vm, it)) }
                 recent.forEach { add(channelCard(vm, it, recent, now, followed)) }
             })
             put(HomeRow.Sport, vm.sportNow.map { channelCard(vm, it, vm.sportNow, now, followed) })
@@ -654,11 +654,12 @@ fun HomeScreen(vm: TunerViewModel) {
         MenuDialog(
             title = item.title,
             subtitle = item.subtitle,
-            items = listOf(
-                MenuItem("Resume") { vm.playPlex(item) },
-                MenuItem("Play from the start") { vm.playPlex(item, fromStart = true) },
-                MenuItem("Open the Plex app") { vm.openPlexApp() },
-            ),
+            items = buildList {
+                add(MenuItem("Resume") { vm.playPlex(item) })
+                add(MenuItem("Play from the start") { vm.playPlex(item, fromStart = true) })
+                if (vm.ownContinue) add(MenuItem("Remove from my Continue watching", vm.activeProfile.name) { vm.forgetStarted(plexTitle = item.title) })
+                add(MenuItem("Open the Plex app") { vm.openPlexApp() })
+            },
             onDismiss = { plexMenu = null },
         )
     }

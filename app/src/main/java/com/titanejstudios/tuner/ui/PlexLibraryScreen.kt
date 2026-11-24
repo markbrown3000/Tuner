@@ -59,10 +59,10 @@ fun PlexLibraryScreen(vm: TunerViewModel) {
         val dupes = sections.groupBy { it.title }.filter { it.value.size > 1 }.keys
         sections.associate { it.id to (if (it.title in dupes) "${it.title} (${it.server.name})" else it.title) }
     }
-    val categories = remember(sections, vm.plexItems.isNotEmpty(), plex.query.isNotEmpty()) {
+    val categories = remember(sections, vm.myPlexItems.isNotEmpty(), plex.query.isNotEmpty()) {
         buildList {
             if (plex.query.isNotEmpty()) add(PLEX_RESULTS)
-            if (vm.plexItems.isNotEmpty() && !kids) add(PLEX_CONTINUE)
+            if (vm.myPlexItems.isNotEmpty() && !kids) add(PLEX_CONTINUE)
             sections.forEach { add(it.id) }
         }
     }
@@ -218,7 +218,7 @@ fun PlexLibraryScreen(vm: TunerViewModel) {
                     }
                 }
                 category == PLEX_CONTINUE -> {
-                    val deck = vm.plexItems
+                    val deck = vm.myPlexItems
                     LazyVerticalGrid(
                         columns = GridCells.Adaptive(if (compact) 104.dp else 116.dp),
                         horizontalArrangement = Arrangement.spacedBy(10.dp),

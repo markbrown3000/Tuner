@@ -107,7 +107,7 @@ enum class Screen {
     Home, Channels, Guide, Player, Search, Movies, Series, SeriesDetail, Settings, SourceEdit, Manage,
     ProfilePicker, ProfileEdit, PhoneSetup, EpgMap, Recordings, MultiView, Sports, Apps, Log,
     WhatsOn, Stats, ShareTv, Catchup, Categories, Plex, Football, Update, SelfTest, PlexLibrary, PlexShow, HomeRows, Languages, Recommendations, Vpn,
-    Link, Downloads, Teams, Remote, Christmas,
+    Link, Downloads, Teams, Remote, Christmas, Cloud,
 }
 
 const val FAVOURITES = "★ Favourites"
@@ -394,6 +394,15 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         onSynced = { changed -> applyLinkChanges(changed) },
         remote = this,
     )
+    /** Sync between houses through your own Google Drive. */
+    val cloud = com.titanejstudios.tuner.features.CloudSyncFeature(
+        store, viewModelScope,
+        deviceId = { store.linkDeviceId },
+        deviceName = { link.name },
+        isPhone = { isPhone },
+        isForeground = { inForeground },
+        onSynced = { changed -> applyLinkChanges(changed) },
+    )
     /** What this profile likes, learned from what it watches. */
     private var taste: Taste = Taste.fromJson(store.taste(store.activeProfileId))
     private val pendingTaste = HashMap<Pair<String, String?>, Long>()
@@ -616,6 +625,8 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     private val upgradeTold = HashSet<String>()
     /** The Christmas TV planner's programmes (null until loaded). */
     var festive by mutableStateOf<List<FestiveItem>?>(null); private set
+    /** What this profile has started watching (its own Continue watching). */
+    var started by mutableStateOf(store.started(store.activeProfileId)); private set
     /** Missed it? Programmes from the last week you'd probably like, ready on catch-up. */
     var missed by mutableStateOf<List<HomeFeed.Pick>>(emptyList()); private set
     /** Programmes you switched off half-way (newest first). */
@@ -1462,6 +1473,10 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
             link.start()
             link.syncSoon(2_500L)
         }
+        if (cloud.signedIn) {
+            cloud.start()
+            cloud.syncSoon(4_000L)
+        }
         if (extrasStarted) refreshPlex()
         AppState.foreground = true
         loadApps()
@@ -1703,6 +1718,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
             favourites = store.favourites(p.id)
             favouriteSet = favourites.toSet()
             taste = Taste.fromJson(store.taste(p.id))
+            started = store.started(p.id)
             becauseFilms = emptyList()
             becauseFilmOf = null
             recents = store.recents(p.id)
@@ -2506,6 +2522,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
             return
         }
         AppLog.info("Playing ${m.title}" + (m.subtitle?.let { " ($it)" } ?: ""))
+        if (!m.contentId.startsWith("plex:")) markStarted("v:" + m.contentId, m.seriesId?.let { "s:$it" })
         if (mode is PlayMode.Vod) saveResume(syncHome = false)
         mode = m
         val start = if (fromStart) 0L else startAt ?: resume[m.contentId]?.positionMs ?: 0L
@@ -2544,6 +2561,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
             val entries = updated.values.toList()
             viewModelScope.launch(Dispatchers.IO) { HomeScreen.syncContinueWatching(app, store, entries) }
             link.tellOthers()
+            cloud.syncSoon()
         }
     }
 
@@ -2554,6 +2572,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
                 store.resume = resume
                 com.titanejstudios.tuner.integrations.LinkSync.markDone(store, m.contentId)
                 link.tellOthers()
+            cloud.syncSoon()
                 if (episodeQueue.isNotEmpty()) {
                     showNotice("Playing next episode")
                     startNextEpisode(m)
@@ -2771,6 +2790,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         loadSettingsFromStore()
         updates.reload()
         link.reload()
+        cloud.reload()
         if (!SafeMode.active) {
             football.reload()
             plexFeature.reload()
@@ -3263,6 +3283,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         }
         if (mode is PlayMode.Vod) saveResume(syncHome = false)
         plexPlaying = item
+        markStarted(plexKey(item.title), plexFeature.show?.title?.let { plexKey(it) })
         episodeQueue = emptyList()
         plexEpisodeQueue = emptyList()
         mode = PlayMode.Vod("plex:" + item.ratingKey, item.title, item.subtitle, item.image, url, null)
@@ -3949,7 +3970,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     val saverSlides: List<SaverSlide>
         get() = buildList {
             plexRecent.forEach { e -> e.art?.let { add(SaverSlide(e.title, listOfNotNull(e.year, if (e.isShow) "TV" else "Film", e.library).joinToString(" · "), it) { if (e.isShow) openPlexShow(e) else playPlexEntry(e) }) } }
-            plexItems.forEach { i -> i.image?.let { add(SaverSlide(i.title, listOfNotNull(i.subtitle, "Continue on Plex").joinToString(" · "), it) { playPlex(i) }) } }
+            myPlexItems.forEach { i -> i.image?.let { add(SaverSlide(i.title, listOfNotNull(i.subtitle, "Continue on Plex").joinToString(" · "), it) { playPlex(i) }) } }
             topPicks.forEach { p -> p.programme.image?.let { add(SaverSlide(p.programme.title, p.channel.name, it) { play(p.channel, channelsFor(ALL)) }) } }
         }.distinctBy { it.image }
 
@@ -4367,8 +4388,14 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
 
     private fun applyLinkChanges(changed: Set<String>) {
         if (com.titanejstudios.tuner.integrations.LinkSync.INTROS in changed) introEnds = store.introEnds
-        val lists = changed - com.titanejstudios.tuner.integrations.LinkSync.INTROS
+        val lists = changed - com.titanejstudios.tuner.integrations.LinkSync.INTROS - com.titanejstudios.tuner.integrations.LinkSync.TEAMS -
+            com.titanejstudios.tuner.integrations.LinkSync.STARTED
         if (lists.isNotEmpty()) applySyncedChanges(lists)
+        if (com.titanejstudios.tuner.integrations.LinkSync.STARTED in changed) started = store.started(activeProfile.id)
+        if (com.titanejstudios.tuner.integrations.LinkSync.TEAMS in changed) {
+            football.reload()
+            refreshTeamFixtures(force = true)
+        }
         if (TvSync.RESUME in changed) {
             val entries = resume.values.toList()
             viewModelScope.launch(Dispatchers.IO) { HomeScreen.syncContinueWatching(app, store, entries) }
@@ -4506,6 +4533,46 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
             }
             festive = items
         }
+    }
+
+    // ---------------- Each profile's own Continue watching ----------------
+
+    /**
+     * Profiles other than "Everyone" start with an empty Continue watching: only films and
+     * episodes they've started (here or on another of your devices) show there, with Plex's own
+     * progress. "Everyone" sees the lot.
+     */
+    val ownContinue: Boolean get() = activeProfile.id != Store.MAIN_PROFILE
+
+    private fun plexKey(title: String) = "p:" + title.lowercase().trim()
+
+    val myPlexItems: List<Plex.Item>
+        get() = if (!ownContinue) plexItems else started.let { s -> plexItems.filter { plexKey(it.title) in s } }
+
+    val myResume: Map<String, ResumeEntry>
+        get() = if (!ownContinue) resume else started.let { s -> resume.filter { (id, e) -> "v:$id" in s || (e.seriesId != null && "s:${e.seriesId}" in s) } }
+
+    /** Remember that this profile started [keys] (newest 300 kept). */
+    private fun markStarted(vararg keys: String?) {
+        val add = keys.filterNotNull().filter { it.length > 2 }
+        if (add.isEmpty() || add.all { it in started }) return
+        val next = (started - add.toSet()).toList().takeLast(300 - add.size).toSet() + add
+        started = next
+        store.setStarted(activeProfile.id, next)
+        store.setSyncStamp(com.titanejstudios.tuner.integrations.LinkSync.STARTED, System.currentTimeMillis())
+    }
+
+    /** "Remove from my Continue watching". */
+    fun forgetStarted(plexTitle: String? = null, contentId: String? = null) {
+        val drop = setOfNotNull(plexTitle?.let { plexKey(it) }, contentId?.let { "v:$it" })
+        started = started - drop
+        store.setStarted(activeProfile.id, started)
+        if (!ownContinue) contentId?.let { id ->
+            // "Everyone" sees all resume points, so remove the point itself.
+            resume = resume - id
+            store.resume = resume
+        }
+        showNotice("Removed from Continue watching")
     }
 
     // ---------------- Missed it? & finish what you started ----------------
@@ -4817,6 +4884,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     private fun markChanged(section: String) {
         // Stamped even without the network drive: linked devices use it to see which list is newest.
         store.setSyncStamp(section, System.currentTimeMillis())
+        cloud.syncSoon()
         if (!syncEnabled) return
         scheduleSync(15_000L)
     }

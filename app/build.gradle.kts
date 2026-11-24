@@ -16,6 +16,17 @@ val tmdbDefaultKey: String = System.getenv("TUNER_TMDB_KEY")?.takeIf { it.isNotB
         ?.firstOrNull { it.trim().startsWith("tmdb=") }?.substringAfter("=")?.trim()
     ?: ""
 
+/** Other built-in keys, from the environment (GitHub secrets) or keys.properties ("name=value"). */
+fun builtInKey(env: String, name: String): String = System.getenv(env)?.takeIf { it.isNotBlank() }
+    ?: rootProject.file("keys.properties").takeIf { it.exists() }?.readLines()
+        ?.firstOrNull { it.trim().startsWith("$name=") }?.substringAfter("=")?.trim()
+    ?: ""
+
+// Google sign-in for "Sync between houses" (Google Drive): an OAuth client of the type
+// "TVs and Limited Input devices". GitHub secrets GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET.
+val googleClientId: String = builtInKey("TUNER_GOOGLE_CLIENT_ID", "google_client_id")
+val googleClientSecret: String = builtInKey("TUNER_GOOGLE_CLIENT_SECRET", "google_client_secret")
+
 fun versionCodeFor(v: String): Int {
     val p = v.split('.', '-').mapNotNull { it.toIntOrNull() } + listOf(0, 0, 0)
     return p[0] * 10000 + p[1] * 100 + p[2]
@@ -32,6 +43,8 @@ android {
         versionCode = versionCodeFor(tunerVersion)
         versionName = tunerVersion
         buildConfigField("String", "TMDB_KEY", "\"$tmdbDefaultKey\"")
+        buildConfigField("String", "GOOGLE_CLIENT_ID", "\"$googleClientId\"")
+        buildConfigField("String", "GOOGLE_CLIENT_SECRET", "\"$googleClientSecret\"")
     }
 
     signingConfigs {

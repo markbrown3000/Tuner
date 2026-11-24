@@ -13,6 +13,8 @@ import org.json.JSONObject
  */
 object LinkSync {
     const val INTROS = "intros"
+    const val TEAMS = "teams"
+    const val STARTED = "started"
     private const val DONE = "done"
 
     /** Remembers that [contentId] was finished (keeps the newest 200). */
@@ -33,6 +35,18 @@ object LinkSync {
         store.resume.values.forEach { resume.put(TvSync.resumeToJson(it)) }
         sections.put(TvSync.RESUME, JSONObject().put("data", resume))
         sections.put(INTROS, JSONObject(store.introEnds))
+        // Each profile's own Continue watching, by profile name (ids differ between devices).
+        val started = JSONObject()
+        for (p in store.profiles) {
+            val keys = store.started(p.id)
+            if (keys.isNotEmpty()) started.put(p.name.lowercase().trim(), JSONArray(keys.toList()))
+        }
+        sections.put(STARTED, started)
+        sections.put(
+            TEAMS,
+            JSONObject().put("at", store.syncStamp(TEAMS)).put("names", JSONArray(store.footballTeams.toList()))
+                .put("ids", JSONObject(store.footballTeamIds)),
+        )
         sections.put(DONE, JSONObject(store.resumeDone))
         return JSONObject().put("app", "Flicker").put("v", 1).put("sections", sections)
     }
@@ -103,6 +117,34 @@ object LinkSync {
             if (merged != store.resume) {
                 store.resume = merged
                 changed += TvSync.RESUME
+            }
+        }
+
+        // Your teams (My teams): the newest choice wins.
+        sections.optJSONObject(TEAMS)?.let { r ->
+            val theirStamp = r.optLong("at")
+            val mine = store.syncStamp(TEAMS)
+            val names = r.optJSONArray("names")?.let { a -> (0 until a.length()).map { a.getString(it) }.toSet() } ?: emptySet()
+            if ((theirStamp > mine || (mine == 0L && store.footballTeams.isEmpty())) && names.isNotEmpty() && names != store.footballTeams) {
+                store.footballTeams = names
+                val ids = HashMap(store.footballTeamIds)
+                r.optJSONObject("ids")?.let { o -> for (k in o.keys()) ids[k] = o.optString(k) }
+                store.footballTeamIds = ids.filterKeys { it in names }
+                store.setSyncStamp(TEAMS, theirStamp)
+                changed += TEAMS
+            }
+        }
+
+        // What each profile has started: added to the profile of the same name here.
+        sections.optJSONObject(STARTED)?.let { o ->
+            for (p in store.profiles) {
+                val arr = o.optJSONArray(p.name.lowercase().trim()) ?: continue
+                val theirs = (0 until arr.length()).map { arr.getString(it) }.toSet()
+                val mine = store.started(p.id)
+                if (!mine.containsAll(theirs)) {
+                    store.setStarted(p.id, (mine + theirs).toList().takeLast(300).toSet())
+                    changed += STARTED
+                }
             }
         }
 

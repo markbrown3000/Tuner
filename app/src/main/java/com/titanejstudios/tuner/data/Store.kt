@@ -693,6 +693,28 @@ class Store(context: Context) {
         get() = stringMap("resume_done")
         set(value) = setStringMap("resume_done", value)
 
+    // ---- Sync between houses (Google Drive) – kept on each device, never in backups ----
+    var gdriveRefresh: String?
+        get() = prefs.getString("gdrive_refresh", null)
+        set(value) = prefs.edit().putString("gdrive_refresh", value).apply()
+    var gdriveEmail: String?
+        get() = prefs.getString("gdrive_email", null)
+        set(value) = prefs.edit().putString("gdrive_email", value).apply()
+    var gdriveFileId: String?
+        get() = prefs.getString("gdrive_file", null)
+        set(value) = prefs.edit().putString("gdrive_file", value).apply()
+    /** Which house this device is in ("Home", "Mum's"). */
+    var cloudHouse: String
+        get() = prefs.getString("cloud_house", "Home") ?: "Home"
+        set(value) = prefs.edit().putString("cloud_house", value).apply()
+    /** Take favourites from devices in other houses too (off: each house keeps its own). */
+    var cloudShareFavourites: Boolean
+        get() = prefs.getBoolean("cloud_share_favs", false)
+        set(value) = prefs.edit().putBoolean("cloud_share_favs", value).apply()
+    var cloudSyncedAt: Long
+        get() = prefs.getLong("cloud_synced_at", 0L)
+        set(value) = prefs.edit().putLong("cloud_synced_at", value).apply()
+
     // ---- Downloads (phones) ----
     var downloadsJson: String
         get() = prefs.getString("downloads", "[]") ?: "[]"
@@ -718,6 +740,10 @@ class Store(context: Context) {
     var unfinishedJson: String
         get() = prefs.getString("unfinished", "[]") ?: "[]"
         set(value) = prefs.edit().putString("unfinished", value).apply()
+
+    /** What a profile has started watching ("p:<plex title>", "v:<film or episode id>") – its own Continue watching. */
+    fun started(profileId: String): Set<String> = prefs.getStringSet("started_$profileId", emptySet())?.toSet() ?: emptySet()
+    fun setStarted(profileId: String, keys: Set<String>) = prefs.edit().putStringSet("started_$profileId", keys).apply()
 
     /** What the home-screen widget shows: favourites with now and next. */
     var widgetSnapshot: String
@@ -794,7 +820,7 @@ class Store(context: Context) {
 
     // ---------------- Backup & restore ----------------
 
-    private val notBackedUp = listOf("preview_channel_id", "watch_next_ids", "last_refresh_", "usage_", "bonus_", "schema", "dead_channels", "health_checked_at", "recordings", "watch_stats", "live_tab_rows", "plex_client_id", "flaky_streams", "db_tidy_at", "new_eps_checked_at", "crash_reported_at", "sport_auto_done", "sync_stamp_", "synced_at", "nas_backup_at", "update_checked_at", "update_dismissed", "vpn_", "device_mode", "link_device_id", "link_name", "downloads", "habits_", "widget_now", "football_team_list", "football_fixtures", "team_announced", "text_scale")
+    private val notBackedUp = listOf("preview_channel_id", "watch_next_ids", "last_refresh_", "usage_", "bonus_", "schema", "dead_channels", "health_checked_at", "recordings", "watch_stats", "live_tab_rows", "plex_client_id", "flaky_streams", "db_tidy_at", "new_eps_checked_at", "crash_reported_at", "sport_auto_done", "sync_stamp_", "synced_at", "nas_backup_at", "update_checked_at", "update_dismissed", "vpn_", "device_mode", "link_device_id", "link_name", "downloads", "habits_", "widget_now", "football_team_list", "football_fixtures", "team_announced", "text_scale", "gdrive_", "cloud_")
 
     /** Every setting as JSON (playlists, profiles, favourites, PIN, reminders, guide fixes…). */
     fun exportBackup(): String {
