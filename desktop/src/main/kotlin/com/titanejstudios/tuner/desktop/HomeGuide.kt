@@ -99,6 +99,19 @@ fun HomePage(app: AppState) {
             .sortedByDescending { it.rating?.toDoubleOrNull() ?: 0.0 }.distinctBy { it.name.lowercase() }.take(24)
     }
 
+    // Learnt from what you watch here: picks, your shows, missed episodes, "because you watched".
+    val tv = app.tasteVersion
+    val topPicks = remember(minute / 5, app.guide, app.visibleChannels, tv, app.profileId) {
+        if (app.taste.isEmpty) emptyList() else com.titanejstudios.tuner.data.Recommend.topPicks(app.visibleChannels, app.guide, app.taste, app.config.recents, now)
+    }
+    val yourShows = remember(minute / 5, app.guide, app.visibleChannels, tv, app.profileId) {
+        com.titanejstudios.tuner.data.Recommend.yourShowsTonight(app.visibleChannels, app.guide, app.taste, now)
+    }
+    val missed = remember(minute / 10, app.guide, tv, app.profileId) { app.missed(now) }
+    val because = remember(app.movies, version) { if (app.kids) null else app.becauseFilms() }
+    LaunchedEffect(app.movies, app.series) { app.loadTrending() }
+    val trending = if (app.kids) emptyList() else app.trending
+
     // The big pick at the top: what you were watching, else the best thing on now.
     val heroResume = cont.firstOrNull()
     val heroLive = onNow.firstOrNull { !it.programme.image.isNullOrBlank() } ?: onNow.firstOrNull()
@@ -141,81 +154,140 @@ fun HomePage(app: AppState) {
                 item { Pill("🔍 Search") { app.page = Page.Search } }
             }
         }
-        if (cont.size > 1 || (cont.size == 1 && heroResume == null)) row(app, "Continue watching") {
-            items(cont.take(20), key = { it.id }) { r ->
-                WithMenu(listOf(
-                    "▶ Carry on" to { app.watch(Watching(r.id, r.title, r.sub, r.poster, r.url, r.series, resumable = true)) },
-                    "⏮ From the start" to { app.watch(Watching(r.id, r.title, r.sub, r.poster, r.url, r.series, resumable = true), fromStart = true) },
-                    "✕ Remove from Continue watching" to { app.removeFromContinue(r.id) },
-                )) {
-                WideTile(
-                    r.title, r.poster, listOfNotNull(r.sub, if (r.dur > 0) "${(r.dur - r.pos) / 60_000} min left" else null).joinToString(" · "),
-                    progress = if (r.dur > 0) r.pos.toFloat() / r.dur else null, width = 260.dp,
-                ) { app.watch(Watching(r.id, r.title, r.sub, r.poster, r.url, r.series, resumable = true)) }
+        for ((rowKey, shown) in app.homeRows) {
+            if (!shown) continue
+            when (rowKey) {
+                "continue" -> {
+                        if (cont.size > 1 || (cont.size == 1 && heroResume == null)) row(app, "Continue watching") {
+                            items(cont.take(20), key = { it.id }) { r ->
+                                WithMenu(listOf(
+                                    "▶ Carry on" to { app.watch(Watching(r.id, r.title, r.sub, r.poster, r.url, r.series, resumable = true)) },
+                                    "⏮ From the start" to { app.watch(Watching(r.id, r.title, r.sub, r.poster, r.url, r.series, resumable = true), fromStart = true) },
+                                    "✕ Remove from Continue watching" to { app.removeFromContinue(r.id) },
+                                )) {
+                                WideTile(
+                                    r.title, r.poster, listOfNotNull(r.sub, if (r.dur > 0) "${(r.dur - r.pos) / 60_000} min left" else null).joinToString(" · "),
+                                    progress = if (r.dur > 0) r.pos.toFloat() / r.dur else null, width = 260.dp,
+                                ) { app.watch(Watching(r.id, r.title, r.sub, r.poster, r.url, r.series, resumable = true)) }
+                                }
+                            }
+                        }
                 }
-            }
-        }
-        if (yourChannels.isNotEmpty()) row(app, if (favourites.isNotEmpty()) "Your channels" else "Watched lately") {
-            items(yourChannels.take(30), key = { it.id }) { c ->
-                val cur = app.guide[c.id]?.firstOrNull { it.start <= now && it.stop > now }
-                ChannelTile(c, cur, now) { app.playChannel(c) }
-            }
-        }
-        if (onNow.isNotEmpty()) row(app, "On now") { items(onNow, key = { "n" + it.channel.id + it.programme.start }) { ProgrammeTile(app, it) } }
-        if (sport.isNotEmpty()) row(app, "Sport") { items(sport, key = { "s" + it.channel.id + it.programme.start }) { ProgrammeTile(app, it) } }
-        if (filmsOnTv.isNotEmpty()) row(app, "Films on TV today") { items(filmsOnTv, key = { "f" + it.channel.id + it.programme.start }) { ProgrammeTile(app, it) } }
-        if (myList.isNotEmpty()) row(app, "My list") {
-            items(myList, key = { it.id }) { w ->
-                PosterTile(w.name, w.image, if (w.isSeries) "Series" else w.category, width = 140.dp) {
-                    if (w.isSeries) {
-                        app.openSeriesId = w.id
-                        app.page = Page.Series
-                    } else w.toVod()?.let { app.playFilm(it) }
+                "channels" -> {
+                        if (yourChannels.isNotEmpty()) row(app, if (favourites.isNotEmpty()) "Your channels" else "Watched lately") {
+                            items(yourChannels.take(30), key = { it.id }) { c ->
+                                val cur = app.guide[c.id]?.firstOrNull { it.start <= now && it.stop > now }
+                                ChannelTile(c, cur, now) { app.playChannel(c) }
+                            }
+                        }
                 }
-            }
-        }
-        val picks = app.familyPicksForMe
-        if (picks.isNotEmpty()) row(app, "👪 Family picks") {
-            items(picks, key = { "fp" + it.item.id }) { p ->
-                val w = p.item
-                WithMenu(listOf("✕ Remove from Family picks" to { app.removeFamilyPick(w.id) })) {
-                    PosterTile(w.name, w.image, "From ${p.from}", width = 140.dp) {
-                        if (w.isSeries) {
-                            app.openSeriesId = w.id
-                            app.page = Page.Series
-                        } else w.toVod()?.let { app.playFilm(it) }
+                "onnow" -> {
+                        if (onNow.isNotEmpty()) row(app, "On now") { items(onNow, key = { "n" + it.channel.id + it.programme.start }) { ProgrammeTile(app, it) } }
+                }
+                "sport" -> {
+                        if (sport.isNotEmpty()) row(app, "Sport") { items(sport, key = { "s" + it.channel.id + it.programme.start }) { ProgrammeTile(app, it) } }
+                }
+                "filmstv" -> {
+                        if (filmsOnTv.isNotEmpty()) row(app, "Films on TV today") { items(filmsOnTv, key = { "f" + it.channel.id + it.programme.start }) { ProgrammeTile(app, it) } }
+                }
+                "mylist" -> {
+                        if (myList.isNotEmpty()) row(app, "My list") {
+                            items(myList, key = { it.id }) { w ->
+                                PosterTile(w.name, w.image, if (w.isSeries) "Series" else w.category, width = 140.dp) {
+                                    if (w.isSeries) {
+                                        app.openSeriesId = w.id
+                                        app.page = Page.Series
+                                    } else w.toVod()?.let { app.playFilm(it) }
+                                }
+                            }
+                        }
+                }
+                "family" -> {
+                        val fpicks = app.familyPicksForMe
+                        if (fpicks.isNotEmpty()) row(app, "👪 Family picks") {
+                            items(fpicks, key = { "fp" + it.item.id }) { p ->
+                                val w = p.item
+                                WithMenu(listOf("✕ Remove from Family picks" to { app.removeFamilyPick(w.id) })) {
+                                    PosterTile(w.name, w.image, "From ${p.from}", width = 140.dp) {
+                                        if (w.isSeries) {
+                                            app.openSeriesId = w.id
+                                            app.page = Page.Series
+                                        } else w.toVod()?.let { app.playFilm(it) }
+                                    }
+                                }
+                            }
+                        }
+                }
+                "coming" -> {
+                        val coming = if (app.kids) emptyList() else app.comingSoon
+                        if (coming.isNotEmpty()) row(app, "📅 Coming soon") {
+                            items(coming.take(20), key = { "cs" + it.item.id }) { c ->
+                                val today = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.UK).format(java.util.Date())
+                                val day = if (c.date == today) "Today" else runCatching {
+                                    java.text.SimpleDateFormat("EEE d MMM", java.util.Locale.UK).format(java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.UK).parse(c.date)!!)
+                                }.getOrDefault(c.date)
+                                PosterTile(c.item.name, c.item.image, "$day · S${c.season} E${c.episode}", width = 140.dp) {
+                                    app.openSeriesId = c.item.id
+                                    app.page = Page.Series
+                                }
+                            }
+                        }
+                }
+                "plexdeck" -> {
+                        if (app.plexDeck.isNotEmpty() && !app.kids) row(app, "Continue on Plex") {
+                            items(app.plexDeck, key = { it.ratingKey }) { p ->
+                                WideTile(p.title, p.image, p.subtitle, progress = if (p.durationMs > 0) p.viewOffsetMs.toFloat() / p.durationMs else null, width = 260.dp) {
+                                    app.playPlex(p.ratingKey, p.title, p.subtitle, p.image, p.playUrl, p.server, p.viewOffsetMs)
+                                }
+                            }
+                        }
+                }
+                "tonight" -> {
+                        if (tonight.isNotEmpty()) row(app, "Tonight") { items(tonight, key = { "t" + it.channel.id + it.programme.start }) { ProgrammeTile(app, it) } }
+                }
+                "topfilms" -> {
+                        if (topFilms.isNotEmpty() && !app.kids) row(app, "Top rated films") {
+                            items(topFilms, key = { it.id }) { m -> PosterTile(m.name, m.poster, m.rating?.let { "★ $it" }, width = 140.dp) { app.playFilm(m) } }
+                        }
+                }
+                "plexnew" -> {
+                        if (app.plexRecent.isNotEmpty() && !app.kids) row(app, "New on Plex") {
+                            items(app.plexRecent, key = { "pr" + it.ratingKey }) { e ->
+                                PosterTile(e.title, e.image, e.library ?: e.year, width = 140.dp) {
+                                    if (e.isShow) app.page = Page.Plex else app.playPlex(e.ratingKey, e.title, e.year, e.image, e.playUrl, e.server, e.viewOffsetMs)
+                                }
+                            }
+                        }
+                }
+
+                "picks" -> if (topPicks.isNotEmpty()) row(app, "Top picks for you") {
+                    items(topPicks, key = { "tp" + it.channel.id + it.programme.start }) { pk -> ProgrammeTile(app, OnNow(pk.channel, pk.programme, 0), pk.reason) }
+                }
+                "yourshows" -> if (yourShows.isNotEmpty()) row(app, "Your shows tonight") {
+                    items(yourShows, key = { "ys" + it.channel.id + it.programme.start }) { pk -> ProgrammeTile(app, OnNow(pk.channel, pk.programme, 0), pk.reason) }
+                }
+                "missed" -> if (missed.isNotEmpty()) row(app, "Missed it?") {
+                    items(missed, key = { "m" + it.first.id + it.second.start }) { (c, p) ->
+                        WideTile(p.title, p.image ?: c.logo, "↺ ${c.name} · ${time(p.start)}", width = 260.dp) { app.playCatchup(c, p) }
                     }
                 }
-            }
-        }
-        val coming = if (app.kids) emptyList() else app.comingSoon
-        if (coming.isNotEmpty()) row(app, "📅 Coming soon") {
-            items(coming.take(20), key = { "cs" + it.item.id }) { c ->
-                val today = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.UK).format(java.util.Date())
-                val day = if (c.date == today) "Today" else runCatching {
-                    java.text.SimpleDateFormat("EEE d MMM", java.util.Locale.UK).format(java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.UK).parse(c.date)!!)
-                }.getOrDefault(c.date)
-                PosterTile(c.item.name, c.item.image, "$day · S${c.season} E${c.episode}", width = 140.dp) {
-                    app.openSeriesId = c.item.id
-                    app.page = Page.Series
+                "because" -> because?.let { (title, films) ->
+                    row(app, "Because you watched $title") {
+                        items(films, key = { "b" + it.id }) { m -> PosterTile(m.name, m.poster, m.rating?.let { "★ $it" }, width = 140.dp) { app.playFilm(m) } }
+                    }
                 }
-            }
-        }
-        if (app.plexDeck.isNotEmpty() && !app.kids) row(app, "Continue on Plex") {
-            items(app.plexDeck, key = { it.ratingKey }) { p ->
-                WideTile(p.title, p.image, p.subtitle, progress = if (p.durationMs > 0) p.viewOffsetMs.toFloat() / p.durationMs else null, width = 260.dp) {
-                    app.playPlex(p.ratingKey, p.title, p.subtitle, p.image, p.playUrl, p.server, p.viewOffsetMs)
-                }
-            }
-        }
-        if (tonight.isNotEmpty()) row(app, "Tonight") { items(tonight, key = { "t" + it.channel.id + it.programme.start }) { ProgrammeTile(app, it) } }
-        if (topFilms.isNotEmpty() && !app.kids) row(app, "Top rated films") {
-            items(topFilms, key = { it.id }) { m -> PosterTile(m.name, m.poster, m.rating?.let { "★ $it" }, width = 140.dp) { app.playFilm(m) } }
-        }
-        if (app.plexRecent.isNotEmpty() && !app.kids) row(app, "New on Plex") {
-            items(app.plexRecent, key = { "pr" + it.ratingKey }) { e ->
-                PosterTile(e.title, e.image, e.library ?: e.year, width = 140.dp) {
-                    if (e.isShow) app.page = Page.Plex else app.playPlex(e.ratingKey, e.title, e.year, e.image, e.playUrl, e.server, e.viewOffsetMs)
+                "trending" -> if (trending.isNotEmpty()) row(app, "Trending this week") {
+                    items(trending, key = { "tr" + it.first.rank }) { (t, hit) ->
+                        PosterTile(t.title, t.poster, "#${t.rank}" + (t.year?.let { " · $it" } ?: ""), width = 140.dp) {
+                            when (hit) {
+                                is com.titanejstudios.tuner.data.VodItem -> app.playFilm(hit)
+                                is com.titanejstudios.tuner.data.SeriesItem -> {
+                                    app.openSeriesId = hit.id
+                                    app.page = Page.Series
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -260,7 +332,7 @@ private fun Hero(image: String?, kicker: String, title: String, line: String, pr
 
 /** A programme on a channel: its picture (or the channel's logo), time and channel. */
 @Composable
-private fun ProgrammeTile(app: AppState, o: OnNow) {
+private fun ProgrammeTile(app: AppState, o: OnNow, reason: String? = null) {
     val now = app.now
     val p = o.programme
     val on = p.start <= now
@@ -281,6 +353,7 @@ private fun ProgrammeTile(app: AppState, o: OnNow) {
             o.channel.name + if (on) "  ·  until ${time(p.stop)}" else "  ·  ${time(p.start)} – ${time(p.stop)}",
             color = Soft, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 2.dp),
         )
+        reason?.let { Text(it, color = Gold, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 2.dp)) }
     }
 }
 
@@ -304,38 +377,115 @@ private const val NAME_W = 200
 fun GuidePage(app: AppState) {
     val now = app.now
     val favourites = remember(app.listsVersion, app.profileId) { app.favourites }
-    var onlyFavourites by remember { mutableStateOf(favourites.isNotEmpty()) }
+    var group by remember { mutableStateOf(if (favourites.isNotEmpty()) GUIDE_FAVOURITES else GUIDE_ALL) }
+    var groupsOpen by remember { mutableStateOf(false) }
+    var search by remember { mutableStateOf("") }
     var menu by remember { mutableStateOf<Pair<Channel, Programme>?>(null) }
-    val channels = remember(app.visibleChannels, onlyFavourites, favourites, app.guide) {
-        val base = if (onlyFavourites) app.visibleChannels.filter { it.id in favourites } else app.visibleChannels
-        base.filter { app.guide[it.id]?.isNotEmpty() == true }
+    val all = app.visibleChannels
+    val groups = remember(all, favourites) {
+        buildList {
+            if (favourites.isNotEmpty()) add(GUIDE_FAVOURITES)
+            if (app.config.recents.isNotEmpty()) add(GUIDE_RECENT)
+            add(GUIDE_ALL)
+            addAll(all.map { it.group }.distinct())
+        }
     }
-    // The timeline starts on the half hour before now.
-    val origin = remember(now / 1_800_000L) { now / 1_800_000L * 1_800_000L - 1_800_000L }
-    val end = origin + 36 * 3_600_000L
+    // The timeline: from the half hour before now, or wherever you've moved it (Earlier / Later / a day).
+    val nowSlot = now / 1_800_000L * 1_800_000L - 1_800_000L
+    var start by remember { mutableStateOf<Long?>(null) }
+    val origin = start ?: nowSlot
+    val end = origin + 24 * 3_600_000L
+    val guide = app.guide
+    // How far back and forward the guide goes (at most a week each way).
+    val range = remember(guide) {
+        var lo = Long.MAX_VALUE
+        var hi = 0L
+        for (list in guide.values) {
+            list.firstOrNull()?.let { if (it.start < lo) lo = it.start }
+            list.lastOrNull()?.let { if (it.stop > hi) hi = it.stop }
+        }
+        val week = 7 * 86_400_000L
+        maxOf(lo, now - week) to minOf(hi, now + week)
+    }
+    val channels = remember(all, group, favourites, guide, search, origin) {
+        val base = when (group) {
+            GUIDE_FAVOURITES -> all.filter { it.id in favourites }
+            GUIDE_RECENT -> app.recentChannels
+            GUIDE_ALL -> all
+            else -> all.filter { it.group == group }
+        }
+        val q = search.trim().lowercase()
+        if (q.isEmpty()) base.filter { guide[it.id]?.isNotEmpty() == true }
+        else all.filter { c ->
+            c.name.lowercase().contains(q) || guide[c.id]?.any { it.stop > origin && it.start < end && it.title.lowercase().contains(q) } == true
+        }
+    }
     val totalW = ((end - origin) / 60_000L * MIN_DP).dp + NAME_W.dp
     val h = rememberScrollState()
-    LaunchedEffect(Unit) { h.scrollTo(0) }
+    LaunchedEffect(origin) { h.scrollTo(0) }
+    val dayFmt = remember { java.text.SimpleDateFormat("EEE d", java.util.Locale.UK) }
 
     Column(Modifier.fillMaxSize().padding(top = 14.dp)) {
         Row(Modifier.padding(horizontal = 20.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("TV Guide", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.ExtraBold)
-            Spacer(Modifier.width(12.dp))
-            if (favourites.isNotEmpty()) {
-                Pill("★ Favourites", selected = onlyFavourites) { onlyFavourites = true }
-                Pill("All channels", selected = !onlyFavourites) { onlyFavourites = false }
+            Spacer(Modifier.width(8.dp))
+            // Which channels: favourites, recently watched, everything, or a group.
+            Box {
+                Pill("$group  ▾", selected = true) { groupsOpen = true }
+                androidx.compose.material3.DropdownMenu(expanded = groupsOpen, onDismissRequest = { groupsOpen = false }) {
+                    for (g in groups) androidx.compose.material3.DropdownMenuItem(
+                        text = { Text((if (g == group) "✓ " else "    ") + g) },
+                        onClick = { group = g; search = ""; groupsOpen = false },
+                    )
+                    if (app.config.lockedGroups.isNotEmpty() && app.unlockedGroups.isEmpty()) androidx.compose.material3.DropdownMenuItem(
+                        text = { Text("🔒 Show locked groups…") },
+                        onClick = { groupsOpen = false; app.unlockGroups() },
+                    )
+                }
+            }
+            androidx.compose.material3.OutlinedTextField(
+                search, { search = it }, singleLine = true, placeholder = { Text("Search the guide") },
+                modifier = Modifier.width(220.dp),
+            )
+            Spacer(Modifier.weight(1f))
+            Pill("◀ Earlier") { start = maxOf(origin - 3 * 3_600_000L, range.first / 1_800_000L * 1_800_000L) }
+            Pill("Now", selected = start == null) { start = null }
+            Pill("Later ▶") { start = minOf(origin + 3 * 3_600_000L, maxOf(range.second - 3 * 3_600_000L, nowSlot)) }
+        }
+        // Days: jump to the evening of any day the guide has.
+        Row(Modifier.padding(horizontal = 20.dp).padding(bottom = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            val cal = java.util.Calendar.getInstance().apply {
+                timeInMillis = range.first
+                set(java.util.Calendar.HOUR_OF_DAY, 0); set(java.util.Calendar.MINUTE, 0); set(java.util.Calendar.SECOND, 0); set(java.util.Calendar.MILLISECOND, 0)
+            }
+            val today = java.util.Calendar.getInstance().apply {
+                set(java.util.Calendar.HOUR_OF_DAY, 0); set(java.util.Calendar.MINUTE, 0); set(java.util.Calendar.SECOND, 0); set(java.util.Calendar.MILLISECOND, 0)
+            }.timeInMillis
+            var guard = 0
+            while (cal.timeInMillis < range.second && guard++ < 15) {
+                val day = cal.timeInMillis
+                val label = when (day) {
+                    today -> "Today"
+                    today - 86_400_000L -> "Yesterday"
+                    today + 86_400_000L -> "Tomorrow"
+                    else -> dayFmt.format(java.util.Date(day))
+                }
+                val shown = origin >= day && origin < day + 86_400_000L
+                Pill(label, selected = shown) { start = if (day == today) null else day + 18 * 3_600_000L }
+                cal.add(java.util.Calendar.DAY_OF_MONTH, 1)
             }
             Spacer(Modifier.weight(1f))
-            Text("Click: watch now · remind me · catch-up", color = Soft, fontSize = 12.sp)
+            Text("Click: watch · catch-up · remind · record", color = Soft, fontSize = 12.sp)
         }
         Box(Modifier.fillMaxSize().horizontalScroll(h)) {
             Column(Modifier.width(totalW)) {
-                // Times along the top.
+                // Times along the top (with the day at midnight).
                 Box(Modifier.fillMaxWidth().height(28.dp)) {
                     var t = origin
                     while (t < end) {
+                        val midnight = java.util.Calendar.getInstance().apply { timeInMillis = t }.let { it.get(java.util.Calendar.HOUR_OF_DAY) == 0 && it.get(java.util.Calendar.MINUTE) == 0 }
                         Text(
-                            time(t), color = Soft, fontSize = 12.sp,
+                            if (midnight) dayFmt.format(java.util.Date(t)) else time(t), color = if (midnight) Gold else Soft, fontSize = 12.sp,
                             modifier = Modifier.offset(x = (NAME_W + (t - origin) / 60_000L * MIN_DP).dp + 4.dp, y = 6.dp),
                         )
                         t += 1_800_000L
@@ -344,7 +494,7 @@ fun GuidePage(app: AppState) {
                 Box(Modifier.weight(1f)) {
                     LazyColumn(Modifier.fillMaxSize()) {
                         items(channels, key = { it.id }) { c ->
-                            GuideRow(app, c, origin, end, now, h.value) { p ->
+                            GuideRow(app, c, origin, end, now, h.value, search.trim().lowercase()) { p ->
                                 when {
                                     p.start <= now && p.stop > now -> app.playChannel(c)
                                     else -> menu = c to p
@@ -353,13 +503,17 @@ fun GuidePage(app: AppState) {
                         }
                         if (channels.isEmpty()) item {
                             Text(
-                                if (app.channels.isEmpty()) "No channels yet." else "No guide for these channels.",
+                                when {
+                                    app.channels.isEmpty() -> "No channels yet."
+                                    search.isNotBlank() -> "Nothing matches \"$search\" at these times."
+                                    else -> "No guide for these channels."
+                                },
                                 color = Soft, fontSize = 15.sp, modifier = Modifier.offset { IntOffset(h.value, 0) }.padding(20.dp),
                             )
                         }
                     }
                     // The "now" line.
-                    Box(
+                    if (now in origin until end) Box(
                         Modifier.offset(x = (NAME_W + (now - origin) / 60_000L * MIN_DP).dp).width(2.dp).fillMaxHeight().background(LiveRed.copy(alpha = 0.8f)),
                     )
                 }
@@ -369,8 +523,12 @@ fun GuidePage(app: AppState) {
     menu?.let { (c, p) -> ProgrammeMenu(app, c, p) { menu = null } }
 }
 
+private const val GUIDE_FAVOURITES = "★ Favourites"
+private const val GUIDE_RECENT = "Recently watched"
+private const val GUIDE_ALL = "All channels"
+
 @Composable
-private fun GuideRow(app: AppState, c: Channel, origin: Long, end: Long, now: Long, scrollX: Int, onClick: (Programme) -> Unit) {
+private fun GuideRow(app: AppState, c: Channel, origin: Long, end: Long, now: Long, scrollX: Int, highlight: String = "", onClick: (Programme) -> Unit) {
     val progs = app.guide[c.id].orEmpty().filter { it.stop > origin && it.start < end }
     Box(Modifier.fillMaxWidth().height(54.dp).padding(vertical = 2.dp)) {
         for (p in progs) {
@@ -381,7 +539,10 @@ private fun GuideRow(app: AppState, c: Channel, origin: Long, end: Long, now: Lo
             val past = p.stop <= now
             Column(
                 Modifier.offset(x = x.dp).width(w.dp - 2.dp).fillMaxHeight().clip(RoundedCornerShape(6.dp))
-                    .background(if (on) Sky.copy(alpha = 0.35f) else if (past) Panel.copy(alpha = 0.5f) else Panel)
+                    .background(
+                        if (highlight.isNotEmpty() && p.title.lowercase().contains(highlight)) Gold.copy(alpha = 0.35f)
+                        else if (on) Sky.copy(alpha = 0.35f) else if (past) Panel.copy(alpha = 0.5f) else Panel
+                    )
                     .then(
                         when {
                             app.recordingFor(c, p) != null -> Modifier.border(1.dp, LiveRed, RoundedCornerShape(6.dp))
@@ -413,7 +574,7 @@ private fun ProgrammeMenu(app: AppState, c: Channel, p: Programme, onDismiss: ()
     val now = app.now
     Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.55f)).clickable(onClick = onDismiss), contentAlignment = Alignment.Center) {
         Column(
-            Modifier.width(520.dp).clip(RoundedCornerShape(16.dp)).background(Panel).clickable(enabled = false) {}.padding(24.dp),
+            Modifier.width(680.dp).clip(RoundedCornerShape(16.dp)).background(Panel).clickable(enabled = false) {}.padding(24.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(p.title, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
@@ -426,6 +587,13 @@ private fun ProgrammeMenu(app: AppState, c: Channel, p: Programme, onDismiss: ()
                 if (p.stop > now && !app.kids) Pill(if (app.recordingFor(c, p) != null) "Cancel the recording" else "● Record") { app.toggleRecording(c, p); onDismiss() }
                 Pill("▶ ${c.name} now") { onDismiss(); app.playChannel(c) }
                 Pill("Close", onClick = onDismiss)
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                val t = remember(app.listsVersion) { app.thumbOf(p.title) }
+                Pill("👍", selected = t == 1) { app.thumb(p.title, true) }
+                Pill("👎", selected = t == -1) { app.thumb(p.title, false) }
+                if (!app.kids) Pill(if (app.seriesLinkFor(c, p)) "Cancel the series link" else "🔁 Every episode") { app.toggleSeriesLink(c, p); onDismiss() }
+                if (app.link.key != null) Pill("📺 On the TV") { onDismiss(); app.watchOnTv(c, p.takeIf { it.stop <= now }) }
             }
         }
     }

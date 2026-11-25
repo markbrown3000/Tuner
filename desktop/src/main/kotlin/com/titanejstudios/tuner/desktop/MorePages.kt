@@ -124,8 +124,42 @@ fun RecordingsPage(app: AppState) {
                     "Files go in ${app.recorder.folder.absolutePath}.",
                 color = Soft, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp, bottom = 10.dp),
             )
-            Pill("Open the folder") { runCatching { java.awt.Desktop.getDesktop().open(app.recorder.folder) } }
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Pill("Open the folder") { runCatching { java.awt.Desktop.getDesktop().open(app.recorder.folder) } }
+                Pill("📁 Save recordings somewhere else…") { app.chooseRecordFolder() }
+                if (app.config.recordFolder.isNotBlank()) Pill("Back to Videos\\Flicker") { app.resetRecordFolder() }
+            }
+            Text("A network drive (NAS or another PC's shared folder) works too.", color = Soft, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
             Spacer(Modifier.height(10.dp))
+            Text("Delete finished recordings after", color = Color.White, fontSize = 14.sp)
+            val v = app.listsVersion
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 4.dp)) {
+                for (d in listOf(0, 7, 14, 30, 60)) Pill(if (d == 0) "Never" else "$d days", selected = app.config.keepRecordingsDays == d && v >= 0) { app.setKeepRecordings(d) }
+            }
+            Spacer(Modifier.height(10.dp))
+        }
+        val links = app.config.seriesLinks
+        if (links.isNotEmpty()) {
+            item { SectionTitle("Series links – every episode records") }
+            items(links, key = { "s" + it }) { l ->
+                val cid = l.substringBefore('\t')
+                val title = l.substringAfter('\t')
+                val ch = app.channels.firstOrNull { it.id == cid }
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Panel).padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("🔁", fontSize = 16.sp, modifier = Modifier.width(56.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(title, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                        val next = app.guide[cid]?.firstOrNull { it.title == title && it.start > app.now }
+                        Text((ch?.name ?: "A channel that's gone") + (next?.let { " · next: ${fmt.format(Date(it.start))}" } ?: " · nothing in the guide yet"), color = Soft, fontSize = 12.sp)
+                    }
+                    if (ch != null) Pill("Cancel") {
+                        app.toggleSeriesLink(ch, com.titanejstudios.tuner.data.Programme(0L, 0L, title, null, null))
+                    }
+                }
+            }
         }
         val downloads = app.downloads
         if (downloads.isNotEmpty()) {
@@ -192,6 +226,79 @@ fun RecordingsPage(app: AppState) {
                             app.toggleRecording(c, com.titanejstudios.tuner.data.Programme(r.start, r.stop, r.title, null))
                         } ?: app.deleteRecording(r)
                     } else app.deleteRecording(r)
+                }
+            }
+        }
+    }
+}
+
+
+/** Catch-up: channels that keep the last few days, then a day, then what was on. */
+@Composable
+fun CatchupPage(app: AppState) {
+    val channels = app.catchupChannels
+    var chosen by remember { mutableStateOf<com.titanejstudios.tuner.data.Channel?>(null) }
+    var dayBack by remember { mutableStateOf(0) }
+    val c = chosen ?: channels.firstOrNull()
+    val dayFmt = remember { SimpleDateFormat("EEE d MMM", Locale.UK) }
+    val timeFmt = remember { SimpleDateFormat("HH:mm", Locale.UK) }
+    Row(Modifier.fillMaxSize().padding(24.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+        Column(Modifier.width(300.dp).fillMaxHeight()) {
+            Text("Catch-up", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.ExtraBold)
+            Text("Channels that keep the last few days.", color = Soft, fontSize = 13.sp, modifier = Modifier.padding(bottom = 8.dp))
+            if (channels.isEmpty()) Text("None of your channels have catch-up.", color = Soft, fontSize = 14.sp)
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                items(channels, key = { it.id }) { ch ->
+                    Row(
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(if (ch.id == c?.id) Sky.copy(alpha = 0.35f) else Panel)
+                            .clickable { chosen = ch; dayBack = 0 }.padding(horizontal = 10.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(ch.name, color = Color.White, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                        Text("${ch.catchupDays}d", color = Soft, fontSize = 11.sp)
+                    }
+                }
+            }
+        }
+        if (c != null) Column(Modifier.weight(1f).fillMaxHeight()) {
+            Text(c.name, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            val days = c.catchupDays.coerceIn(1, 7)
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(vertical = 8.dp)) {
+                for (d in 0..days) {
+                    val label = when (d) {
+                        0 -> "Today"
+                        1 -> "Yesterday"
+                        else -> dayFmt.format(Date(System.currentTimeMillis() - d * 86_400_000L))
+                    }
+                    Pill(label, selected = d == dayBack) { dayBack = d }
+                }
+            }
+            val now = app.now
+            val shown = remember(c.id, dayBack, app.guide, now / 60_000L) {
+                val cal = java.util.Calendar.getInstance().apply {
+                    add(java.util.Calendar.DAY_OF_MONTH, -dayBack)
+                    set(java.util.Calendar.HOUR_OF_DAY, 0); set(java.util.Calendar.MINUTE, 0); set(java.util.Calendar.SECOND, 0); set(java.util.Calendar.MILLISECOND, 0)
+                }
+                val from = cal.timeInMillis
+                val to = from + 86_400_000L
+                app.guide[c.id].orEmpty().filter { it.start >= from && it.start < to && it.stop <= now }.reversed()
+            }
+            if (shown.isEmpty()) Text("Nothing in the guide for this day.", color = Soft, fontSize = 14.sp)
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                items(shown, key = { it.start }) { p ->
+                    val ok = com.titanejstudios.tuner.data.Catchup.isAvailable(c, p, now)
+                    Row(
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(Panel)
+                            .clickable(enabled = ok) { app.playCatchup(c, p) }.padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("${timeFmt.format(Date(p.start))}–${timeFmt.format(Date(p.stop))}", color = Soft, fontSize = 13.sp, modifier = Modifier.width(110.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(p.title, color = if (ok) Color.White else Soft, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            p.desc?.let { Text(it, color = Soft, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                        }
+                        Text(if (ok) "▶" else "gone", color = if (ok) Gold else Soft, fontSize = 13.sp)
+                    }
                 }
             }
         }

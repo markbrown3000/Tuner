@@ -80,7 +80,8 @@ class Recorder(private val main: Player) {
     private var factory: MediaPlayerFactory? = null
     private val running = HashMap<String, MediaPlayer>()
 
-    val folder: File = File(System.getProperty("user.home"), "Videos" + File.separator + "Flicker").apply { mkdirs() }
+    /** Videos\Flicker, or the folder chosen in Settings › Recordings (a network drive works). */
+    var folder: File = File(System.getProperty("user.home"), "Videos" + File.separator + "Flicker").apply { mkdirs() }
 
     fun start(r: PcRecording, url: String): Boolean {
         if (!main.available) return false

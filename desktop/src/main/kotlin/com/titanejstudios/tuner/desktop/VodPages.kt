@@ -94,6 +94,7 @@ fun FilmsPage(app: AppState) {
     var category by remember { mutableStateOf(ALL_CATS) }
     var search by remember { mutableStateOf("") }
     var open by remember { mutableStateOf<VodItem?>(null) }
+    var showEverything by remember { mutableStateOf(false) }
     val films = app.movies.orEmpty()
     // Opened from the player's "Go to film page".
     LaunchedEffect(app.openFilmId, films) {
@@ -134,6 +135,7 @@ fun FilmsPage(app: AppState) {
         }
         // 🎲 Surprise me: a well-rated film you haven't watched.
         if (films.isNotEmpty()) Box(Modifier.fillMaxSize()) {
+            if (app.plexLinked) Pill("Plex + provider", modifier = Modifier.align(Alignment.TopEnd).padding(top = 4.dp, end = 150.dp)) { showEverything = true }
             Pill("🎲 Surprise me", selected = true, modifier = Modifier.align(Alignment.TopEnd).padding(4.dp)) {
                 val pool = films.filter { (it.rating?.toDoubleOrNull() ?: 0.0) >= 7.0 && it.id !in app.config.done && it.id !in app.config.resume && app.thumbOf(it.name) >= 0 }
                     .ifEmpty { films.filter { it.id !in app.config.done } }
@@ -142,6 +144,7 @@ fun FilmsPage(app: AppState) {
         }
     }
     open?.let { m -> FilmDetail(app, m) { open = null } }
+    if (showEverything) Everything(app, onOpen = { open = it }) { showEverything = false }
 }
 
 @Composable
@@ -169,7 +172,15 @@ private fun FilmDetail(app: AppState, m: VodItem, onClose: () -> Unit) {
                     color = Gold, fontSize = 14.sp,
                 )
                 info?.overview?.let { Text(it, color = Soft, fontSize = 15.sp) }
-                info?.cast?.take(6)?.takeIf { it.isNotEmpty() }?.let { Text("With " + it.joinToString(", "), color = Soft, fontSize = 13.sp) }
+                // The cast: click a name for what else they're in.
+                val castIds = info?.castIds.orEmpty()
+                if (castIds.isNotEmpty()) LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    item { Text("With", color = Soft, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp)) }
+                    items(castIds.size) { i ->
+                        val (id, name) = castIds[i]
+                        Pill(name) { app.openActor(id, name) }
+                    }
+                } else info?.cast?.take(6)?.takeIf { it.isNotEmpty() }?.let { Text("With " + it.joinToString(", "), color = Soft, fontSize = 13.sp) }
                 // The rest of its film series, in order (the ones you have can be played).
                 val inf = info
                 var parts by remember(m.id) { mutableStateOf<List<Pair<Tmdb.Part, VodItem?>>>(emptyList()) }
@@ -359,5 +370,48 @@ fun DownloadPill(app: AppState, id: String, title: String, sub: String?, poster:
         d.state == "downloading" -> Pill(progress?.let { "⤓ ${(it * 100).toInt()}%" } ?: "⤓ …") { }
         d.state == "failed" -> Pill(if (short) "⚠" else "⚠ Download failed – remove") { app.deleteDownload(d) }
         else -> Pill(if (short) "✓" else "✓ Downloaded") { }
+    }
+}
+
+
+/** Plex and your provider's films together: each once, saying where it is. */
+@Composable
+private fun Everything(app: AppState, onOpen: (VodItem) -> Unit, onClose: () -> Unit) {
+    LaunchedEffect(Unit) { app.loadEverything() }
+    var q by remember { mutableStateOf("") }
+    var only by remember { mutableStateOf("All") }
+    val all = app.everything
+    DetailOverlay(onClose) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("All my films", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.ExtraBold)
+            Spacer(Modifier.width(10.dp))
+            OutlinedTextField(q, { q = it }, singleLine = true, placeholder = { Text("Find a film") }, modifier = Modifier.width(240.dp))
+            for (o in listOf("All", "Both", "Plex only", "Provider only")) Pill(o, selected = only == o) { only = o }
+        }
+        Spacer(Modifier.height(10.dp))
+        if (all == null) Text("Putting Plex and your provider's films together…", color = Soft, fontSize = 15.sp)
+        else {
+            val t = q.trim().lowercase()
+            val shown = all.filter { (title, f, p) ->
+                (t.isEmpty() || title.lowercase().contains(t)) && when (only) {
+                    "Both" -> f != null && p != null
+                    "Plex only" -> f == null
+                    "Provider only" -> p == null
+                    else -> true
+                }
+            }
+            Text("${shown.size} films", color = Soft, fontSize = 12.sp)
+            LazyVerticalGrid(GridCells.Adaptive(140.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                items(shown.size) { i ->
+                    val (title, f, p) = shown[i]
+                    PosterTile(title, p?.image ?: f?.poster, if (f != null && p != null) "Plex + provider" else if (p != null) "Plex" else "Provider", width = 140.dp) {
+                        when {
+                            f != null -> { onClose(); onOpen(f) }
+                            p != null -> { onClose(); app.playPlex(p.ratingKey, p.title, p.year, p.image, p.playUrl, p.server, p.viewOffsetMs) }
+                        }
+                    }
+                }
+            }
+        }
     }
 }

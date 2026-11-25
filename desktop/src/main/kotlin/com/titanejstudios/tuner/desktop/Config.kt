@@ -50,7 +50,7 @@ class Reminder(val channelId: String, val channelName: String, val title: String
 /** Settings for the PC version, kept in Flicker's folder in your user profile. */
 class Config {
     private val dir = File(System.getProperty("user.home"), ".tuner").apply { mkdirs() }
-    private val file = File(dir, "settings.json")
+    val file = File(dir, "settings.json")
 
     var deviceId: String = UUID.randomUUID().toString()
     var sources: List<Source> = emptyList()
@@ -137,6 +137,51 @@ class Config {
     var thumbs: Map<String, Int>
         get() = more.optJSONObject("thumbs")?.let { o -> o.keys().asSequence().associateWith { o.optInt(it) } } ?: emptyMap()
         set(v) { more.put("thumbs", JSONObject(v)) }
+    // Channels and categories (Settings › Manage channels).
+    private fun moreSet(k: String): Set<String> = more.optJSONArray(k)?.let { a -> (0 until a.length()).map { a.getString(it) }.toSet() } ?: emptySet()
+    private fun moreList(k: String): List<String> = more.optJSONArray(k)?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList()
+    private fun moreMap(k: String): Map<String, String> = more.optJSONObject(k)?.let { o -> o.keys().asSequence().associateWith { o.optString(it) } } ?: emptyMap()
+    var hiddenGroups: Set<String> get() = moreSet("hiddenGroups"); set(v) { more.put("hiddenGroups", JSONArray(v.toList())) }
+    var hiddenChannels: Set<String> get() = moreSet("hiddenChannels"); set(v) { more.put("hiddenChannels", JSONArray(v.toList())) }
+    var lockedGroups: Set<String> get() = moreSet("lockedGroups"); set(v) { more.put("lockedGroups", JSONArray(v.toList())) }
+    /** Original group name → the name you gave it. */
+    var groupNames: Map<String, String> get() = moreMap("groupNames"); set(v) { more.put("groupNames", JSONObject(v)) }
+    /** Groups in the order you put them (the rest follow in the playlist's order). */
+    var groupOrder: List<String> get() = moreList("groupOrder"); set(v) { more.put("groupOrder", JSONArray(v)) }
+    /** Channel id → the channel whose guide it uses (for channels with none). */
+    var epgMap: Map<String, String> get() = moreMap("epgMap"); set(v) { more.put("epgMap", JSONObject(v)) }
+    /** Channels that didn't answer the last check. */
+    var offline: Set<String> get() = moreSet("offline"); set(v) { more.put("offline", JSONArray(v.toList())) }
+    var hideOffline: Boolean get() = more.optBoolean("hideOffline"); set(v) { more.put("hideOffline", v) }
+    var offlineCheckedAt: Long get() = more.optLong("offlineAt"); set(v) { more.put("offlineAt", v) }
+
+    // Picture and sound.
+    var nightMode: Boolean get() = more.optBoolean("nightMode"); set(v) { more.put("nightMode", v) }
+    var clearSpeech: Boolean get() = more.optBoolean("clearSpeech"); set(v) { more.put("clearSpeech", v) }
+    var subtitleScale: Int get() = more.optInt("subScale", 100); set(v) { more.put("subScale", v) }
+    var lipSyncMs: Long get() = more.optLong("lipSync"); set(v) { more.put("lipSync", v) }
+    var openSubtitlesKey: String? get() = moreStr("osKey", "").ifBlank { null }; set(v) { more.put("osKey", v ?: "") }
+    // Recordings.
+    /** Series links: "channelId<TAB>title" – every showing records. */
+    var seriesLinks: List<String> get() = moreList("seriesLinks"); set(v) { more.put("seriesLinks", JSONArray(v)) }
+    /** Finished recordings older than this many days are deleted (0 = keep them). */
+    var keepRecordingsDays: Int get() = more.optInt("keepDays"); set(v) { more.put("keepDays", v) }
+    /** Where recordings go (a network drive is fine); blank = Videos\Flicker. */
+    var recordFolder: String get() = moreStr("recFolder", ""); set(v) { more.put("recFolder", v) }
+
+    /** Plex libraries kids may see ("machineId/key"), from the TV. */
+    var plexKidsSections: Set<String> get() = moreSet("plexKids"); set(v) { more.put("plexKids", JSONArray(v.toList())) }
+
+    /** Artwork screensaver after this many idle minutes with nothing playing (0 = off). */
+    var screensaverMin: Int get() = more.optInt("saver", 10); set(v) { more.put("saver", v) }
+
+    // Home and recommendations.
+    fun tasteOf(profile: String): String? = moreStr("taste_$profile", "").ifBlank { null }
+    fun saveTaste(profile: String, json: String) { more.put("taste_$profile", json) }
+    /** Home rows in your order; hidden ones start with "-". Empty = the standard order. */
+    var homeRows: List<String> get() = moreList("homeRows"); set(v) { more.put("homeRows", JSONArray(v)) }
+    var lastFilm: String get() = moreStr("lastFilm", ""); set(v) { more.put("lastFilm", v) }
+
     /** Each profile's sound language, subtitle language and audio description: "en|en|1". */
     fun languagesOf(profile: String): Triple<String?, String?, Boolean> {
         val p = moreStr("lang_$profile", "").split('|')
@@ -163,7 +208,7 @@ class Config {
         runCatching { sourceFromJson(arr.getJSONObject(i)) }.getOrNull()
     }
 
-    private fun load() {
+    fun load() {
         if (!file.exists()) {
             save()
             return

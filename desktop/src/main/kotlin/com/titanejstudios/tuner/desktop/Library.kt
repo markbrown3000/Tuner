@@ -12,7 +12,13 @@ import com.titanejstudios.tuner.data.XtreamClient
 
 /** Loads channels and the TV guide from your playlists – the same code the TV app uses. */
 object Library {
-    class Loaded(val channels: List<Channel>, val guide: Map<String, List<Programme>>, val problems: List<String>)
+    class Loaded(
+        val channels: List<Channel>,
+        val guide: Map<String, List<Programme>>,
+        val problems: List<String>,
+        /** Merged channels: the HD / SD / backup copies behind each one (best first). */
+        val versions: Map<String, List<Channel>> = emptyMap(),
+    )
 
     fun load(sources: List<Source>, englishOnly: Boolean, merge: Boolean, onStatus: (String) -> Unit): Loaded {
         val all = ArrayList<Channel>()
@@ -41,7 +47,11 @@ object Library {
             val hidden = Languages.nonEnglish
             channels = channels.filter { (Languages.tagOf(it)?.code ?: Languages.NONE) !in hidden }
         }
-        if (merge) channels = ChannelMerge.merge(channels, emptyMap()).channels
+        var versions: Map<String, List<Channel>> = emptyMap()
+        if (merge) ChannelMerge.merge(channels, emptyMap()).let { r ->
+            channels = r.channels
+            versions = r.versions
+        }
 
         // The guide: from 3 hours ago to a day and a half ahead (plus catch-up days for channels that have it).
         val guide = HashMap<String, ArrayList<Programme>>()
@@ -59,7 +69,7 @@ object Library {
             }
             try {
                 Http.open(url.trim()).use { input ->
-                    XmltvParser.parse(input, byId, byName, now - 3 * 3_600_000L, now + 36 * 3_600_000L, catchupFrom) { id, p ->
+                    XmltvParser.parse(input, byId, byName, now - 24 * 3_600_000L, now + 7 * 86_400_000L, catchupFrom) { id, p ->
                         guide.getOrPut(id) { ArrayList() }.add(p)
                     }
                 }
@@ -68,6 +78,6 @@ object Library {
             }
         }
         val sorted = guide.mapValues { (_, l) -> l.sortedBy { it.start }.distinctBy { it.start } }
-        return Loaded(channels, sorted, problems)
+        return Loaded(channels, sorted, problems, versions)
     }
 }

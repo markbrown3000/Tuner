@@ -60,7 +60,27 @@ fun PlexPage(app: AppState) {
     var items by remember { mutableStateOf<List<Plex.Entry>?>(null) }
     var show by remember { mutableStateOf<Plex.Entry?>(null) }
     var episodes by remember { mutableStateOf<List<Plex.Entry>?>(null) }
+    var sort by remember { mutableStateOf<String?>(null) }
+    var filter by remember { mutableStateOf("") }
+    var season by remember { mutableStateOf<Int?>(null) }
     LaunchedEffect(app.plexLinked) { if (app.plexLinked && app.plexServers.isEmpty()) app.loadPlex() }
+    fun loadShow(e: Plex.Entry) {
+        show = e
+        episodes = null
+        season = null
+        scope.launch { episodes = withContext(Dispatchers.IO) { runCatching { app.plex.episodes(e) }.getOrDefault(emptyList()) } }
+    }
+    fun loadSection(s: Plex.Section) {
+        items = null
+        scope.launch { items = withContext(Dispatchers.IO) { runCatching { app.plex.sectionItems(s, sort) }.getOrDefault(emptyList()) } }
+    }
+    // "Go to show" from the player.
+    LaunchedEffect(app.plexShowRequest) {
+        app.plexShowRequest?.let { e ->
+            app.plexShowRequest = null
+            loadShow(e)
+        }
+    }
 
     Column(Modifier.fillMaxSize().padding(24.dp)) {
         Text("Plex", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.ExtraBold)
@@ -84,13 +104,20 @@ fun PlexPage(app: AppState) {
         Spacer(Modifier.height(10.dp))
         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             item { Pill("Continue watching", selected = section == null) { section = null; show = null } }
-            items(app.plexSections, key = { it.id }) { s ->
+            items(app.plexSectionsForMe, key = { it.id }) { s ->
                 Pill(s.title, selected = section?.id == s.id) {
                     section = s
                     show = null
-                    items = null
-                    scope.launch { items = withContext(Dispatchers.IO) { runCatching { app.plex.sectionItems(s) }.getOrDefault(emptyList()) } }
+                    filter = ""
+                    loadSection(s)
                 }
+            }
+        }
+        val secNow = section
+        if (secNow != null && show == null) Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(filter, { filter = it }, singleLine = true, placeholder = { Text("Find in ${secNow.title}") }, modifier = Modifier.width(260.dp))
+            for ((key, label) in listOf(null to "A–Z", "addedAt:desc" to "Newest", "year:desc" to "Year", "rating:desc" to "Rating", "lastViewedAt:desc" to "Watched lately")) {
+                Pill(label, selected = sort == key) { sort = key; loadSection(secNow) }
             }
         }
         Spacer(Modifier.height(14.dp))
@@ -105,9 +132,21 @@ fun PlexPage(app: AppState) {
                 }
                 Spacer(Modifier.height(10.dp))
                 val eps = episodes
+                val seasons = remember(eps) { eps.orEmpty().map { it.season }.distinct().sorted() }
+                // The season you're up to (the first unwatched episode's).
+                val upTo = remember(eps) { eps.orEmpty().firstOrNull { !it.watched }?.season ?: seasons.lastOrNull() }
+                val sn = season ?: upTo
+                if (seasons.size > 1) LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(bottom = 8.dp)) {
+                    items(seasons, key = { it }) { n -> Pill(if (n == 0) "Specials" else "Season $n", selected = n == sn) { season = n } }
+                }
                 if (eps == null) Text("Loading episodes…", color = Soft, fontSize = 15.sp)
                 else LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    items(eps, key = { it.ratingKey }) { e ->
+                    items(eps.filter { sn == null || it.season == sn }, key = { it.ratingKey }) { e ->
+                        WithMenu(listOf(
+                            "▶ Play" to { app.playPlex(e.ratingKey, sh.title, "S${e.season} E${e.episode}  ${e.title}", e.image, e.playUrl, e.server, e.viewOffsetMs) },
+                            "⏮ From the start" to { app.playPlex(e.ratingKey, sh.title, "S${e.season} E${e.episode}  ${e.title}", e.image, e.playUrl, e.server, 0L, fromStart = true) },
+                            (if (e.watched) "↺ Mark as unwatched" else "✓ Mark as watched") to { app.setPlexWatched(e, !e.watched) { loadShow(sh) } },
+                        )) {
                         Row(
                             Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Panel)
                                 .clickable { app.playPlex(e.ratingKey, sh.title, "S${e.season} E${e.episode}  ${e.title}", e.image, e.playUrl, e.server, e.viewOffsetMs) }
@@ -122,6 +161,7 @@ fun PlexPage(app: AppState) {
                                 Text("S${e.season} E${e.episode}  ${e.title}" + if (e.watched) "  ✓" else "", color = Color.White, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 e.summary?.let { Text(it, color = Soft, fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis) }
                             }
+                        }
                         }
                     }
                 }
@@ -140,13 +180,16 @@ fun PlexPage(app: AppState) {
                 val list = items
                 if (list == null) Text("Loading ${sec.title}…", color = Soft, fontSize = 15.sp)
                 else LazyVerticalGrid(GridCells.Adaptive(150.dp), contentPadding = PaddingValues(bottom = 24.dp), horizontalArrangement = Arrangement.spacedBy(14.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                    items(list, key = { it.ratingKey }) { e ->
-                        PosterTile(e.title, e.image, e.year, progress = if (e.durationMs > 0 && e.viewOffsetMs > 0) e.viewOffsetMs.toFloat() / e.durationMs else null) {
-                            if (e.isShow) {
-                                show = e
-                                episodes = null
-                                scope.launch { episodes = withContext(Dispatchers.IO) { runCatching { app.plex.episodes(e) }.getOrDefault(emptyList()) } }
-                            } else app.playPlex(e.ratingKey, e.title, e.year, e.image, e.playUrl, e.server, e.viewOffsetMs)
+                    val q = filter.trim().lowercase()
+                    items(if (q.isEmpty()) list else list.filter { it.title.lowercase().contains(q) }, key = { it.ratingKey }) { e ->
+                        WithMenu(
+                            if (e.isShow) emptyList()
+                            else listOf((if (e.watched) "↺ Mark as unwatched" else "✓ Mark as watched") to { app.setPlexWatched(e, !e.watched) { loadSection(sec) } }),
+                        ) {
+                        PosterTile(e.title + if (e.watched && !e.isShow) " ✓" else "", e.image, e.year, progress = if (e.durationMs > 0 && e.viewOffsetMs > 0) e.viewOffsetMs.toFloat() / e.durationMs else null) {
+                            if (e.isShow) loadShow(e)
+                            else app.playPlex(e.ratingKey, e.title, e.year, e.image, e.playUrl, e.server, e.viewOffsetMs)
+                        }
                         }
                     }
                 }
@@ -226,6 +269,8 @@ fun YouTubePage(app: AppState) {
 fun SettingsPage(app: AppState) {
     var adding by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<PcProfile?>(null) }
+    var managing by remember { mutableStateOf(false) }
+    var addingProfile by remember { mutableStateOf(false) }
     var logVersion by remember { mutableStateOf(0) }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(24.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item { Text("Settings", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.ExtraBold) }
@@ -321,6 +366,19 @@ fun SettingsPage(app: AppState) {
                     }
                     Pill("↻ Reload channels and guide") { app.reload() }
                 }
+                Spacer(Modifier.height(10.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Pill("☰ Manage groups and channels", selected = true) { managing = true }
+                    Pill(app.checking ?: "🩺 Check my channels") { app.checkChannels() }
+                    val mv = app.manageVersion
+                    Pill(if (app.config.hideOffline) "✓ Hide channels that don't answer" else "Hide channels that don't answer") { app.setHideOffline(!app.config.hideOffline) }
+                    if (app.config.offline.isNotEmpty()) Pill("Clear the list (${app.config.offline.size})") { app.clearOffline() }
+                }
+                Text(
+                    "Hide, rename, reorder or lock groups; hide channels; fix a channel's missing guide. " +
+                        "The check tries your favourites and every channel (up to 600) to see which don't answer.",
+                    color = Soft, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp),
+                )
                 if (app.problems.isNotEmpty()) Text(app.problems.joinToString("\n"), color = Gold, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
             }
         }
@@ -406,6 +464,11 @@ fun SettingsPage(app: AppState) {
                     }
                 }
                 Spacer(Modifier.height(10.dp))
+                Text("Artwork screensaver (nothing playing, no mouse or keys)", color = Color.White, fontSize = 14.sp)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 4.dp)) {
+                    for (m in listOf(0, 5, 10, 30)) Pill(if (m == 0) "Off" else "After $m min", selected = app.config.screensaverMin == m && v >= 0) { app.setScreensaver(m); app.listsVersion = v + 1 }
+                }
+                Spacer(Modifier.height(10.dp))
                 Text("Colours", color = Color.White, fontSize = 14.sp)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 4.dp)) {
                     for (t in Themes) Pill(t.name, selected = currentTheme.name == t.name) {
@@ -439,8 +502,68 @@ fun SettingsPage(app: AppState) {
                             Avatar(p, 54, selected = p.id == app.profileId) { app.chooseProfile(p) }
                             Text(p.name, color = Color.White, fontSize = 12.sp)
                             if (!app.kids || app.grownUp) Text("Edit", color = Sky, fontSize = 11.sp, modifier = Modifier.clickable { editing = p }.padding(2.dp))
+                            if (p.kids) Text("${app.minutesToday(p)} min today", color = Soft, fontSize = 10.sp)
+                        }
+                        if (!app.kids || app.grownUp) Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Box(
+                                Modifier.width(54.dp).height(54.dp).clip(androidx.compose.foundation.shape.CircleShape).background(PanelLight).clickable { addingProfile = true },
+                                contentAlignment = Alignment.Center,
+                            ) { Text("+", color = Color.White, fontSize = 26.sp) }
+                            Text("Add", color = Color.White, fontSize = 12.sp)
                         }
                     }
+                    Text(
+                        "The PIN, and which apps kids can use, are set on the TV. Kids' daily time is counted here too.",
+                        color = Soft, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp),
+                    )
+                }
+            }
+        }
+
+        if (!app.kids) {
+            item { SectionTitle("Home") }
+            item {
+                Card {
+                    val v = app.listsVersion
+                    Text("Which rows Home shows, and in what order.", color = Soft, fontSize = 13.sp)
+                    Spacer(Modifier.height(6.dp))
+                    for ((k, on) in app.homeRows) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(vertical = 2.dp)) {
+                        Text((app.homeRowNames[k] ?: k) + if (v < 0) "" else "", color = if (on) Color.White else Soft, fontSize = 14.sp, modifier = Modifier.width(260.dp))
+                        Pill(if (on) "👁 Shown" else "🚫 Hidden", selected = on) { app.toggleHomeRow(k) }
+                        Pill("▲") { app.moveHomeRow(k, -1) }
+                        Pill("▼") { app.moveHomeRow(k, 1) }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Pill("Standard order") { app.resetHomeRows() }
+                        Pill("Forget what I like (recommendations)") { app.forgetTaste() }
+                    }
+                    Text("Top picks, Your shows and Missed it? learn from what each profile watches on this PC.", color = Soft, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
+                }
+            }
+        }
+
+        item { SectionTitle("Reminders") }
+        item {
+            Card {
+                val v = app.listsVersion
+                val list = app.config.reminders.sortedBy { it.start }
+                if (list.isEmpty() || v < 0) Text("No reminders set. Click a programme that's coming up (Guide or Home) to set one.", color = Soft, fontSize = 13.sp)
+                val fmt = remember { java.text.SimpleDateFormat("EEE d MMM HH:mm", java.util.Locale.UK) }
+                for (r in list) Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 2.dp)) {
+                    Text("⏰ ${fmt.format(java.util.Date(r.start))}  ${r.title}  ·  ${r.channelName}", color = Color.White, fontSize = 14.sp, modifier = Modifier.weight(1f))
+                    Pill("Cancel") { app.cancelReminder(r) }
+                }
+            }
+        }
+
+        item { SectionTitle("Backup") }
+        item {
+            Card {
+                Text("Save all of Flicker's settings to a file (playlists, profiles, lists, groups, recordings list), or put them back.", color = Soft, fontSize = 13.sp)
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(top = 8.dp)) {
+                    Pill("💾 Save a backup…", selected = true) { app.backUp() }
+                    Pill("Restore a backup…") { app.restore() }
                 }
             }
         }
@@ -506,8 +629,22 @@ fun SettingsPage(app: AppState) {
                 )
             }
         }
+        item { SectionTitle("Subtitles online") }
+        item {
+            Card {
+                var key by remember { mutableStateOf(app.config.openSubtitlesKey ?: "") }
+                Text("A free key from opensubtitles.com (your profile › API consumers) lets ⋯ More › Find subtitles online fetch them for films and episodes.", color = Soft, fontSize = 13.sp)
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 6.dp)) {
+                    OutlinedTextField(key, { key = it.trim() }, singleLine = true, placeholder = { Text("OpenSubtitles API key") }, modifier = Modifier.width(380.dp))
+                    Pill("Save", selected = true) { app.setOpenSubtitlesKey(key) }
+                    if (app.config.openSubtitlesKey != null) Pill("Remove") { key = ""; app.setOpenSubtitlesKey(null) }
+                }
+            }
+        }
     }
     editing?.let { p -> ProfileEditor(app, p) { editing = null } }
+    if (managing) ManageChannels(app) { managing = false }
+    if (addingProfile) AddProfileDialog(app) { addingProfile = false }
     if (adding) AddPlaylistDialog(onDismiss = { adding = false }) { src ->
         app.config.sources = app.config.sources + src
         app.config.save()
@@ -591,8 +728,11 @@ private fun ProfileEditor(app: AppState, p: PcProfile, onClose: () -> Unit) {
     var bedtime by remember { mutableStateOf(p.bedtime) }
     var colour by remember { mutableStateOf(p.colour) }
     var icon by remember { mutableStateOf(p.icon) }
+    var groups by remember { mutableStateOf(p.groups) }
+    var cert by remember { mutableStateOf(app.certOf(p.id)) }
+    var pickGroups by remember { mutableStateOf(false) }
     Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.6f)), contentAlignment = Alignment.Center) {
-        Column(Modifier.width(560.dp).clip(RoundedCornerShape(16.dp)).background(Panel).padding(22.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(Modifier.width(620.dp).clip(RoundedCornerShape(16.dp)).background(Panel).padding(22.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Avatar(PcProfile(p.id, name, kids, p.groups, limit, bedtime, colour, icon), 60) {}
                 Spacer(Modifier.width(14.dp))
@@ -630,12 +770,52 @@ private fun ProfileEditor(app: AppState, p: PcProfile, onClose: () -> Unit) {
                     }
                 }
             }
-            Text("The channels kids can see are chosen on the TV.", color = Soft, fontSize = 12.sp)
+            if (kids) {
+                Text("Films and series up to", color = Soft, fontSize = 13.sp)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    for (c in listOf("", "U", "PG", "12", "15")) Pill(if (c.isEmpty()) "Any" else c, selected = cert == c) { cert = c }
+                }
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Channels: ${groups.size} groups", color = Soft, fontSize = 13.sp)
+                    Pill(if (pickGroups) "Hide the list" else "Choose groups…") { pickGroups = !pickGroups }
+                }
+                if (pickGroups) LazyColumn(Modifier.height(220.dp).fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(PanelLight).padding(6.dp)) {
+                    items(app.allGroups, key = { it }) { g ->
+                        Text(
+                            (if (g in groups) "✓ " else "    ") + app.groupLabel(g), color = if (g in groups) Color.White else Soft, fontSize = 13.sp,
+                            modifier = Modifier.fillMaxWidth().clickable { groups = if (g in groups) groups - g else groups + g }.padding(4.dp),
+                        )
+                    }
+                }
+            }
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Pill("Save", selected = true) {
                     app.editProfile(p.id, name, kids, if (kids) limit else 0, if (kids) bedtime else -1, colour, icon)
+                    if (kids && (groups != p.groups || cert != app.certOf(p.id))) app.setKidsChannels(p.id, groups, cert)
                     onClose()
                 }
+                Pill("Cancel", onClick = onClose)
+                Spacer(Modifier.weight(1f))
+                Pill("🗑 Delete this profile") { app.deleteProfile(p.id); onClose() }
+            }
+        }
+    }
+}
+
+
+/** + Add a profile (it goes to the TV at the next sync). */
+@Composable
+private fun AddProfileDialog(app: AppState, onClose: () -> Unit) {
+    var name by remember { mutableStateOf("") }
+    var kids by remember { mutableStateOf(false) }
+    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.6f)), contentAlignment = Alignment.Center) {
+        Column(Modifier.width(440.dp).clip(RoundedCornerShape(16.dp)).background(Panel).padding(22.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("Add a profile", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            OutlinedTextField(name, { name = it }, singleLine = true, label = { Text("Name") }, modifier = Modifier.fillMaxWidth())
+            Pill(if (kids) "✓ Kids' profile" else "Kids' profile") { kids = !kids }
+            Text("Edit it afterwards for a picture, kids' channels and limits.", color = Soft, fontSize = 12.sp)
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Pill("Add", selected = true) { app.addProfile(name, kids); onClose() }
                 Pill("Cancel", onClick = onClose)
             }
         }

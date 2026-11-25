@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.draganddrop.dragAndDropTarget
 import androidx.compose.ui.draganddrop.awtTransferable
+import androidx.compose.ui.input.pointer.onPointerEvent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -86,6 +87,10 @@ private fun runApp() = application {
         Player().also {
             it.deinterlace = config.deinterlace
             it.normalise = config.normalise
+            it.nightMode = config.nightMode
+            it.clearSpeech = config.clearSpeech
+            it.subtitleScale = config.subtitleScale
+            it.audioDelayMs = config.lipSyncMs
             it.warmUp()
         }
     }
@@ -157,6 +162,10 @@ private fun runApp() = application {
             app.checkReminders()
             app.checkRecordings()
             app.tickKids()
+            app.tickSleep()
+            app.tidyRecordings()
+            app.learnTaste()
+            app.tickSaver()
             if (app.watching != null) app.saveProgress()
             if (ticks % 18 == 0) app.syncSoon(0)
             if (ticks % 1080 == 0) app.checkForUpdate()
@@ -198,6 +207,7 @@ private fun runApp() = application {
         title = "Flicker",
         icon = icon,
         onKeyEvent = handler@{ e ->
+            app.activity()
             if (e.type != KeyEventType.KeyDown) return@handler false
             val watching = app.watching != null && !app.mini
             when {
@@ -298,7 +308,7 @@ private fun runApp() = application {
 
 @Composable
 private fun Shell(app: AppState, fullScreen: Boolean, toggleFullScreen: () -> Unit) {
-    Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Ink, InkBottom))).dropFiles(app)) {
+    Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Ink, InkBottom))).dropFiles(app).noticeActivity(app)) {
         Row(Modifier.fillMaxSize()) {
             if (!fullScreen) NavRail(app)
             Box(Modifier.weight(1f).fillMaxHeight()) {
@@ -308,6 +318,7 @@ private fun Shell(app: AppState, fullScreen: Boolean, toggleFullScreen: () -> Un
                         Page.Home -> HomePage(app)
                         Page.Live -> LivePage(app, fullScreen, toggleFullScreen)
                         Page.Guide -> GuidePage(app)
+                        Page.Catchup -> CatchupPage(app)
                         Page.Multi -> MultiPage(app)
                         Page.WhatsOn -> WhatsOnPage(app)
                         Page.Search -> SearchPage(app)
@@ -348,6 +359,23 @@ private fun Shell(app: AppState, fullScreen: Boolean, toggleFullScreen: () -> Un
             }
         }
         if (app.showKeys) KeysHelp(app)
+        if (app.showStreamInfo && (app.watching != null || app.playingChannel != null)) StreamInfo(app, Modifier.align(Alignment.TopEnd))
+        app.subtitleHits?.let { hits -> SubtitlePicker(app, hits) }
+        app.nextInSeries?.let { m ->
+            Column(
+                Modifier.align(Alignment.BottomEnd).padding(28.dp).width(380.dp).clip(RoundedCornerShape(14.dp)).background(Panel).padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text("NEXT IN THE SERIES", color = Gold, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Text(m.name, color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Pill("▶ Play it", selected = true) { app.nextInSeries = null; app.playFilm(m, fromStart = true) }
+                    Pill("Not now") { app.nextInSeries = null }
+                }
+            }
+        }
+        app.actor?.let { (name, films) -> ActorFilms(app, name, films) }
+        if (app.saverOn) Screensaver(app)
         app.pinPrompt?.let { (why, _) -> PinPrompt(app, why) }
         if (app.askWhoIsWatching && app.config.profiles.size > 1) WhoIsWatching(app)
     }
@@ -575,6 +603,101 @@ private fun KeysHelp(app: AppState) {
                 Text(what, color = Color.White, fontSize = 15.sp)
             }
             Text("Click anywhere or press Esc to close", color = Soft, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
+        }
+    }
+}
+
+
+/** ℹ Stream info: picture size, codecs and sound, updated every couple of seconds. */
+@Composable
+private fun StreamInfo(app: AppState, modifier: Modifier) {
+    var lines by remember { mutableStateOf<List<String>>(emptyList()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            lines = app.player.streamInfo()
+            delay(2_000)
+        }
+    }
+    Column(
+        modifier.padding(24.dp).width(420.dp).clip(RoundedCornerShape(12.dp)).background(Ink.copy(alpha = 0.9f))
+            .clickable { app.showStreamInfo = false }.padding(14.dp),
+    ) {
+        Text("ℹ Stream info", color = Gold, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+        if (lines.isEmpty()) Text("Waiting for the stream…", color = Soft, fontSize = 13.sp)
+        for (l in lines) Text(l, color = Color.White, fontSize = 13.sp, maxLines = 2)
+    }
+}
+
+/** Subtitles found online: pick one. */
+@Composable
+private fun SubtitlePicker(app: AppState, hits: List<com.titanejstudios.tuner.integrations.OpenSubtitles.Hit>) {
+    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.6f)).clickable { app.subtitleHits = null }, contentAlignment = Alignment.Center) {
+        Column(Modifier.width(620.dp).clip(RoundedCornerShape(16.dp)).background(Panel).padding(22.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("Subtitles found", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            for (h in hits) Column(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(PanelLight).clickable { app.useSubtitle(h) }.padding(horizontal = 12.dp, vertical = 7.dp),
+            ) {
+                Text(h.release, color = Color.White, fontSize = 14.sp, maxLines = 1)
+                Text("${h.language} · ${h.downloads} downloads", color = Soft, fontSize = 11.sp)
+            }
+            Pill("Cancel") { app.subtitleHits = null }
+        }
+    }
+}
+
+
+/** What else an actor's in (the films you have can be played). */
+@Composable
+private fun ActorFilms(app: AppState, name: String, films: List<Pair<com.titanejstudios.tuner.integrations.Tmdb.Part, com.titanejstudios.tuner.data.VodItem?>>) {
+    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.6f)).clickable { app.actor = null }, contentAlignment = Alignment.Center) {
+        Column(Modifier.fillMaxWidth(0.8f).clip(RoundedCornerShape(16.dp)).background(Panel).clickable(enabled = false) {}.padding(22.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("$name's films", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                Pill("Close") { app.actor = null }
+            }
+            Text("The ones you have are first – click to play.", color = Soft, fontSize = 13.sp)
+            androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                items(films.size) { i ->
+                    val (p, mine) = films[i]
+                    PosterTile(p.title, p.poster, if (mine != null) "▶ yours" else p.year, width = 130.dp) {
+                        if (mine != null) {
+                            app.actor = null
+                            app.playFilm(mine)
+                        } else app.say("${p.title} isn't in your films")
+                    }
+                }
+            }
+        }
+    }
+}
+
+
+/** Any mouse movement counts as being there (for the screensaver). */
+@OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+private fun Modifier.noticeActivity(app: AppState): Modifier = this
+    .onPointerEvent(androidx.compose.ui.input.pointer.PointerEventType.Move) { app.activity() }
+    .onPointerEvent(androidx.compose.ui.input.pointer.PointerEventType.Press) { app.activity() }
+
+/** The artwork screensaver: big pictures of what's on and your films, with the time. Any movement ends it. */
+@Composable
+private fun Screensaver(app: AppState) {
+    val pics = remember { app.saverPictures() }
+    var i by remember { mutableStateOf(0) }
+    var clock by remember { mutableStateOf(time(System.currentTimeMillis())) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(9_000)
+            i++
+            clock = time(System.currentTimeMillis())
+        }
+    }
+    Box(Modifier.fillMaxSize().background(Color.Black).clickable { app.activity() }) {
+        val pic = pics.getOrNull(if (pics.isEmpty()) 0 else i % pics.size)
+        if (pic != null) NetImage(pic.first, Modifier.fillMaxSize(), contentScale = androidx.compose.ui.layout.ContentScale.Crop)
+        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.75f)))))
+        Column(Modifier.align(Alignment.BottomStart).padding(40.dp)) {
+            Text(clock, color = Color.White, fontSize = 64.sp, fontWeight = FontWeight.ExtraBold)
+            pic?.let { Text(it.second, color = Color.White.copy(alpha = 0.85f), fontSize = 20.sp) }
         }
     }
 }

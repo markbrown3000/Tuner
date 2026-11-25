@@ -103,6 +103,7 @@ class Sync(private val config: Config) {
                 config.intros = merged
             }
             sections.optJSONObject("profiles")?.let { p ->
+                p.optJSONArray("plex_kids")?.let { a -> if (a.length() > 0) config.plexKidsSections = (0 until a.length()).map { a.getString(it) }.toSet() }
                 val stamp = p.optLong("at")
                 if (stamp > bestProfilesAt && stamp >= config.profilesAt) {
                     bestProfilesAt = stamp

@@ -46,6 +46,7 @@ import kotlinx.coroutines.delay
 
 private const val FAVOURITES = "★ Favourites"
 private const val ALL = "All channels"
+private const val RECENT = "Recently watched"
 
 /** Live TV: categories, channels with what's on, and the video with now/next and catch-up. */
 @Composable
@@ -60,6 +61,7 @@ fun LivePage(app: AppState, fullScreen: Boolean, toggleFullScreen: () -> Unit) {
     val groups = remember(channels, favourites) {
         buildList {
             if (favourites.isNotEmpty()) add(FAVOURITES)
+            if (app.config.recents.isNotEmpty()) add(RECENT)
             add(ALL)
             addAll(channels.map { it.group }.distinct())
         }
@@ -68,6 +70,7 @@ fun LivePage(app: AppState, fullScreen: Boolean, toggleFullScreen: () -> Unit) {
         val base = when (group) {
             ALL -> channels
             FAVOURITES -> channels.filter { it.id in favourites }
+            RECENT -> app.recentChannels
             else -> channels.filter { it.group == group }
         }
         val q = search.trim().lowercase()
@@ -91,6 +94,12 @@ fun LivePage(app: AppState, fullScreen: Boolean, toggleFullScreen: () -> Unit) {
                             g, color = if (sel) Color.White else Soft, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(if (sel) Sky.copy(alpha = 0.35f) else Color.Transparent)
                                 .clickable { group = g; search = "" }.padding(horizontal = 12.dp, vertical = 9.dp),
+                        )
+                    }
+                    if (app.config.lockedGroups.isNotEmpty() && app.unlockedGroups.isEmpty()) item {
+                        Text(
+                            "🔒 Locked groups…", color = Soft, fontSize = 13.sp,
+                            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable { app.unlockGroups() }.padding(horizontal = 12.dp, vertical = 9.dp),
                         )
                     }
                 }
@@ -177,6 +186,10 @@ fun LivePage(app: AppState, fullScreen: Boolean, toggleFullScreen: () -> Unit) {
                         if (app.catchupOf != null) Pill("● Back to live") { app.playChannel(c) }
                         if (app.timeshift != null) Pill("● Back to live", selected = true) { app.goLive() }
                         else if (app.catchupOf == null) Pill("⏸ Pause") { app.togglePauseLive() }
+                        app.startOverProgramme()?.let { (sc, sp) ->
+                            Spacer(Modifier.width(8.dp))
+                            Pill("⏮ From the start") { app.playCatchup(sc, sp) }
+                        }
                         Spacer(Modifier.width(8.dp))
                         PictureMenu(app)
                         Spacer(Modifier.width(8.dp))
@@ -363,6 +376,16 @@ fun PictureMenu(app: AppState, films: Boolean = false) {
                     add(MenuLine("Speed", heading = true))
                     for (r in listOf(0.75f, 1f, 1.25f, 1.5f, 2f)) add(MenuLine(if (r == 1f) "Normal" else "$r×") { p.setSpeed(r) })
                 }
+                add(MenuLine("Sound", heading = true))
+                add(MenuLine("🌙 Night mode (quiet bangs, louder voices)", selected = app.config.nightMode) { app.toggleNightMode() })
+                add(MenuLine("🗣 Clearer speech", selected = app.config.clearSpeech) { app.toggleClearSpeech() })
+                add(MenuLine("Sound timing: ${app.lipSyncLabel()}", heading = true))
+                for (ms in listOf(-300L, -200L, -100L, 0L, 100L, 200L, 300L)) {
+                    add(MenuLine(app.lipSyncLabel(ms), selected = ms == app.config.lipSyncMs) { app.setLipSync(ms) })
+                }
+                add(MenuLine("More", heading = true))
+                add(MenuLine("Subtitle size: ${app.subtitleSizeLabel} (press to change)") { app.cycleSubtitleSize() })
+                add(MenuLine("ℹ Stream info", selected = app.showStreamInfo) { app.showStreamInfo = !app.showStreamInfo })
             }
             for (l in lines) {
                 if (l.heading) Text(l.text, color = Gold, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 14.dp, top = 8.dp, bottom = 2.dp))
@@ -407,7 +430,10 @@ fun VolumeSlider(app: AppState) {
 fun WatchingMenu(app: AppState) {
     var open by remember { mutableStateOf(false) }
     Box {
-        Pill("⋯ More") { open = true }
+        Pill("⋯ More") {
+            open = true
+            if (app.link.key != null && app.peers.isEmpty() && !app.findingPeers) app.findPeers()
+        }
         androidx.compose.material3.DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             val w = app.watching
             val series = app.playingSeries()
@@ -415,6 +441,27 @@ fun WatchingMenu(app: AppState) {
             val channel = app.playingChannel
             val programme = app.catchupOf ?: channel?.let { c -> app.guide[c.id]?.firstOrNull { it.start <= app.now && it.stop > app.now } }
             val lines = buildList {
+                if (channel != null && w == null) {
+                    add(MenuLine("🛠 Fix it – start it again, then try other copies") { app.fixIt() })
+                    val copies = app.versionsFor(channel)
+                    if (copies.size > 1) {
+                        add(MenuLine("Copies of ${channel.name}", heading = true))
+                        for (v in copies) add(MenuLine("📺 " + v.name, selected = app.player.lastUrl == v.url) { app.playVersion(channel, v) })
+                    }
+                }
+                if (w != null && !w.id.startsWith("rec:")) add(MenuLine("🔎 Find subtitles online") { app.findSubtitles() })
+                add(MenuLine("😴 Sleep timer: ${app.sleepLabel}", heading = true))
+                add(MenuLine("Off", selected = app.sleepAt == 0L) { app.setSleep(0) })
+                if (channel != null && w == null) add(MenuLine("At the end of this programme") { app.setSleep(-1) })
+                for (m in listOf(15, 30, 60, 90, 120)) add(MenuLine(if (m < 60) "In $m minutes" else "In ${m / 60}h${if (m % 60 > 0) " ${m % 60}m" else ""}") { app.setSleep(m) })
+                if (app.togetherWith != null) add(MenuLine("✕ Stop watching together with ${app.togetherWith}") { app.stopTogether() })
+                else if (app.link.key != null) {
+                    add(MenuLine("👫 Watch together with…", heading = true))
+                    if (app.peers.isEmpty()) add(MenuLine(if (app.findingPeers) "Looking…" else "Find your TVs and phones") { app.findPeers() })
+                    for (p in app.peers) add(MenuLine((if (p.phone) "📱 " else "📺 ") + p.name) { app.watchTogether(p) })
+                }
+                add(MenuLine("Go to", heading = true))
+                if (w != null && w.id.startsWith("plex:")) add(MenuLine("📺 Go to show (Plex)") { app.goToPlexShow() })
                 if (series != null) {
                     add(MenuLine("📺 Go to series – all the episodes") { app.goToSeries() })
                     add(MenuLine(if (app.inWatchlist(series.id)) "✓ In My list (remove)" else "＋ Add series to My list") {
@@ -453,13 +500,16 @@ fun WatchingMenu(app: AppState) {
                 if (w != null || channel != null) add(MenuLine(if (app.mini) "⤢ Back to the big picture" else "▣ Keep watching small and look around") { app.toggleMini() })
             }
             if (lines.isEmpty()) Text("Nothing more for this", color = Soft, fontSize = 13.sp, modifier = Modifier.padding(12.dp))
-            for (l in lines) androidx.compose.material3.DropdownMenuItem(
-                text = { Text(l.text) },
-                onClick = {
-                    open = false
-                    l.action?.invoke()
-                },
-            )
+            for (l in lines) {
+                if (l.heading) Text(l.text, color = Gold, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 14.dp, top = 8.dp, bottom = 2.dp))
+                else androidx.compose.material3.DropdownMenuItem(
+                    text = { Text((if (l.selected) "✓ " else "") + l.text) },
+                    onClick = {
+                        open = false
+                        l.action?.invoke()
+                    },
+                )
+            }
         }
     }
 }
