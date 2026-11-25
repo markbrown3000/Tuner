@@ -87,6 +87,7 @@ class AppState(val config: Config, val player: Player, private val scope: Corout
     var plexServers by mutableStateOf<List<Plex.Server>>(emptyList())
     var plexDeck by mutableStateOf<List<Plex.Item>>(emptyList())
     var plexSections by mutableStateOf<List<Plex.Section>>(emptyList())
+    var plexRecent by mutableStateOf<List<Plex.Entry>>(emptyList())
 
     // Reminders.
     var dueReminder by mutableStateOf<Reminder?>(null)
@@ -144,6 +145,12 @@ class AppState(val config: Config, val player: Player, private val scope: Corout
     fun toggleWatchlist(item: WatchItem) {
         config.watchlistJson = Watchlist.encode(Watchlist.toggle(watchlist, item))
         config.watchlistAt = System.currentTimeMillis()
+        changed()
+    }
+
+    fun removeFromContinue(id: String) {
+        config.resume = config.resume - id
+        config.done = config.done + (id to System.currentTimeMillis())
         changed()
     }
 
@@ -206,6 +213,8 @@ class AppState(val config: Config, val player: Player, private val scope: Corout
 
     fun playChannel(c: Channel) {
         if (blockedForKids()) return
+        previewJob?.cancel()
+        previewing = null
         endTimeshift()
         stopWatching(save = true)
         playingChannel = c
@@ -214,6 +223,7 @@ class AppState(val config: Config, val player: Player, private val scope: Corout
         player.play(c.url)
         player.setVolume(config.volume)
         config.lastChannel = c.id
+        config.recents = (listOf(c.id) + config.recents.filter { it != c.id }).take(20)
         scope.launch(Dispatchers.IO) { config.save() }
     }
 
@@ -236,6 +246,8 @@ class AppState(val config: Config, val player: Player, private val scope: Corout
         playingChannel = null
         val start = if (fromStart) 0L else config.resume[w.id]?.pos?.takeIf { w.resumable && it > 10_000L } ?: 0L
         watching = w
+        upNextCancelled = null
+        endPreview()
         // Downloaded: play the copy on this PC.
         val local = config.downloads.firstOrNull { it.id == w.id && it.state == "done" && java.io.File(it.file).exists() }
         player.play(local?.let { java.io.File(it.file).toURI().toString() } ?: w.url, start)
@@ -292,7 +304,7 @@ class AppState(val config: Config, val player: Player, private val scope: Corout
             config.done = config.done + (w.id to System.currentTimeMillis())
             changed()
         }
-        val next = w.next
+        val next = w.next.takeIf { upNextCancelled != w.id }
         watching = null
         if (next != null) {
             say("Playing the next episode")
@@ -497,6 +509,122 @@ class AppState(val config: Config, val player: Player, private val scope: Corout
         scope.launch(Dispatchers.IO) { config.save() }
     }
 
+    // ---------------- Windows notifications ----------------
+
+    /** Shows a notification in the corner of the screen (set up by the tray icon). */
+    var notifier: ((String, String) -> Unit)? = null
+
+    fun notify(title: String, message: String) {
+        if (config.notifications) notifier?.invoke(title, message)
+    }
+
+    // ---------------- Up next, skip intro ----------------
+
+    /** Where this episode's series intro ends (learnt on the TV), if it does. */
+    fun introEnd(): Long? = watching?.seriesId?.let { config.intros[it] }
+
+    /** Skips the intro (and remembers where it ends for this series). */
+    fun skipIntro() {
+        val end = introEnd() ?: return
+        player.seekTo(end)
+    }
+
+    /** "Skip intro" without a saved end: 85 seconds on, saved for the rest of the series. */
+    fun skipIntroGuess() {
+        val w = watching ?: return
+        val to = player.positionMs + 85_000L
+        player.seekTo(to)
+        w.seriesId?.let { sid ->
+            config.intros = config.intros + (sid to to)
+            changed()
+        }
+    }
+
+    /** The next episode's countdown was cancelled. */
+    var upNextCancelled by mutableStateOf<String?>(null)
+
+    // ---------------- Volume ----------------
+
+    fun setVolume(v: Int) {
+        config.volume = v.coerceIn(0, 150)
+        player.setVolume(config.volume)
+        scope.launch(Dispatchers.IO) { config.save() }
+    }
+
+    // ---------------- Full screen on another monitor ----------------
+
+    /** The other screen's position and size (in Windows' units), or null with one screen. */
+    fun otherScreen(): java.awt.Rectangle? = runCatching {
+        val env = java.awt.GraphicsEnvironment.getLocalGraphicsEnvironment()
+        val screens = env.screenDevices
+        if (screens.size < 2) return null
+        val main = env.defaultScreenDevice
+        (screens.firstOrNull { it != main } ?: screens[1]).defaultConfiguration.bounds
+    }.getOrNull()
+
+    var secondScreen by mutableStateOf<java.awt.Rectangle?>(null)
+
+    fun toggleSecondScreen() {
+        if (secondScreen != null) {
+            secondScreen = null
+        } else {
+            val r = otherScreen() ?: return say("Only one screen found")
+            if (watching == null && playingChannel == null) return say("Play something first")
+            mini = false
+            secondScreen = r
+        }
+        scope.launch {
+            delay(500)
+            player.restart()
+        }
+    }
+
+    /** The video's in its own window (mini player or the other screen). */
+    val videoElsewhere: Boolean get() = mini || secondScreen != null
+
+    // ---------------- Hover preview (Live TV, when nothing's playing) ----------------
+
+    var previewing by mutableStateOf<Channel?>(null)
+    private var previewJob: Job? = null
+
+    fun hoverChannel(c: Channel?) {
+        previewJob?.cancel()
+        if (c == null || playingChannel != null || watching != null) return
+        previewJob = scope.launch {
+            delay(1_200)
+            if (playingChannel != null || watching != null) return@launch
+            previewing = c
+            player.play(c.url)
+            player.setVolume(0)
+        }
+    }
+
+    fun endPreview() {
+        previewJob?.cancel()
+        if (previewing != null && playingChannel == null) player.stop()
+        previewing = null
+    }
+
+    // ---------------- Profiles (edited here, back to the TV) ----------------
+
+    fun editProfile(id: String, name: String, kids: Boolean, limitMinutes: Int, bedtime: Int, colour: Int, icon: String) {
+        val arr = runCatching { JSONArray(config.profilesRaw) }.getOrDefault(JSONArray())
+        var found = false
+        for (i in 0 until arr.length()) {
+            val o = arr.optJSONObject(i) ?: continue
+            if (o.optString("id") != id) continue
+            o.put("name", name.trim().ifEmpty { o.optString("name") }).put("kids", kids).put("limit", limitMinutes).put("bedtime", bedtime)
+                .put("colour", colour).put("icon", icon)
+            found = true
+        }
+        if (!found) return say("That profile hasn't come from the TV yet – sync first")
+        config.profilesRaw = arr.toString()
+        config.profiles = config.profilesFromJson(arr)
+        config.profilesAt = System.currentTimeMillis()
+        changed()
+        say("Saved – the TV gets it at the next sync")
+    }
+
     // ---------------- Start with Windows ----------------
 
     /** Adds (or removes) Flicker to the programs Windows starts when you sign in – in the tray, out of the way. */
@@ -546,6 +674,7 @@ class AppState(val config: Config, val player: Player, private val scope: Corout
     fun toggleMini() {
         if (watching == null && playingChannel == null) return say("Play something first")
         mini = !mini
+        if (mini) secondScreen = null
         // VLC has to be told where to draw once the video's moved window.
         scope.launch {
             delay(500)
@@ -631,6 +760,7 @@ class AppState(val config: Config, val player: Player, private val scope: Corout
                 r.state == "recording" && (t >= r.stop + 2 * 60_000L || !recorder.isRunning(r.id)) -> {
                     recorder.stop(r.id)
                     r.state = if (java.io.File(r.file).length() > 0) "done" else "failed"
+                    notify(if (r.state == "done") "● Recorded" else "⚠ Didn't record", r.title)
                     changed = true
                 }
                 r.state == "scheduled" && t >= r.stop -> {
@@ -856,7 +986,10 @@ class AppState(val config: Config, val player: Player, private val scope: Corout
         val due = config.reminders.firstOrNull { t >= it.start - 60_000L } ?: return
         config.reminders = config.reminders - due
         scope.launch(Dispatchers.IO) { config.save() }
-        if (t - due.start < 30 * 60_000L) dueReminder = due
+        if (t - due.start < 30 * 60_000L) {
+            dueReminder = due
+            notify("⏰ ${due.title}", "Starting now on ${due.channelName}")
+        }
     }
 
     // ---------------- Sync ----------------
@@ -977,6 +1110,7 @@ class AppState(val config: Config, val player: Player, private val scope: Corout
             if (servers.isEmpty()) return@launch
             plexDeck = withContext(Dispatchers.IO) { runCatching { plex.onDeck(servers) }.getOrDefault(emptyList()) }
             plexSections = withContext(Dispatchers.IO) { runCatching { plex.sections(servers) }.getOrDefault(emptyList()) }
+            plexRecent = withContext(Dispatchers.IO) { runCatching { plex.recentlyAdded(servers, 30) }.getOrDefault(emptyList()) }
         }
     }
 

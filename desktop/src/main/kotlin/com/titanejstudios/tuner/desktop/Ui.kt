@@ -13,6 +13,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.awt.SwingPanel
@@ -28,15 +30,38 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-// The "Evening" colours from the TV app.
-val Ink = Color(0xFF07123A)
-val InkBottom = Color(0xFF030920)
-val Panel = Color(0xFF10204F)
-val PanelLight = Color(0xFF1A2A5E)
-val Sky = Color(0xFF4D9BFF)
-val Soft = Color(0xFFAAB6DA)
+/** A colour theme (the TV app's themes). */
+class Theme(val name: String, val ink: Long, val inkBottom: Long, val panel: Long, val panelLight: Long, val sky: Long, val soft: Long)
+
+val Themes = listOf(
+    Theme("Evening", 0xFF07123A, 0xFF030920, 0xFF10204F, 0xFF1A2A5E, 0xFF4D9BFF, 0xFFAAB6DA),
+    Theme("Midnight", 0xFF0B0B0F, 0xFF000000, 0xFF17171E, 0xFF24242E, 0xFF7C9CFF, 0xFFB4B4C4),
+    Theme("Ocean", 0xFF042A36, 0xFF01141B, 0xFF0A3B4A, 0xFF135467, 0xFF2FD4C7, 0xFFA6D4DC),
+    Theme("Plum", 0xFF22103A, 0xFF10061E, 0xFF331A55, 0xFF472670, 0xFFC08BFF, 0xFFCDB8E6),
+    Theme("Forest", 0xFF0E2416, 0xFF06120A, 0xFF173823, 0xFF214D31, 0xFF5FD38A, 0xFFB5D6C0),
+)
+
+/** The theme in use (Settings › This PC); every screen redraws when it changes. */
+var currentTheme by androidx.compose.runtime.mutableStateOf(Themes[0])
+
+/** Text and everything else a bit bigger, for watching from further away (1 = normal). */
+var uiScale by androidx.compose.runtime.mutableStateOf(1f)
+
+val Ink: Color get() = Color(currentTheme.ink)
+val InkBottom: Color get() = Color(currentTheme.inkBottom)
+val Panel: Color get() = Color(currentTheme.panel)
+val PanelLight: Color get() = Color(currentTheme.panelLight)
+val Sky: Color get() = Color(currentTheme.sky)
+val Soft: Color get() = Color(currentTheme.soft)
 val Gold = Color(0xFFFFB648)
 val LiveRed = Color(0xFFFF5252)
+
+/** The profile colours and pictures from the TV. */
+val AvatarColours = listOf(
+    Color(0xFF1F7BFF), Color(0xFFE0567A), Color(0xFFFFB648), Color(0xFF2FBF71),
+    Color(0xFF8A4FFF), Color(0xFF14B8C4), Color(0xFFFF7A1A), Color(0xFF64748B),
+)
+val AvatarIcons = listOf("", "🦊", "🐼", "🦁", "🐸", "🐶", "🐱", "🚀", "⚽", "🎸", "🌈", "🎮", "🧸")
 
 private val hhmmFormat = SimpleDateFormat("HH:mm", Locale.UK)
 fun time(t: Long): String = synchronized(hhmmFormat) { hhmmFormat.format(Date(t)) }
@@ -104,9 +129,10 @@ fun VideoBox(app: AppState, modifier: Modifier, inMini: Boolean = false) {
     val player = app.player
     Box(modifier.background(Color.Black), contentAlignment = Alignment.Center) {
         val video = player.component
-        if (app.mini && !inMini) Text(
-            "▣ Playing in the mini player\nClick to bring it back here", color = Soft, fontSize = 15.sp,
-            modifier = Modifier.clickable { app.toggleMini() }.padding(24.dp),
+        if (app.videoElsewhere && !inMini) Text(
+            if (app.secondScreen != null) "🖥 Playing on your other screen\nClick to bring it back here" else "▣ Playing in the mini player\nClick to bring it back here",
+            color = Soft, fontSize = 15.sp,
+            modifier = Modifier.clickable { if (app.secondScreen != null) app.toggleSecondScreen() else app.toggleMini() }.padding(24.dp),
         )
         else if (video != null) SwingPanel(factory = { video }, modifier = Modifier.fillMaxSize())
         else Text(
@@ -114,4 +140,12 @@ fun VideoBox(app: AppState, modifier: Modifier, inMini: Boolean = false) {
             color = Color.White, fontSize = 16.sp, modifier = Modifier.padding(24.dp),
         )
     }
+}
+
+
+/** Right-click menu around [content] (nothing extra when [items] is empty). */
+@Composable
+fun WithMenu(items: List<Pair<String, () -> Unit>>, content: @Composable () -> Unit) {
+    if (items.isEmpty()) content()
+    else androidx.compose.foundation.ContextMenuArea(items = { items.map { (label, action) -> androidx.compose.foundation.ContextMenuItem(label, action) } }) { content() }
 }

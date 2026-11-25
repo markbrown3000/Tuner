@@ -46,6 +46,11 @@ class Sync(private val config: Config) {
             .put("followed", JSONObject().put("at", config.followedAt).put("data", config.followedJson))
             .put("resume", JSONObject().put("data", JSONArray().apply { config.resume.values.forEach { put(it.toJson()) } }))
             .put("done", JSONObject().apply { config.done.entries.sortedByDescending { it.value }.take(200).forEach { (k, v) -> put(k, v.toString()) } })
+        // Profiles changed on this PC go back to the TV (the newest change wins there).
+        if (config.profilesAt > 0) {
+            val list = runCatching { JSONArray(config.profilesRaw) }.getOrDefault(JSONArray())
+            if (list.length() > 0) sections.put("profiles", JSONObject().put("at", config.profilesAt).put("list", list).put("gone", JSONObject()))
+        }
         return JSONObject().put("app", "Flicker").put("v", 1).put("sections", sections)
     }
 
@@ -91,9 +96,14 @@ class Sync(private val config: Config) {
             }
             val sections = d.optJSONObject("snapshot")?.optJSONObject("sections") ?: continue
 
+            sections.optJSONObject("intros")?.let { o ->
+                val merged = HashMap(config.intros)
+                for (k in o.keys()) o.optString(k).toLongOrNull()?.let { merged[k] = it }
+                config.intros = merged
+            }
             sections.optJSONObject("profiles")?.let { p ->
                 val stamp = p.optLong("at")
-                if (stamp > bestProfilesAt) {
+                if (stamp > bestProfilesAt && stamp >= config.profilesAt) {
                     bestProfilesAt = stamp
                     bestProfiles = p.optJSONArray("list")
                 }
@@ -178,6 +188,8 @@ class Sync(private val config: Config) {
             val list = config.profilesFromJson(arr)
             if (list.isNotEmpty()) {
                 config.profiles = list
+                config.profilesRaw = arr.toString()
+                config.profilesAt = maxOf(config.profilesAt, bestProfilesAt)
                 if (config.activeProfile != null && list.none { it.id == config.activeProfile }) config.activeProfile = null
             }
         }

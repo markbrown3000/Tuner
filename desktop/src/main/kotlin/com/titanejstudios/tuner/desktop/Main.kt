@@ -50,6 +50,8 @@ private var startInTray = false
 
 fun main(args: Array<String>) {
     startInTray = "--tray" in args
+    // Finding the TV on the Wi-Fi (multicast) fails on Windows when Java tries IPv6 first.
+    System.setProperty("java.net.preferIPv4Stack", "true")
     // Anything that goes wrong is written to %USERPROFILE%\.tuner\flicker.log, and shown.
     com.titanejstudios.tuner.data.AppLog.info(
         "Flicker starting · Java " + System.getProperty("java.version") + " · " + System.getProperty("os.name") +
@@ -77,7 +79,17 @@ fun main(args: Array<String>) {
 
 private fun runApp() = application {
     val config = remember { Config() }
-    val player = remember { Player().also { it.deinterlace = config.deinterlace; it.warmUp() } }
+    val player = remember {
+        Player().also {
+            it.deinterlace = config.deinterlace
+            it.normalise = config.normalise
+            it.warmUp()
+        }
+    }
+    remember {
+        currentTheme = Themes.firstOrNull { it.name == config.theme } ?: Themes[0]
+        uiScale = config.textScale
+    }
     // The window as you left it (size, place, maximised).
     val windowState = rememberWindowState(
         size = DpSize(config.windowW.coerceAtLeast(800).dp, config.windowH.coerceAtLeast(500).dp),
@@ -146,8 +158,13 @@ private fun runApp() = application {
         }
     }
     // Flicker in the system tray: closing the window leaves it running (recordings and reminders carry on).
+    val trayState = androidx.compose.ui.window.rememberTrayState()
+    LaunchedEffect(Unit) {
+        app.notifier = { title, message -> trayState.sendNotification(androidx.compose.ui.window.Notification(title, message)) }
+    }
     if (config.keepRunning && icon != null) {
         Tray(
+            state = trayState,
             icon = icon,
             tooltip = "Flicker",
             onAction = { shown = true },
@@ -191,12 +208,52 @@ private fun runApp() = application {
                 !watching && (e.key == Key.PageUp || (fullScreen() && e.key == Key.DirectionUp)) -> { app.zapBy(-1); true }
                 !watching && (e.key == Key.PageDown || (fullScreen() && e.key == Key.DirectionDown)) -> { app.zapBy(1); true }
                 e.key == Key.M && e.isCtrlPressed -> { app.player.toggleMute(); true }
+                // The keyboard's media and volume keys.
+                e.key == Key.MediaPlayPause || e.key == Key.MediaPlay || e.key == Key.MediaPause ->
+                    { if (watching) app.player.togglePause() else app.togglePauseLive(); true }
+                e.key == Key.MediaNext -> { if (!watching) app.zapBy(1) else app.player.skip(30_000L); true }
+                e.key == Key.MediaPrevious -> { if (!watching) app.zapBy(-1) else app.player.skip(-10_000L); true }
+                e.key == Key.MediaStop -> { app.stopWatching(save = true); true }
+                e.key == Key.VolumeUp || (e.key == Key.DirectionUp && e.isCtrlPressed) -> { app.setVolume(app.config.volume + 10); true }
+                e.key == Key.VolumeDown || (e.key == Key.DirectionDown && e.isCtrlPressed) -> { app.setVolume(app.config.volume - 10); true }
+                e.key == Key.VolumeMute -> { app.player.toggleMute(); true }
                 else -> false
             }
         },
     ) {
         MaterialTheme(colorScheme = darkColorScheme(primary = Sky, background = Ink, surface = Panel)) {
-            Shell(app, fullScreen(), ::toggleFullScreen)
+            // Text size (Settings › This PC): everything scales together.
+            val d = androidx.compose.ui.platform.LocalDensity.current
+            androidx.compose.runtime.CompositionLocalProvider(
+                androidx.compose.ui.platform.LocalDensity provides androidx.compose.ui.unit.Density(d.density * uiScale, d.fontScale),
+            ) {
+                Shell(app, fullScreen(), ::toggleFullScreen)
+            }
+        }
+    }
+    // Full screen on the other monitor.
+    app.secondScreen?.let { r ->
+        val ss = rememberWindowState(
+            placement = WindowPlacement.Floating,
+            position = androidx.compose.ui.window.WindowPosition(r.x.dp, r.y.dp),
+            size = DpSize(r.width.dp, r.height.dp),
+        )
+        Window(
+            onCloseRequest = { app.toggleSecondScreen() },
+            state = ss,
+            title = "Flicker",
+            icon = icon,
+            undecorated = true,
+            onKeyEvent = { e ->
+                if (e.type == KeyEventType.KeyDown && e.key == Key.Escape) {
+                    app.toggleSecondScreen()
+                    true
+                } else false
+            },
+        ) {
+            MaterialTheme(colorScheme = darkColorScheme(primary = Sky, background = Ink, surface = Panel)) {
+                VideoBox(app, Modifier.fillMaxSize(), inMini = true)
+            }
         }
     }
     // The mini player: a small window that stays on top of everything.
@@ -291,6 +348,7 @@ private fun NavRail(app: AppState) {
                 Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(if (sel) Sky.copy(alpha = 0.35f) else Color.Transparent)
                     .clickable {
                         if (app.watching != null) app.stopWatching(save = true)
+                        app.endPreview()
                         if (app.page == Page.Multi && p != Page.Multi) app.leaveMulti()
                         if (p == Page.Multi && app.page != Page.Multi) app.enterMulti()
                         app.page = p
@@ -303,10 +361,14 @@ private fun NavRail(app: AppState) {
         }
         Spacer(Modifier.weight(1f))
         app.profile?.let { p ->
-            Text(
-                "👤 " + p.name + if (app.config.profiles.size > 1) "  ▾" else "", color = Soft, fontSize = 14.sp,
-                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable { app.askWhoIsWatching = true }.padding(12.dp),
-            )
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable { app.askWhoIsWatching = true }.padding(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Avatar(p, 30) { app.askWhoIsWatching = true }
+                Spacer(Modifier.width(10.dp))
+                Text(p.name + if (app.config.profiles.size > 1) "  ▾" else "", color = Soft, fontSize = 14.sp)
+            }
         }
         app.status?.let { Text("⟳ $it", color = Soft, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 10.dp)) }
         app.syncStatus?.let { Text(it, color = Soft, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 10.dp)) }
@@ -344,7 +406,8 @@ private fun WhoIsWatching(app: AppState) {
                             .clickable { app.chooseProfile(p) }.padding(18.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
-                        Text(p.name.take(1).uppercase(), color = Color.White, fontSize = 40.sp, fontWeight = FontWeight.Bold)
+                        Avatar(p, 72) { app.chooseProfile(p) }
+                        Spacer(Modifier.height(8.dp))
                         Text(p.name, color = Color.White, fontSize = 15.sp)
                         if (p.kids) Text("Kids", color = Gold, fontSize = 12.sp)
                     }

@@ -81,6 +81,7 @@ class Player {
         lastUrl = url
         val opts = mutableListOf(":network-caching=1500", ":http-reconnect")
         if (deinterlace) opts += listOf(":deinterlace=1", ":deinterlace-mode=yadif")
+        if (normalise) opts += listOf(":audio-filter=normvol", ":norm-max-level=1.5")
         if (startMs > 0) opts += ":start-time=${startMs / 1000}"
         player()?.media()?.play(url, *opts.toTypedArray())
     }
@@ -109,6 +110,9 @@ class Player {
 
     /** Tidy up interlaced pictures (old SD channels). */
     var deinterlace = true
+
+    /** Evens out loud and quiet channels. */
+    var normalise = false
 
     // ---- Picture and sound (Settings on the player) ----
 

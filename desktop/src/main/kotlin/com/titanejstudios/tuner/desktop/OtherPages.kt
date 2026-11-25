@@ -1,6 +1,7 @@
 package com.titanejstudios.tuner.desktop
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -224,6 +225,8 @@ fun YouTubePage(app: AppState) {
 @Composable
 fun SettingsPage(app: AppState) {
     var adding by remember { mutableStateOf(false) }
+    var editing by remember { mutableStateOf<PcProfile?>(null) }
+    var logVersion by remember { mutableStateOf(0) }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(24.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item { Text("Settings", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.ExtraBold) }
 
@@ -353,6 +356,39 @@ fun SettingsPage(app: AppState) {
                     }
                 }
                 Text("Type a channel's number (on Live TV, Home or the guide) to go straight to it.", color = Soft, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
+                Spacer(Modifier.height(10.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Pill(if (app.config.normalise) "✓ Even out loud and quiet channels" else "Even out loud and quiet channels") {
+                        app.config.normalise = !app.config.normalise
+                        app.player.normalise = app.config.normalise
+                        app.config.save()
+                        app.listsVersion = v + 1
+                    }
+                    Pill(if (app.config.notifications) "✓ Windows notifications" else "Windows notifications") {
+                        app.config.notifications = !app.config.notifications
+                        app.config.save()
+                        app.listsVersion = v + 1
+                    }
+                }
+                Text("Notifications: reminders and finished recordings pop up in the corner, even with Flicker in the tray.", color = Soft, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
+                Spacer(Modifier.height(10.dp))
+                Text("Text size", color = Color.White, fontSize = 14.sp)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 4.dp)) {
+                    for ((label, scale) in listOf("Normal" to 1f, "Large" to 1.15f, "Extra large" to 1.3f)) Pill(label, selected = uiScale == scale) {
+                        uiScale = scale
+                        app.config.textScale = scale
+                        app.config.save()
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
+                Text("Colours", color = Color.White, fontSize = 14.sp)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 4.dp)) {
+                    for (t in Themes) Pill(t.name, selected = currentTheme.name == t.name) {
+                        currentTheme = t
+                        app.config.theme = t.name
+                        app.config.save()
+                    }
+                }
             }
         }
 
@@ -367,15 +403,43 @@ fun SettingsPage(app: AppState) {
             }
         }
 
-        if (app.config.profiles.size > 1) {
+        if (app.config.profiles.isNotEmpty()) {
             item { SectionTitle("Profiles") }
             item {
                 Card {
-                    Text("From your TV. Kids' profiles see only their channels.", color = Soft, fontSize = 13.sp)
+                    Text("From your TV – changes here go back to it. Kids' profiles see only their channels.", color = Soft, fontSize = 13.sp)
                     Spacer(Modifier.height(8.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        for (p in app.config.profiles) Pill(p.name + if (p.kids) " (kids)" else "", selected = p.id == app.profileId) { app.chooseProfile(p) }
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        for (p in app.config.profiles) Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Avatar(p, 54, selected = p.id == app.profileId) { app.chooseProfile(p) }
+                            Text(p.name, color = Color.White, fontSize = 12.sp)
+                            if (!app.kids || app.grownUp) Text("Edit", color = Sky, fontSize = 11.sp, modifier = Modifier.clickable { editing = p }.padding(2.dp))
+                        }
                     }
+                }
+            }
+        }
+
+        item { SectionTitle("Problem log") }
+        item {
+            Card {
+                val lines = remember(logVersion) {
+                    runCatching { com.titanejstudios.tuner.data.AppLog.file.readLines().filter { it.isNotBlank() && !it.startsWith("\t") }.takeLast(12) }.getOrDefault(emptyList())
+                }
+                Text("What went wrong lately (the full log is ${com.titanejstudios.tuner.data.AppLog.file.absolutePath}).", color = Soft, fontSize = 13.sp)
+                Spacer(Modifier.height(6.dp))
+                if (lines.isEmpty()) Text("Nothing yet.", color = Soft, fontSize = 12.sp)
+                for (l in lines) Text(l, color = if ("WARN" in l) Gold else Soft, fontSize = 11.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Pill("📋 Copy the log", selected = true) {
+                        val text = "Flicker for Windows ${Keys.VERSION} · ${System.getProperty("os.name")}\n\n" +
+                            runCatching { com.titanejstudios.tuner.data.AppLog.file.readText().takeLast(60_000) }.getOrDefault("")
+                        runCatching { java.awt.Toolkit.getDefaultToolkit().systemClipboard.setContents(java.awt.datatransfer.StringSelection(text), null) }
+                        app.say("Problem log copied – paste it wherever you need")
+                    }
+                    Pill("Open the log") { runCatching { java.awt.Desktop.getDesktop().open(com.titanejstudios.tuner.data.AppLog.file) } }
+                    Pill("↻") { logVersion++ }
                 }
             }
         }
@@ -418,6 +482,7 @@ fun SettingsPage(app: AppState) {
             }
         }
     }
+    editing?.let { p -> ProfileEditor(app, p) { editing = null } }
     if (adding) AddPlaylistDialog(onDismiss = { adding = false }) { src ->
         app.config.sources = app.config.sources + src
         app.config.save()
@@ -472,6 +537,81 @@ private fun AddPlaylistDialog(onDismiss: () -> Unit, onAdd: (Source) -> Unit) {
                     colors = ButtonDefaults.buttonColors(containerColor = Sky),
                 ) { Text("Add") }
                 TextButton(onClick = onDismiss) { Text("Cancel", color = Soft) }
+            }
+        }
+    }
+}
+
+
+/** A profile's round picture: its colour, with its emoji or first letter (like the TV). */
+@Composable
+fun Avatar(p: PcProfile, size: Int, selected: Boolean = false, onClick: () -> Unit) {
+    val colour = AvatarColours[(if (p.colour in AvatarColours.indices) p.colour else (p.name.hashCode() and 0x7fffffff) % AvatarColours.size)]
+    Box(
+        Modifier.width(size.dp).height(size.dp).clip(androidx.compose.foundation.shape.CircleShape).background(colour)
+            .then(if (selected) Modifier.border(3.dp, Color.White, androidx.compose.foundation.shape.CircleShape) else Modifier)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(p.icon.ifBlank { p.name.take(1).uppercase() }, color = Color.White, fontSize = (size * 0.45f).sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+/** Edit a profile (name, picture, kids, daily time and bedtime) – it goes back to the TV. */
+@Composable
+private fun ProfileEditor(app: AppState, p: PcProfile, onClose: () -> Unit) {
+    var name by remember { mutableStateOf(p.name) }
+    var kids by remember { mutableStateOf(p.kids) }
+    var limit by remember { mutableStateOf(p.limitMinutes) }
+    var bedtime by remember { mutableStateOf(p.bedtime) }
+    var colour by remember { mutableStateOf(p.colour) }
+    var icon by remember { mutableStateOf(p.icon) }
+    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.6f)), contentAlignment = Alignment.Center) {
+        Column(Modifier.width(560.dp).clip(RoundedCornerShape(16.dp)).background(Panel).padding(22.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Avatar(PcProfile(p.id, name, kids, p.groups, limit, bedtime, colour, icon), 60) {}
+                Spacer(Modifier.width(14.dp))
+                OutlinedTextField(name, { name = it }, singleLine = true, label = { Text("Name") }, modifier = Modifier.weight(1f))
+            }
+            Text("Colour", color = Soft, fontSize = 13.sp)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                AvatarColours.forEachIndexed { i, c ->
+                    Box(
+                        Modifier.width(30.dp).height(30.dp).clip(androidx.compose.foundation.shape.CircleShape).background(c)
+                            .then(if (colour == i) Modifier.border(2.dp, Color.White, androidx.compose.foundation.shape.CircleShape) else Modifier)
+                            .clickable { colour = i },
+                    )
+                }
+            }
+            Text("Picture", color = Soft, fontSize = 13.sp)
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                items(AvatarIcons.size) { i ->
+                    val e = AvatarIcons[i]
+                    Pill(e.ifBlank { "Aa" }, selected = icon == e) { icon = e }
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Pill(if (kids) "✓ Kids' profile" else "Kids' profile") { kids = !kids }
+            }
+            if (kids) {
+                Text("TV a day", color = Soft, fontSize = 13.sp)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    for (m in listOf(0, 30, 60, 90, 120, 180)) Pill(if (m == 0) "No limit" else "${m / 60}h${if (m % 60 > 0) " ${m % 60}m" else ""}".replace("0h ", ""), selected = limit == m) { limit = m }
+                }
+                Text("Bedtime", color = Soft, fontSize = 13.sp)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    for (b in listOf(-1, 18 * 60 + 30, 19 * 60, 19 * 60 + 30, 20 * 60, 21 * 60)) {
+                        Pill(if (b < 0) "None" else String.format(java.util.Locale.UK, "%d:%02d", b / 60, b % 60), selected = bedtime == b) { bedtime = b }
+                    }
+                }
+            }
+            Text("The channels kids can see are chosen on the TV.", color = Soft, fontSize = 12.sp)
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Pill("Save", selected = true) {
+                    app.editProfile(p.id, name, kids, if (kids) limit else 0, if (kids) bedtime else -1, colour, icon)
+                    onClose()
+                }
+                Pill("Cancel", onClick = onClose)
             }
         }
     }

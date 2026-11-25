@@ -33,6 +33,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.onPointerEvent
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -107,9 +108,21 @@ fun LivePage(app: AppState, fullScreen: Boolean, toggleFullScreen: () -> Unit) {
                     val c = shown[index]
                     val cur = guide[c.id]?.firstOrNull { it.start <= now && it.stop > now }
                     val sel = c.id == app.playingChannel?.id
+                    androidx.compose.foundation.ContextMenuArea(items = {
+                        listOf(
+                            androidx.compose.foundation.ContextMenuItem("▶ Watch") { app.playChannel(c) },
+                            androidx.compose.foundation.ContextMenuItem(if (c.id in favourites) "☆ Remove from favourites" else "★ Add to favourites") { app.toggleFavourite(c) },
+                        ) + listOfNotNull(
+                            guide[c.id]?.firstOrNull { it.start > now }?.let { nx ->
+                                androidx.compose.foundation.ContextMenuItem("⏰ Remind me: ${time(nx.start)} ${nx.title}") { app.toggleReminder(c, nx) }
+                            },
+                            cur?.let { p -> androidx.compose.foundation.ContextMenuItem("● Record ${p.title}") { app.toggleRecording(c, p) } }?.takeIf { !app.kids },
+                        )
+                    }) {
                     Row(
                         Modifier.fillMaxWidth().height(58.dp).clip(RoundedCornerShape(10.dp))
-                            .background(if (sel) Sky.copy(alpha = 0.45f) else Panel)
+                            .background(if (sel) Sky.copy(alpha = 0.45f) else if (app.previewing?.id == c.id) Sky.copy(alpha = 0.2f) else Panel)
+                            .hoverPreview(app, c)
                             .clickable { app.playChannel(c) }.padding(horizontal = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
@@ -130,6 +143,7 @@ fun LivePage(app: AppState, fullScreen: Boolean, toggleFullScreen: () -> Unit) {
                         Text(if (fav) "★" else "☆", color = if (fav) Gold else Soft, fontSize = 18.sp,
                             modifier = Modifier.clickable { app.toggleFavourite(c) }.padding(6.dp))
                     }
+                    }
                 }
             }
         }
@@ -142,8 +156,10 @@ fun LivePage(app: AppState, fullScreen: Boolean, toggleFullScreen: () -> Unit) {
             if (!fullScreen) {
                 val c = app.playingChannel
                 Spacer(Modifier.height(12.dp))
-                if (c == null) {
-                    Text("Click a channel to watch. F11 or double-click for full screen · Page Up/Down change channel · Space pause · Ctrl+M mute", color = Soft, fontSize = 14.sp)
+                if (c == null && app.previewing != null) {
+                    Text("Preview: ${app.previewing?.name} – click it to watch with sound", color = Soft, fontSize = 14.sp)
+                } else if (c == null) {
+                    Text("Click a channel to watch (or rest the pointer on one for a silent preview). F11 or double-click for full screen · Page Up/Down change channel · Space pause · Ctrl+M mute", color = Soft, fontSize = 14.sp)
                 } else {
                     val list = guide[c.id].orEmpty()
                     val cur = app.catchupOf ?: list.firstOrNull { it.start <= now && it.stop > now }
@@ -164,6 +180,12 @@ fun LivePage(app: AppState, fullScreen: Boolean, toggleFullScreen: () -> Unit) {
                         PictureMenu(app)
                         Spacer(Modifier.width(8.dp))
                         Pill("▣ Mini", selected = app.mini) { app.toggleMini() }
+                        if (app.secondScreen != null || app.otherScreen() != null) {
+                            Spacer(Modifier.width(8.dp))
+                            Pill("🖥", selected = app.secondScreen != null) { app.toggleSecondScreen() }
+                        }
+                        Spacer(Modifier.width(8.dp))
+                        VolumeSlider(app)
                         Spacer(Modifier.width(8.dp))
                         SendToTv(app)
                         Spacer(Modifier.width(8.dp))
@@ -218,6 +240,23 @@ fun PlayerPage(app: AppState, fullScreen: Boolean, toggleFullScreen: () -> Unit)
     }
     Column(Modifier.fillMaxSize()) {
         VideoBox(app, Modifier.fillMaxWidth().weight(1f))
+        // Skip intro, and Up next in the last 30 seconds of an episode.
+        val introEnd = app.introEnd()
+        val left = if (dur > 0) dur - pos else Long.MAX_VALUE
+        val showSkip = w.seriesId != null && pos in 5_000L..240_000L && (introEnd == null || pos < introEnd - 3_000L)
+        val showNext = w.next != null && left < 30_000L && app.upNextCancelled != w.id
+        if (showSkip || showNext) {
+            Row(Modifier.fillMaxWidth().background(Ink).padding(horizontal = 20.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (showSkip) Pill(if (introEnd != null) "⏭ Skip intro" else "⏭ Skip intro (85s)", selected = true) {
+                    if (introEnd != null) app.skipIntro() else app.skipIntroGuess()
+                }
+                if (showNext) {
+                    Text("Up next in ${(left / 1000).coerceAtLeast(0)}s", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                    w.next?.let { n -> Pill("▶ Play now", selected = true) { app.saveProgress(); n() } }
+                    Pill("Cancel") { app.upNextCancelled = w.id }
+                }
+            }
+        }
         if (!fullScreen) {
             Column(Modifier.fillMaxWidth().background(InkBottom).padding(horizontal = 20.dp, vertical = 10.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -247,7 +286,9 @@ fun PlayerPage(app: AppState, fullScreen: Boolean, toggleFullScreen: () -> Unit)
                     w.next?.let { n -> Pill("Next episode ›") { app.saveProgress(); n() } }
                     Pill("⛶ Full screen", onClick = toggleFullScreen)
                     Pill(if (app.mini) "▣ Back from mini player" else "▣ Mini player") { app.toggleMini() }
+                    if (app.secondScreen != null || app.otherScreen() != null) Pill(if (app.secondScreen != null) "🖥 Back to this screen" else "🖥 Other screen") { app.toggleSecondScreen() }
                     PictureMenu(app, films = true)
+                    VolumeSlider(app)
                     SendToTv(app)
                     Spacer(Modifier.weight(1f))
                     Pill("✕ Close") { app.stopWatching(save = true) }
@@ -331,5 +372,27 @@ fun PictureMenu(app: AppState, films: Boolean = false) {
                 )
             }
         }
+    }
+}
+
+
+/** Rest the pointer on a channel (with nothing playing) for a silent preview. */
+@OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+private fun Modifier.hoverPreview(app: AppState, c: com.titanejstudios.tuner.data.Channel): Modifier = this
+    .onPointerEvent(androidx.compose.ui.input.pointer.PointerEventType.Enter) { app.hoverChannel(c) }
+    .onPointerEvent(androidx.compose.ui.input.pointer.PointerEventType.Exit) { app.hoverChannel(null) }
+
+/** 🔊 and a slider (0–150%). */
+@Composable
+fun VolumeSlider(app: AppState) {
+    var v by remember { mutableFloatStateOf(app.config.volume.toFloat()) }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(if (v < 1f) "🔇" else "🔊", fontSize = 15.sp, modifier = Modifier.clickable { app.player.toggleMute() }.padding(end = 4.dp))
+        Slider(
+            value = v, onValueChange = { v = it; app.player.setVolume(it.toInt()) }, valueRange = 0f..150f,
+            onValueChangeFinished = { app.setVolume(v.toInt()) },
+            modifier = Modifier.width(120.dp),
+            colors = SliderDefaults.colors(thumbColor = Sky, activeTrackColor = Sky, inactiveTrackColor = PanelLight),
+        )
     }
 }

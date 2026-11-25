@@ -46,19 +46,28 @@ class PcLink(private val config: Config) {
     @Synchronized
     fun start() {
         val k = key ?: return
-        if (server != null || k.isBlank()) return
-        runCatching {
-            val s = HttpServer.create(InetSocketAddress(0), 0)
-            s.executor = Executors.newFixedThreadPool(3)
-            s.createContext("/link/") { ex -> handle(ex) }
-            s.start()
-            server = s
-            val addr = lanAddress()
-            val d = JmDNS.create(addr, "flicker-pc")
-            d.registerService(ServiceInfo.create("_flickerlink._tcp.local.", deviceId, s.address.port, "Flicker PC"))
+        if (k.isBlank()) return
+        val s = server ?: runCatching {
+            HttpServer.create(InetSocketAddress(0), 0).apply {
+                executor = Executors.newFixedThreadPool(3)
+                createContext("/link/") { ex -> handle(ex) }
+                start()
+            }
+        }.onFailure { AppLog.warn("Linked devices: couldn't listen", it) }.getOrNull() ?: return
+        server = s
+        if (dns != null) return
+        // Telling the network: the Wi-Fi's address first, then let it choose, if Windows won't have that.
+        val addr = lanAddress()
+        for (a in listOf(addr, null)) {
+            val d = runCatching { JmDNS.create(a, "flicker-pc") }
+                .onFailure { AppLog.warn("Linked devices: couldn't announce on ${a?.hostAddress ?: "the default network"}: ${it.message}") }
+                .getOrNull() ?: continue
+            runCatching { d.registerService(ServiceInfo.create("_flickerlink._tcp.local.", deviceId, s.address.port, "Flicker PC")) }
+                .onFailure { AppLog.warn("Linked devices: couldn't register", it) }
             dns = d
-            AppLog.info("Linked devices: listening on ${addr?.hostAddress}:${s.address.port}")
-        }.onFailure { AppLog.warn("Linked devices: couldn't start", it) }
+            AppLog.info("Linked devices: listening on ${a?.hostAddress ?: "default"}:${s.address.port}")
+            return
+        }
     }
 
     fun stop() {

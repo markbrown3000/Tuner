@@ -11,6 +11,8 @@ class PcProfile(
     val id: String, val name: String, val kids: Boolean, val groups: Set<String>,
     /** Kids: minutes a day (0 = no limit), and no TV after this (minutes after midnight, -1 = none) until 6am. */
     val limitMinutes: Int = 0, val bedtime: Int = -1,
+    /** The TV's avatar colour (-1 = automatic) and picture (an emoji, or empty for the first letter). */
+    val colour: Int = -1, val icon: String = "",
 )
 
 /** A film or episode saved to the PC to watch without the internet. */
@@ -55,6 +57,8 @@ class Config {
     var englishOnly = false
     var mergeVersions = true
     var lastChannel: String? = null
+    /** Channels watched lately, newest first. */
+    var recents: List<String> = emptyList()
     var volume = 80
 
     // From your TV through Google Drive (see Sync).
@@ -106,6 +110,18 @@ class Config {
     var showNumbers = true
     /** Picture: deinterlace old channels. */
     var deinterlace = true
+    /** Evens out loud and quiet channels. */
+    var normalise = false
+    var theme = "Evening"
+    var textScale = 1f
+    /** Windows notifications for reminders and finished recordings. */
+    var notifications = true
+    /** Where each series' intro ends (from the TV): series id → milliseconds. */
+    var intros: Map<String, Long> = emptyMap()
+    /** The TV's profiles exactly as it sent them (so edits here keep everything the TV knows). */
+    var profilesRaw: String = "[]"
+    /** When profiles were last changed on this PC (0 = never: the TV's are used). */
+    var profilesAt = 0L
 
     init {
         load()
@@ -136,6 +152,7 @@ class Config {
             englishOnly = o.optBoolean("englishOnly")
             mergeVersions = o.optBoolean("merge", true)
             lastChannel = o.optString("last").ifBlank { null }
+            recents = o.optJSONArray("recents")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList()
             volume = o.optInt("volume", 80)
             googleRefresh = o.optString("gRefresh").ifBlank { null }
             googleEmail = o.optString("gEmail").ifBlank { null }
@@ -179,6 +196,13 @@ class Config {
             startWithWindows = o.optBoolean("startWithWindows")
             showNumbers = o.optBoolean("numbers", true)
             deinterlace = o.optBoolean("deinterlace", true)
+            normalise = o.optBoolean("normalise")
+            theme = o.optString("theme", "Evening")
+            textScale = o.optDouble("textScale", 1.0).toFloat()
+            notifications = o.optBoolean("notify", true)
+            intros = o.optJSONObject("intros")?.let { d -> d.keys().asSequence().associateWith { d.optLong(it) } } ?: emptyMap()
+            profilesRaw = o.optString("profilesRaw", "[]")
+            profilesAt = o.optLong("profilesAt")
             recordings = o.optJSONArray("recordings")?.let { a -> (0 until a.length()).map { PcRecording.fromJson(a.getJSONObject(it)) } } ?: emptyList()
             lastUpdateCheck = o.optLong("updateCheck")
             reminders = o.optJSONArray("reminders")?.let { a ->
@@ -193,7 +217,7 @@ class Config {
         val groups = o.optJSONArray("groups")
         PcProfile(
             id, o.optString("name"), o.optBoolean("kids"), groups?.let { g -> (0 until g.length()).map { g.getString(it) }.toSet() } ?: emptySet(),
-            o.optInt("limit"), o.optInt("bedtime", -1),
+            o.optInt("limit"), o.optInt("bedtime", -1), o.optInt("colour", -1), o.optString("icon"),
         )
     }
 
@@ -217,12 +241,12 @@ class Config {
         val favs = JSONObject()
         for ((k, v) in favourites) favs.put(k, JSONArray(v))
         val o = JSONObject().put("device", deviceId).put("sources", sourcesToJson()).put("englishOnly", englishOnly).put("merge", mergeVersions)
-            .put("last", lastChannel ?: "").put("volume", volume)
+            .put("last", lastChannel ?: "").put("recents", JSONArray(recents)).put("volume", volume)
             .put("gRefresh", googleRefresh ?: "").put("gEmail", googleEmail ?: "").put("gFile", driveFileId ?: "")
             .put("tvPlaylists", useTvPlaylists)
             .put("profiles", JSONArray().apply {
                 profiles.forEach { p ->
-                    put(JSONObject().put("id", p.id).put("name", p.name).put("kids", p.kids).put("groups", JSONArray(p.groups.toList())).put("limit", p.limitMinutes).put("bedtime", p.bedtime))
+                    put(JSONObject().put("id", p.id).put("name", p.name).put("kids", p.kids).put("groups", JSONArray(p.groups.toList())).put("limit", p.limitMinutes).put("bedtime", p.bedtime).put("colour", p.colour).put("icon", p.icon))
                 }
             })
             .put("profile", activeProfile ?: "")
@@ -241,6 +265,8 @@ class Config {
             .put("downloads", JSONArray().apply { downloads.forEach { put(it.toJson()) } })
             .put("window", JSONObject().put("x", windowX).put("y", windowY).put("w", windowW).put("h", windowH).put("max", windowMaximised))
             .put("keepRunning", keepRunning).put("startWithWindows", startWithWindows).put("numbers", showNumbers).put("deinterlace", deinterlace)
+            .put("normalise", normalise).put("theme", theme).put("textScale", textScale.toDouble()).put("notify", notifications)
+            .put("intros", JSONObject(intros)).put("profilesRaw", profilesRaw).put("profilesAt", profilesAt)
             .put("recordings", JSONArray().apply { recordings.forEach { put(it.toJson()) } })
             .put("updateCheck", lastUpdateCheck)
             .put("reminders", JSONArray().apply { reminders.forEach { put(JSONObject().put("c", it.channelId).put("cn", it.channelName).put("t", it.title).put("s", it.start)) } })

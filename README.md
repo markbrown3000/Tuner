@@ -71,6 +71,15 @@ A TiviMate-style live TV app for Google TV / Android TV. Built with Kotlin, Jetp
   - **Picture & sound** (⚙ on Live TV and the player): sound track, subtitles, picture shape (fit, fill, 16:9, 4:3) and, for films, speed. Old interlaced channels are smoothed out (Settings › This PC).
   - **Pause live TV**: Space (or ⏸ Pause) on Live TV. Flicker records the channel from that moment, Space again carries on from where you paused, and ● Back to live jumps to now.
   - **Runs in the tray**: closing the window leaves Flicker running, so recordings and reminders carry on. Right-click the tray icon › Quit to close it. It can also start with Windows (Settings › This PC).
+  - **Up next and Skip intro**: a countdown to the next episode in the last 30 seconds (Play now or Cancel), and a Skip intro button that uses the intro times your TV has learnt.
+  - **Right-click menus** on channels (watch, favourite, remind, record), films (play, from the start, My list, download) and Continue watching (remove).
+  - **Volume slider, media keys and even sound**: 🔊 slider up to 150%, keyboard media and volume keys work, and Settings › This PC can even out loud and quiet channels.
+  - **Other screen**: 🖥 moves the picture full screen to a second monitor while you keep using the guide.
+  - **Hover preview**: rest the pointer on a channel (with nothing playing) for a silent preview.
+  - **Films**: 🎲 Surprise me, and a film's page shows the rest of its series.
+  - **Profiles with pictures**: colours and emoji like the TV, and you can edit profiles from the PC (it goes back to the TV).
+  - **Windows notifications**, **text size** and **colour themes** in Settings › This PC.
+  - **Problem log**: Settings › Problem log shows recent errors, with 📋 Copy to send them on.
   - **Kids' limits**: the TV's PIN, daily TV time and bedtime apply on the PC too. A grown-up's PIN gives 30 more minutes, and switching from a kids' profile to a grown-up one needs the PIN.
   - **What's On**: now and coming up by kind, sport (with LIVE badges), and My teams, with your teams' fixtures from ESPN and the channel showing each one.
   - **Search** (top of the menu): channels, the guide (on now, coming up, catch-up), films, series, Plex and YouTube in one go.

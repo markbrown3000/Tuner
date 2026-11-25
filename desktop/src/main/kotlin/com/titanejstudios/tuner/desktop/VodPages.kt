@@ -111,7 +111,25 @@ fun FilmsPage(app: AppState) {
         LazyVerticalGrid(GridCells.Adaptive(150.dp), contentPadding = PaddingValues(bottom = 24.dp), horizontalArrangement = Arrangement.spacedBy(14.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             items(shown, key = { it.id }) { m ->
                 val r = app.config.resume[m.id]
-                PosterTile(tidy(m.name), m.poster, m.rating?.let { "★ $it" }, progress = r?.let { if (it.dur > 0) it.pos.toFloat() / it.dur else null }) { open = m }
+                WithMenu(
+                    listOfNotNull(
+                        "▶ Play" to { app.playFilm(m) },
+                        if (r != null) "⏮ Play from the start" to { app.playFilm(m, fromStart = true) } else null,
+                        (if (app.inWatchlist(m.id)) "✓ Remove from My list" else "+ Add to My list") to { app.toggleWatchlist(WatchItem.of(m, System.currentTimeMillis())) },
+                        if (app.downloadFor(m.id) == null) "⤓ Download" to { app.download(m.id, tidy(m.name), m.category, m.poster, m.url) } else null,
+                        "ⓘ Details" to { open = m },
+                    ),
+                ) {
+                    PosterTile(tidy(m.name), m.poster, m.rating?.let { "★ $it" }, progress = r?.let { if (it.dur > 0) it.pos.toFloat() / it.dur else null }) { open = m }
+                }
+            }
+        }
+        // 🎲 Surprise me: a well-rated film you haven't watched.
+        if (films.isNotEmpty()) Box(Modifier.fillMaxSize()) {
+            Pill("🎲 Surprise me", selected = true, modifier = Modifier.align(Alignment.TopEnd).padding(4.dp)) {
+                val pool = films.filter { (it.rating?.toDoubleOrNull() ?: 0.0) >= 7.0 && it.id !in app.config.done && it.id !in app.config.resume }
+                    .ifEmpty { films.filter { it.id !in app.config.done } }
+                pool.randomOrNull()?.let { open = it }
             }
         }
     }
@@ -144,6 +162,36 @@ private fun FilmDetail(app: AppState, m: VodItem, onClose: () -> Unit) {
                 )
                 info?.overview?.let { Text(it, color = Soft, fontSize = 15.sp) }
                 info?.cast?.take(6)?.takeIf { it.isNotEmpty() }?.let { Text("With " + it.joinToString(", "), color = Soft, fontSize = 13.sp) }
+                // The rest of its film series, in order (the ones you have can be played).
+                val inf = info
+                var parts by remember(m.id) { mutableStateOf<List<Pair<Tmdb.Part, VodItem?>>>(emptyList()) }
+                LaunchedEffect(inf?.collectionId) {
+                    val id = inf?.collectionId ?: return@LaunchedEffect
+                    val films = app.movies.orEmpty()
+                    parts = withContext(Dispatchers.IO) {
+                        runCatching { Tmdb.collection(Keys.TMDB_KEY, id) }.getOrDefault(emptyList()).map { p ->
+                            val want = p.title.lowercase().filter { it.isLetterOrDigit() }
+                            p to films.firstOrNull { f ->
+                                val (t, y) = FilmName.parse(f.name)
+                                t.lowercase().filter { it.isLetterOrDigit() } == want && (y == null || p.year == null || y == p.year)
+                            }
+                        }
+                    }
+                }
+                if (parts.size > 1) {
+                    Text(inf?.collectionName ?: "The series", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 6.dp))
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        items(parts.size) { i ->
+                            val (p, mine) = parts[i]
+                            PosterTile("${i + 1}. ${p.title}", p.poster, if (mine != null) "▶ yours" else p.year, width = 100.dp) {
+                                if (mine != null) {
+                                    onClose()
+                                    app.playFilm(mine)
+                                } else app.say("${p.title} isn't in your films")
+                            }
+                        }
+                    }
+                }
                 Spacer(Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     if (r != null && r.dur > 0) {
