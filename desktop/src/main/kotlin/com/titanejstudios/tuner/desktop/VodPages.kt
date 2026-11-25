@@ -95,6 +95,14 @@ fun FilmsPage(app: AppState) {
     var search by remember { mutableStateOf("") }
     var open by remember { mutableStateOf<VodItem?>(null) }
     val films = app.movies.orEmpty()
+    // Opened from the player's "Go to film page".
+    LaunchedEffect(app.openFilmId, films) {
+        val id = app.openFilmId
+        if (id != null && films.isNotEmpty()) {
+            open = films.firstOrNull { it.id == id }
+            app.openFilmId = null
+        }
+    }
     val myList = remember(app.listsVersion) { app.watchlist.filter { !it.isSeries }.map { it.id }.toSet() }
     val categories = remember(films, myList) { listOf(ALL_CATS) + (if (myList.isNotEmpty()) listOf(MY_LIST) else emptyList()) + films.map { it.category }.distinct() }
     val shown = remember(films, category, search, myList) {
@@ -127,7 +135,7 @@ fun FilmsPage(app: AppState) {
         // 🎲 Surprise me: a well-rated film you haven't watched.
         if (films.isNotEmpty()) Box(Modifier.fillMaxSize()) {
             Pill("🎲 Surprise me", selected = true, modifier = Modifier.align(Alignment.TopEnd).padding(4.dp)) {
-                val pool = films.filter { (it.rating?.toDoubleOrNull() ?: 0.0) >= 7.0 && it.id !in app.config.done && it.id !in app.config.resume }
+                val pool = films.filter { (it.rating?.toDoubleOrNull() ?: 0.0) >= 7.0 && it.id !in app.config.done && it.id !in app.config.resume && app.thumbOf(it.name) >= 0 }
                     .ifEmpty { films.filter { it.id !in app.config.done } }
                 pool.randomOrNull()?.let { open = it }
             }
@@ -201,6 +209,13 @@ private fun FilmDetail(app: AppState, m: VodItem, onClose: () -> Unit) {
                     Pill(if (inList) "✓ In My list" else "+ My list") { app.toggleWatchlist(WatchItem.of(m, System.currentTimeMillis())) }
                     info?.trailerKey?.let { k -> Pill("Trailer ↗") { openInBrowser("https://www.youtube.com/watch?v=$k") } }
                     DownloadPill(app, m.id, tidy(m.name), m.category, m.poster, m.url)
+                }
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    val t = remember(app.listsVersion) { app.thumbOf(m.name) }
+                    Pill("👍", selected = t == 1) { app.thumb(m.name, true) }
+                    Pill("👎", selected = t == -1) { app.thumb(m.name, false) }
+                    if (!app.kids) Pill("👪 Recommend to the family") { app.recommendToFamily(WatchItem.of(m, System.currentTimeMillis())) }
                 }
             }
         }

@@ -262,6 +262,7 @@ private fun TunerApp(vm: TunerViewModel) {
                 Screen.YouTubePlayer -> com.titanejstudios.tuner.ui.YouTubePlayerScreen(vm)
                 Screen.YouTubeList -> com.titanejstudios.tuner.ui.YouTubeListScreen(vm)
                 Screen.More -> com.titanejstudios.tuner.ui.PhoneMoreScreen(vm)
+                Screen.Library -> com.titanejstudios.tuner.ui.LibraryScreen(vm)
             }
             }
         }
@@ -279,6 +280,7 @@ private fun TunerApp(vm: TunerViewModel) {
             }
             vm.categoryPickFor?.let { CategoryPicker(vm, it) }
             if (vm.timesUp) TimesUpDialog(vm)
+            vm.timeRequest?.let { com.titanejstudios.tuner.ui.TimeRequestDialog(vm, it) }
             if (vm.filmInfoOpen) FilmInfoDialog(vm)
             if (vm.stillWatchingAsk) StillWatchingDialog(vm)
             vm.updateOffer?.let { UpdateDialog(vm, it) }

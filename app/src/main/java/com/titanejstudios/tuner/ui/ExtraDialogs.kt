@@ -155,6 +155,10 @@ fun FilmInfoDialog(vm: TunerViewModel) {
                     val trailer = info.trailerKey
                     if (trailer != null) PillButton("▶ Trailer", { vm.playTrailer(trailer, info.title) }, Modifier.focusRequester(first))
                     PillButton("Close", { vm.closeFilmInfo() }, if (trailer == null) Modifier.focusRequester(first) else Modifier)
+                    // 👍 / 👎: more or fewer like it in recommendations and Surprise me.
+                    val thumb = remember(vm.tasteVersion, info.title) { vm.thumbOf(info.title) }
+                    PillButton("👍", { vm.thumb(info.title, info.genres.firstOrNull(), true) }, selected = thumb == 1)
+                    PillButton("👎", { vm.thumb(info.title, info.genres.firstOrNull(), false) }, selected = thumb == -1)
                 }
                 Spacer(Modifier.height(4.dp))
                 Text("Film info from TMDB", color = TunerColors.TextSecondary, fontSize = 12.sp)

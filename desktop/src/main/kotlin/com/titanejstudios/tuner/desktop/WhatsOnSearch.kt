@@ -210,6 +210,9 @@ private fun TeamsView(app: AppState) {
 @Composable
 fun SearchPage(app: AppState) {
     var query by remember { mutableStateOf("") }
+    LaunchedEffect(app.searchFor) {
+        app.searchFor?.let { query = it; app.searchFor = null }
+    }
     var plex by remember { mutableStateOf<List<Plex.Entry>>(emptyList()) }
     var youtube by remember { mutableStateOf<List<YouTube.Video>>(emptyList()) }
     LaunchedEffect(Unit) { app.loadVod() }

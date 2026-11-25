@@ -396,6 +396,7 @@ fun TimesUpDialog(vm: TunerViewModel) {
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 PillButton("OK", { vm.dismissTimesUp() }, Modifier.focusRequester(first))
                 PillButton("+30 minutes (PIN)", { vm.grantExtraTime(30) })
+                if (vm.link.linked) PillButton("📱 Ask a grown-up", { vm.askForMoreTime() })
                 PillButton("Switch profile", {
                     vm.dismissTimesUp()
                     vm.navigate(Screen.ProfilePicker)
@@ -1074,4 +1075,21 @@ fun FocusStrip(title: String?, details: String?, image: String?, hint: String, m
             Text(hint, color = Color(0xFF8FA3D4), fontSize = 13.sp, maxLines = 1)
         }
     }
+}
+
+
+/** On a grown-up's device: a child is asking for more TV. */
+@Composable
+fun TimeRequestDialog(vm: TunerViewModel, r: TunerViewModel.TimeRequest) {
+    MenuDialog(
+        title = "📱 ${r.kidName} is asking for more TV",
+        subtitle = "From ${r.from}" + if (vm.pin != null) " · you'll need the PIN" else "",
+        items = listOf(
+            MenuItem("+15 minutes") { vm.answerTimeRequest(15) },
+            MenuItem("+30 minutes") { vm.answerTimeRequest(30) },
+            MenuItem("+1 hour") { vm.answerTimeRequest(60) },
+            MenuItem("Not now") { vm.answerTimeRequest(0) },
+        ),
+        onDismiss = { vm.answerTimeRequest(0) },
+    )
 }

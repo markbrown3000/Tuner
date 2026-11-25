@@ -409,7 +409,7 @@ fun SettingsScreen(vm: TunerViewModel) {
             }
 
             item {
-                SettingRow("Sound language", subtitle = "Picked automatically when a channel or film has several", detail = vm.languageName(vm.audioLanguage), onClick = { vm.cycleAudioLanguage() })
+                SettingRow("Sound language", subtitle = "Picked automatically when a channel or film has several (each profile has its own)", detail = vm.languageName(vm.audioLanguage), onClick = { vm.cycleAudioLanguage() })
             }
             item {
                 SettingRow(
@@ -417,6 +417,14 @@ fun SettingsScreen(vm: TunerViewModel) {
                     subtitle = "Subtitles in this language switch on by themselves when there are any",
                     detail = if (vm.subtitleLanguage == null) "Off" else vm.languageName(vm.subtitleLanguage),
                     onClick = { vm.cycleSubtitleLanguage() },
+                )
+            }
+            item {
+                SettingRow(
+                    "Audio description",
+                    subtitle = "Picks the soundtrack that describes what's happening on screen, when there is one (for this profile)",
+                    detail = if (vm.audioDescription) "On" else "Off",
+                    onClick = { vm.toggleAudioDescription() },
                 )
             }
 
@@ -427,6 +435,14 @@ fun SettingsScreen(vm: TunerViewModel) {
                     subtitle = "Free from themoviedb.org › Settings › API. Gives posters, plots, cast and trailers",
                     detail = if (vm.tmdbKey != null) "Set" else "Not set",
                     onClick = { askKey = "tmdb" },
+                )
+            }
+            item {
+                SettingRow(
+                    "Previously on…",
+                    subtitle = "Starting an episode after a break shows what happened in the one before (needs the TMDB key)",
+                    detail = if (vm.recapsOn) "On" else "Off",
+                    onClick = { vm.toggleRecaps() },
                 )
             }
             item {

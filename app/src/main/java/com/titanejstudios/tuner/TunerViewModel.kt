@@ -59,6 +59,8 @@ import com.titanejstudios.tuner.data.SafeMode
 import com.titanejstudios.tuner.data.VodCache
 import com.titanejstudios.tuner.data.WatchItem
 import com.titanejstudios.tuner.data.Watchlist
+import com.titanejstudios.tuner.data.FamilyPick
+import com.titanejstudios.tuner.data.ComingEpisode
 import com.titanejstudios.tuner.features.FootballFeature
 import com.titanejstudios.tuner.features.PlexFeature
 import com.titanejstudios.tuner.features.SelfTest
@@ -107,7 +109,7 @@ enum class Screen {
     Home, Channels, Guide, Player, Search, Movies, Series, SeriesDetail, Settings, SourceEdit, Manage,
     ProfilePicker, ProfileEdit, PhoneSetup, EpgMap, Recordings, MultiView, Sports, Apps, Log,
     WhatsOn, Stats, ShareTv, Catchup, Categories, Plex, Update, SelfTest, PlexLibrary, PlexShow, HomeRows, Languages, Recommendations, Vpn,
-    Link, Downloads, Teams, Remote, Christmas, Cloud, YouTube, YouTubePlayer, YouTubeList, More,
+    Link, Downloads, Teams, Remote, Christmas, Cloud, YouTube, YouTubePlayer, YouTubeList, More, Library,
 }
 
 const val FAVOURITES = "★ Favourites"
@@ -955,6 +957,12 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     var lipSyncMap by mutableStateOf<Map<String, String>>(emptyMap()); private set
     var audioLanguage by mutableStateOf<String?>(null); private set
     var subtitleLanguage by mutableStateOf<String?>(null); private set
+    var audioDescription by mutableStateOf(false); private set
+    /** "Previously on…": the episode before's name and plot, shown for a few seconds. */
+    var previously by mutableStateOf<Pair<String, String>?>(null); private set
+    var recapsOn by mutableStateOf(store.recaps); private set
+    /** When an episode of each series last started (no recap when you're binge-watching). */
+    private val lastEpisodeStart = HashMap<String, Long>()
 
     // Recording tidy-up and network drive
     var keptRecordings by mutableStateOf<Set<String>>(emptySet()); private set
@@ -1373,9 +1381,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         loadRecordingSettings()
         customGroups = store.customGroups
         lipSyncMap = store.lipSync
-        audioLanguage = store.audioLanguage
-        subtitleLanguage = store.subtitleLanguage
-        playback.setLanguages(audioLanguage, subtitleLanguage)
+        loadLanguages()
         epgOverrides = store.epgOverrides
         deadChannels = store.deadChannels
         hideDead = store.hideDead
@@ -2339,6 +2345,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
             activeProfile = p
             store.activeProfileId = p.id
             youtube.useProfile(p.id)
+            loadLanguages()
             plexFeature.useUser(store.plexUserOf(p.id)?.third)
             favourites = store.favourites(p.id)
             favouriteSet = favourites.toSet()
@@ -3074,6 +3081,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         val now = System.currentTimeMillis()
         // Every 6 hours (Flicker can stay open for days – the guide check calls this too).
         if (!force && now - store.newEpisodesCheckedAt < 6 * 3600_000L) return
+        refreshComingSoon()
         val follow = followedSeries
         if (follow.isEmpty() || activeProfile.kids) return
         val xtream = sources.filterIsInstance<Source.Xtream>().associateBy { it.id }
@@ -3207,6 +3215,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         val meta = MediaMetadata.Builder().setTitle(m.title).setArtist(m.subtitle)
         m.poster?.let { meta.setArtworkUri(Uri.parse(it)) }
         playback.play(m.url, live = false, startPositionMs = start, metadata = meta.build())
+        maybeRecap(m, start)
         sendHa("playing", mapOf("kind" to if (m.seriesId != null) "episode" else "film", "title" to m.title, "subtitle" to m.subtitle, "poster" to m.poster))
         navigate(Screen.Player)
     }
@@ -3766,18 +3775,35 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
 
     fun languageName(code: String?) = languages.firstOrNull { it.first == code }?.second ?: code ?: "Stream's default"
 
+    // Each profile has its own sound and subtitle language, and audio description.
+
+    private fun loadLanguages() {
+        val pid = activeProfile.id
+        audioLanguage = store.audioLanguageOf(pid)
+        subtitleLanguage = store.subtitleLanguageOf(pid)
+        audioDescription = store.audioDescriptionOf(pid)
+        playback.setLanguages(audioLanguage, subtitleLanguage, audioDescription)
+    }
+
     fun cycleAudioLanguage() {
         val i = languages.indexOfFirst { it.first == audioLanguage }
         audioLanguage = languages[(i + 1).mod(languages.size)].first
-        store.audioLanguage = audioLanguage
-        playback.setLanguages(audioLanguage, subtitleLanguage)
+        store.saveAudioLanguage(activeProfile.id, audioLanguage)
+        playback.setLanguages(audioLanguage, subtitleLanguage, audioDescription)
     }
 
     fun cycleSubtitleLanguage() {
         val i = languages.indexOfFirst { it.first == subtitleLanguage }
         subtitleLanguage = languages[(i + 1).mod(languages.size)].first
-        store.subtitleLanguage = subtitleLanguage
-        playback.setLanguages(audioLanguage, subtitleLanguage)
+        store.saveSubtitleLanguage(activeProfile.id, subtitleLanguage)
+        playback.setLanguages(audioLanguage, subtitleLanguage, audioDescription)
+    }
+
+    fun toggleAudioDescription() {
+        audioDescription = !audioDescription
+        store.saveAudioDescription(activeProfile.id, audioDescription)
+        playback.setLanguages(audioLanguage, subtitleLanguage, audioDescription)
+        showNotice(if (audioDescription) "Audio description will be picked when there is one" else "Audio description off")
     }
 
     // ---------------- Catch-up page ----------------
@@ -4133,6 +4159,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         mode = PlayMode.Vod("plex:" + item.ratingKey, item.title, item.subtitle, item.image, url, null)
         val meta = MediaMetadata.Builder().setTitle(item.title).setArtist(item.subtitle)
         playback.play(url, live = false, startPositionMs = if (fromStart) 0L else item.viewOffsetMs, metadata = meta.build())
+        (mode as? PlayMode.Vod)?.let { maybeRecap(it, if (fromStart) 0L else item.viewOffsetMs) }
         sendHa("playing", mapOf("kind" to "plex", "title" to item.title, "subtitle" to item.subtitle))
         navigate(Screen.Player)
     }
@@ -4191,6 +4218,8 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
             return
         }
         val item = entry.toItem(if (entry.type == "episode") showTitle ?: ownShow?.title else null)
+        plexShowPlaying = if (entry.type == "episode") ownShow ?: entry.showEntry() else null
+        plexShowFor = entry.ratingKey
         playPlex(item, fromStart, fallback)
         if (entry.type == "episode") {
             plexEpisodeQueue = plexFeature.showEpisodes.orEmpty().dropWhile { it.ratingKey != entry.ratingKey }.drop(1)
@@ -4357,6 +4386,326 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     fun openPlexShow(entry: com.titanejstudios.tuner.integrations.Plex.Entry) {
         plexFeature.openShow(entry)
         navigate(Screen.PlexShow)
+    }
+
+    // ---------------- "Go to…" from the player ----------------
+
+    /** The Plex show the playing episode belongs to (when it was started from the show's page). */
+    private var plexShowPlaying: com.titanejstudios.tuner.integrations.Plex.Entry? = null
+    private var plexShowFor: String? = null
+
+    /** The IPTV series that's playing. */
+    val playingSeries: SeriesItem?
+        get() {
+            val sid = (mode as? PlayMode.Vod)?.seriesId ?: return null
+            return openSeries?.takeIf { it.id == sid } ?: series?.firstOrNull { it.id == sid }
+        }
+
+    /** The IPTV film that's playing. */
+    val playingFilm: VodItem?
+        get() {
+            val m = mode as? PlayMode.Vod ?: return null
+            if (m.seriesId != null || m.contentId.startsWith("plex:")) return null
+            return movies?.firstOrNull { it.id == m.contentId }
+        }
+
+    val playingPlexShow: com.titanejstudios.tuner.integrations.Plex.Entry?
+        get() = plexShowPlaying?.takeIf { plexShowFor != null && (mode as? PlayMode.Vod)?.contentId == "plex:$plexShowFor" }
+
+    /** What the player shows the name of (the series or show for episodes, the programme on live TV). */
+    val playingShowName: String?
+        get() = when (val m = mode) {
+            is PlayMode.Vod -> m.title
+            is PlayMode.CatchupPlay -> m.programme.title
+            is PlayMode.Live -> nowNext(m.channel.id, now).first?.title
+            else -> null
+        }
+
+    /** Leaves the player (on phones it carries on in the mini player). */
+    private fun leavePlayer() {
+        if (screen == Screen.Player) back()
+    }
+
+    fun goToSeries() {
+        val s = playingSeries ?: return
+        leavePlayer()
+        openSeriesDetail(s)
+    }
+
+    fun goToPlexShow() {
+        val s = playingPlexShow ?: return
+        leavePlayer()
+        openPlexShow(s)
+    }
+
+    fun goToFilmPage() {
+        val m = mode as? PlayMode.Vod ?: return
+        val isSeries = m.seriesId != null || playingPlexShow != null || (m.contentId.startsWith("plex:") && m.subtitle?.matches(Regex("S\\d+ E\\d+.*")) == true)
+        leavePlayer()
+        openFilmInfo(m.title, isSeries)
+    }
+
+    /** Search everything (guide, films, series, Plex, YouTube) for the show. */
+    fun findMoreOf(name: String) {
+        leavePlayer()
+        navigate(Screen.Search)
+        updateSearch(Tmdb.cleanTitle(name).first)
+    }
+
+    fun goToChannelGuide() {
+        leavePlayer()
+        openGuide()
+    }
+
+    // ---------------- Family picks ----------------
+
+    /** "👪 Recommend to the family": shared with every profile and linked device. */
+    var familyPicks by mutableStateOf(Watchlist.decodePicks(store.familyPicksJson)); private set
+
+    /** Picks for this profile (not its own). */
+    val familyPicksForMe: List<FamilyPick>
+        get() = familyPicks.filter { !activeProfile.kids && !it.from.equals(activeProfile.name, ignoreCase = true) }
+
+    fun recommendToFamily(item: WatchItem) {
+        if (activeProfile.kids) return showNotice("Only grown-ups' profiles can recommend things")
+        familyPicks = Watchlist.addPick(familyPicks, FamilyPick(item, activeProfile.name, System.currentTimeMillis()), System.currentTimeMillis())
+        store.familyPicksJson = Watchlist.encodePicks(familyPicks)
+        markChanged(com.titanejstudios.tuner.integrations.LinkSync.PICKS)
+        link.tellOthers()
+        showNotice("👪 ${item.name} is on everyone's Home under Family picks")
+    }
+
+    fun removeFamilyPick(id: String) {
+        familyPicks = familyPicks.filter { it.item.id != id }
+        store.familyPicksJson = Watchlist.encodePicks(familyPicks)
+        markChanged(com.titanejstudios.tuner.integrations.LinkSync.PICKS)
+        link.tellOthers()
+    }
+
+    /** What's playing, as something to recommend or rate (IPTV films and series). */
+    val playingWatchItem: WatchItem?
+        get() = playingSeries?.let { WatchItem.of(it, System.currentTimeMillis()) } ?: playingFilm?.let { WatchItem.of(it, System.currentTimeMillis()) }
+
+    // ---------------- 👍 / 👎 on films, series and what's playing ----------------
+
+    /** 1 = 👍, -1 = 👎, 0 = not rated. */
+    fun thumbOf(title: String): Int {
+        val k = Taste.key(FilmName.parse(title).first)
+        return when (k) {
+            in taste.liked -> 1
+            in taste.disliked -> -1
+            else -> 0
+        }
+    }
+
+    fun thumb(title: String, genre: String?, like: Boolean) = rate(FilmName.parse(title).first, genre, like)
+
+    /** The title and genre of what's playing (the programme on live TV). */
+    val playingRateable: Pair<String, String?>?
+        get() = when (val m = mode) {
+            is PlayMode.Vod -> m.title to (playingFilm?.category ?: playingSeries?.category)
+            is PlayMode.CatchupPlay -> m.programme.title to Genres.of(m.programme.category, m.programme.title, m.channel.group)
+            is PlayMode.Live -> nowNext(m.channel.id, now).first?.let { p -> p.title to Genres.of(p.category, p.title, m.channel.group) }
+            else -> null
+        }
+
+    // ---------------- Coming soon: new episodes of your series ----------------
+
+    var comingSoon by mutableStateOf(decodeComing(store.comingSoonJson)); private set
+
+    private fun decodeComing(json: String?): List<ComingEpisode> = runCatching {
+        val a = org.json.JSONArray(json ?: "[]")
+        (0 until a.length()).mapNotNull { i ->
+            val o = a.getJSONObject(i)
+            val w = Watchlist.decode(org.json.JSONArray().put(o.getJSONObject("w")).toString()).firstOrNull() ?: return@mapNotNull null
+            ComingEpisode(w, o.optString("date"), o.optInt("s"), o.optInt("e"), o.optString("name").takeIf { it.isNotBlank() })
+        }
+    }.getOrDefault(emptyList())
+
+    private fun encodeComing(list: List<ComingEpisode>): String {
+        val a = org.json.JSONArray()
+        for (c in list) {
+            val w = org.json.JSONArray(Watchlist.encode(listOf(c.item))).getJSONObject(0)
+            a.put(org.json.JSONObject().put("w", w).put("date", c.date).put("s", c.season).put("e", c.episode).put("name", c.name ?: ""))
+        }
+        return a.toString()
+    }
+
+    /** Upcoming episodes still to come (or today). */
+    val comingSoonNow: List<ComingEpisode>
+        get() {
+            val today = SimpleDateFormat("yyyy-MM-dd", Locale.UK).format(Date())
+            return comingSoon.filter { it.date >= today }
+        }
+
+    /** Asks TMDB, twice a day, when the series you follow and save have their next episode. */
+    fun refreshComingSoon(force: Boolean = false) {
+        val key = tmdbKey ?: return
+        if (activeProfile.kids) return
+        val now = System.currentTimeMillis()
+        if (!force && now - store.comingSoonAt < 12 * 3600_000L) {
+            tellComingToday()
+            return
+        }
+        store.comingSoonAt = now
+        val shows = (followedSeries.map { it.series } + watchlist.filter { it.isSeries })
+            .distinctBy { FilmName.parse(it.name).first.lowercase() }.take(40)
+        if (shows.isEmpty()) return
+        viewModelScope.launch {
+            val found = withContext(Dispatchers.IO) {
+                shows.mapNotNull { w ->
+                    runCatching { Tmdb.upcoming(key, w.name) }.getOrNull()?.let { (_, up) ->
+                        ComingEpisode(w, up.date, up.season, up.episode, up.name)
+                    }.also { Thread.sleep(150) }
+                }
+            }.sortedBy { it.date }
+            comingSoon = found
+            store.comingSoonJson = encodeComing(found)
+            tellComingToday()
+        }
+    }
+
+    /** "New today: …" once a day. */
+    private fun tellComingToday() {
+        val today = SimpleDateFormat("yyyy-MM-dd", Locale.UK).format(Date())
+        if (store.comingSoonTold == today) return
+        val due = comingSoon.filter { it.date == today }
+        if (due.isEmpty()) return
+        store.comingSoonTold = today
+        showNotice("📅 New today: " + due.joinToString(", ") { "${FilmName.parse(it.item.name).first} S${it.season} E${it.episode}" })
+    }
+
+    // ---------------- One library: Plex and your provider together ----------------
+
+    class LibraryTitle(
+        val key: String,
+        val title: String,
+        val year: String?,
+        val poster: String?,
+        val rating: String?,
+        val film: VodItem?,
+        val series: SeriesItem?,
+        val plex: Plex.Entry?,
+    ) {
+        val where: String
+            get() = when {
+                plex != null && (film != null || series != null) -> "On Plex and your provider"
+                plex != null -> "Plex only"
+                else -> "Your provider only"
+            }
+    }
+
+    var library by mutableStateOf<List<LibraryTitle>?>(null); private set
+    var libraryShows by mutableStateOf(false); private set
+    var libraryStatus by mutableStateOf<String?>(null); private set
+    private var libraryJob: Job? = null
+
+    fun openLibrary(shows: Boolean) {
+        if (activeProfile.kids) return showNotice("Ask a grown-up – kids have their own films")
+        libraryShows = shows
+        library = null
+        navigate(Screen.Library)
+    }
+
+    fun switchLibrary() {
+        libraryShows = !libraryShows
+        library = null
+        loadLibrary()
+    }
+
+    fun loadLibrary(force: Boolean = false) {
+        if (library != null && !force) return
+        val shows = libraryShows
+        if (hasVod) if (shows) loadSeries() else loadMovies()
+        libraryJob?.cancel()
+        libraryStatus = "Putting Plex and your provider's ${if (shows) "series" else "films"} together…"
+        libraryJob = viewModelScope.launch {
+            withTimeoutOrNull(40_000) { while (hasVod && (if (shows) series else movies) == null) delay(300) }
+            val plexList = if (plexLinked) plexFeature.allOf(shows) else emptyList()
+            val films = if (shows) emptyList() else movies.orEmpty()
+            val sers = if (shows) series.orEmpty() else emptyList()
+            val merged = withContext(Dispatchers.Default) {
+                fun norm(n: String): Pair<String, String?> = FilmName.parse(n).let { (t, y) -> t.lowercase().filter { it.isLetterOrDigit() } to y }
+                val plexBy = plexList.groupBy { norm(it.title).first }
+                val used = HashSet<String>()
+                val out = ArrayList<LibraryTitle>()
+                val seen = HashSet<String>()
+                val provider: List<Triple<String, VodItem?, SeriesItem?>> =
+                    films.map { Triple(it.name, it, null) } + sers.map { Triple(it.name, null, it) }
+                for ((name, f, s) in provider) {
+                    val (t, y) = norm(name)
+                    if (t.isEmpty() || !seen.add(t + "|" + (y ?: ""))) continue
+                    val p = plexBy[t]?.firstOrNull { it.ratingKey !in used && (y == null || it.year == null || it.year == y) }
+                    if (p != null) used += p.ratingKey
+                    out += LibraryTitle(
+                        "i:" + (f?.id ?: s?.id), FilmName.parse(name).first, y ?: p?.year, p?.image ?: f?.poster ?: s?.cover,
+                        p?.rating ?: (f?.rating ?: s?.rating)?.let { "★ $it" }, f, s, p,
+                    )
+                }
+                for (p in plexList) {
+                    if (p.ratingKey in used) continue
+                    val (t, _) = norm(p.title)
+                    if (!seen.add(t + "|" + (p.year ?: ""))) continue
+                    out += LibraryTitle("p:" + p.server.machineId + p.ratingKey, p.title, p.year, p.image, p.rating, null, null, p)
+                }
+                out.sortedBy { it.title.lowercase() }
+            }
+            library = merged
+            libraryStatus = if (merged.isEmpty()) "Nothing found – is Plex or your provider set up?" else null
+        }
+    }
+
+    fun openLibraryTitle(t: LibraryTitle) {
+        when {
+            t.film != null -> playMovie(t.film, fromStart = (resume[t.film.id]?.positionMs ?: 0L) == 0L)
+            t.series != null && (t.plex == null || !preferPlexFilms) -> openSeriesDetail(t.series)
+            t.plex != null && t.plex.type == "show" -> openPlexShow(t.plex)
+            t.plex != null -> playPlexEntry(t.plex)
+        }
+    }
+
+    // ---------------- Kids: ask a grown-up for more time ----------------
+
+    class TimeRequest(val from: String, val profileId: String, val kidName: String)
+
+    /** A child somewhere in the house is asking for more TV (shown on grown-ups' devices). */
+    var timeRequest by mutableStateOf<TimeRequest?>(null); private set
+
+    fun askForMoreTime() {
+        if (!link.linked) return showNotice("Link a phone first (Settings › Linked devices) – or ask a grown-up for the PIN")
+        val kid = activeProfile
+        link.search()
+        showNotice("📱 Asking a grown-up…")
+        viewModelScope.launch {
+            delay(3_000)
+            val peers = link.peers
+            if (peers.isEmpty()) return@launch showNotice("Couldn't find a grown-up's phone – is Flicker open on it?")
+            var asked = 0
+            peers.forEach { p ->
+                link.send(p, JSONObject().put("kind", "askmore").put("profile", kid.id).put("name", kid.name)) { problem ->
+                    if (problem == null) asked++
+                }
+            }
+            delay(2_000)
+            showNotice(if (asked > 0) "📱 Asked! You'll see when a grown-up answers" else "Couldn't reach a grown-up's phone")
+        }
+    }
+
+    private fun receiveTimeRequest(from: String, j: JSONObject) {
+        if (activeProfile.kids) return
+        timeRequest = TimeRequest(from.ifBlank { "The TV" }, j.optString("profile"), j.optString("name").ifBlank { "Your child" })
+    }
+
+    fun answerTimeRequest(minutes: Int) {
+        val r = timeRequest ?: return
+        timeRequest = null
+        val kid = profiles.firstOrNull { it.id == r.profileId } ?: profiles.firstOrNull { it.name.equals(r.kidName, true) }
+        if (minutes > 0 && kid != null) {
+            sendBonusTime(kid, minutes)
+            return
+        }
+        // "Not now": tell the TVs.
+        link.tvs.forEach { tv -> link.send(tv, JSONObject().put("kind", "askno").put("profile", r.profileId)) { } }
     }
 
     /** The rest of a Plex show to play after the current episode. */
@@ -5494,6 +5843,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         // Each film scored once (rating, nudged by your taste), then a random one of the best 60.
         val pool = list.asSequence()
             .filter { it.id !in seen && it.id !in surpriseShown }
+            .filter { thumbOf(it.name) >= 0 }
             .filter { !com.titanejstudios.tuner.ui.isAdultTitle(it.name, it.category) }
             .map { it to ratingValueFor(it.name, false, it.rating) }
             .filter { it.second >= 6.8 }
@@ -5698,6 +6048,12 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     /** "Play now" on the Up next card. */
     fun playNextEpisodeNow() {
         val m = mode as? PlayMode.Vod ?: return
+        // Skipped from well before the end: that's probably where the credits start.
+        val left = playback.durationMs - playback.positionMs
+        if (m.seriesId != null && creditsFor() == null && playback.durationMs > 0 && left in 25_000L..600_000L) {
+            introEnds = introEnds + ("credits:${m.seriesId}" to left.toString())
+            store.introEnds = introEnds
+        }
         // This one's as good as finished – don't keep a resume point for it.
         resume = resume - m.contentId
         store.resume = resume
@@ -5713,6 +6069,70 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     fun introEndFor(): Long? {
         val sid = (mode as? PlayMode.Vod)?.seriesId ?: return null
         return introEnds[sid]?.toLongOrNull()
+    }
+
+    // ---------------- Skip credits ----------------
+    // Kept with the intros (as "credits:<series>" = how long before the end they start), so they sync too.
+
+    /** How long before the end this series' credits start, if known. */
+    fun creditsFor(): Long? {
+        val sid = (mode as? PlayMode.Vod)?.seriesId ?: return null
+        return introEnds["credits:$sid"]?.toLongOrNull()
+    }
+
+    fun setCreditsHere(posMs: Long, durMs: Long) {
+        val sid = (mode as? PlayMode.Vod)?.seriesId ?: return
+        val fromEnd = durMs - posMs
+        if (durMs <= 0 || fromEnd !in 15_000L..900_000L) return showNotice("That's not near enough the end")
+        introEnds = introEnds + ("credits:$sid" to fromEnd.toString())
+        store.introEnds = introEnds
+        showNotice("Got it – Up next will start when the credits do")
+    }
+
+    fun forgetCredits() {
+        val sid = (mode as? PlayMode.Vod)?.seriesId ?: return
+        introEnds = introEnds - "credits:$sid"
+        store.introEnds = introEnds
+        showNotice("Credits forgotten")
+    }
+
+    // ---------------- Previously on… ----------------
+
+
+    fun toggleRecaps() {
+        recapsOn = !recapsOn
+        store.recaps = recapsOn
+    }
+
+    fun dismissRecap() {
+        previously = null
+    }
+
+    private fun maybeRecap(m: PlayMode.Vod, startMs: Long) {
+        previously = null
+        val match = Regex("S(\\d+) ?E(\\d+)").find(m.subtitle ?: "") ?: return
+        val season = match.groupValues[1].toInt()
+        val ep = match.groupValues[2].toInt()
+        val now = System.currentTimeMillis()
+        val last = lastEpisodeStart.put(m.title, now)
+        val key = tmdbKey
+        if (!recapsOn || key == null || (season <= 1 && ep <= 1) || startMs > 60_000L) return
+        if (last != null && now - last < 4 * 3600_000L) return
+        viewModelScope.launch {
+            val recap = withContext(Dispatchers.IO) {
+                runCatching {
+                    val info = Tmdb.lookup(key, m.title, isSeries = true) ?: return@runCatching null
+                    val (ps, pe) = if (ep > 1) season to ep - 1 else (season - 1) to Tmdb.seasonLength(key, info.id, season - 1)
+                    if (pe < 1 || ps < 1) return@runCatching null
+                    val (name, plot) = Tmdb.episode(key, info.id, ps, pe) ?: return@runCatching null
+                    plot?.let { "Previously on ${m.title} – S$ps E$pe ${name}".trim() to it }
+                }.getOrNull()
+            } ?: return@launch
+            if (mode !== m) return@launch
+            previously = recap
+            delay(15_000)
+            if (previously === recap) previously = null
+        }
     }
 
     /** "The intro ends here" from the player's menu. */
@@ -5901,6 +6321,14 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         }
         if (j.optString("kind") == "bonus") {
             receiveBonus(from, j)
+            return true
+        }
+        if (j.optString("kind") == "askmore") {
+            receiveTimeRequest(from, j)
+            return true
+        }
+        if (j.optString("kind") == "askno") {
+            if (activeProfile.id == j.optString("profile")) showNotice("A grown-up said not now – sorry!")
             return true
         }
         if (allChannels.isEmpty() && j.optString("kind") != "vod" && j.optString("kind") != "youtube") return false
@@ -6613,6 +7041,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         if (TvSync.WATCHLIST in changed) watchlist = Watchlist.decode(store.watchlistJson)
         if (TvSync.FOLLOWED in changed) followedSeries = Watchlist.decodeFollowed(store.followedSeriesJson)
         if (TvSync.RESUME in changed) resume = store.resume
+        if (com.titanejstudios.tuner.integrations.LinkSync.PICKS in changed) familyPicks = Watchlist.decodePicks(store.familyPicksJson)
         AppLog.info("Synced from another TV: " + changed.joinToString())
     }
 

@@ -123,6 +123,29 @@ class Config {
     /** When profiles were last changed on this PC (0 = never: the TV's are used). */
     var profilesAt = 0L
 
+    /** Newer settings, kept together. */
+    private var more = JSONObject()
+    private fun moreStr(k: String, d: String) = more.optString(k, d)
+    var familyPicksJson: String get() = moreStr("picks", "[]"); set(v) { more.put("picks", v) }
+    var familyPicksAt: Long get() = more.optLong("picksAt"); set(v) { more.put("picksAt", v) }
+    var comingSoonJson: String get() = moreStr("coming", "[]"); set(v) { more.put("coming", v) }
+    var comingSoonAt: Long get() = more.optLong("comingAt"); set(v) { more.put("comingAt", v) }
+    var comingTold: String get() = moreStr("comingTold", ""); set(v) { more.put("comingTold", v) }
+    var recaps: Boolean get() = more.optBoolean("recaps", true); set(v) { more.put("recaps", v) }
+    var miniOnTop: Boolean get() = more.optBoolean("miniOnTop", true); set(v) { more.put("miniOnTop", v) }
+    /** 👍 (1) and 👎 (-1), by title in lower case. */
+    var thumbs: Map<String, Int>
+        get() = more.optJSONObject("thumbs")?.let { o -> o.keys().asSequence().associateWith { o.optInt(it) } } ?: emptyMap()
+        set(v) { more.put("thumbs", JSONObject(v)) }
+    /** Each profile's sound language, subtitle language and audio description: "en|en|1". */
+    fun languagesOf(profile: String): Triple<String?, String?, Boolean> {
+        val p = moreStr("lang_$profile", "").split('|')
+        return Triple(p.getOrNull(0)?.ifBlank { null }, p.getOrNull(1)?.ifBlank { null }, p.getOrNull(2) == "1")
+    }
+    fun saveLanguages(profile: String, audio: String?, subs: String?, describe: Boolean) {
+        more.put("lang_$profile", "${audio ?: ""}|${subs ?: ""}|${if (describe) 1 else 0}")
+    }
+
     init {
         load()
     }
@@ -203,6 +226,7 @@ class Config {
             intros = o.optJSONObject("intros")?.let { d -> d.keys().asSequence().associateWith { d.optLong(it) } } ?: emptyMap()
             profilesRaw = o.optString("profilesRaw", "[]")
             profilesAt = o.optLong("profilesAt")
+            more = o.optJSONObject("more") ?: JSONObject()
             recordings = o.optJSONArray("recordings")?.let { a -> (0 until a.length()).map { PcRecording.fromJson(a.getJSONObject(it)) } } ?: emptyList()
             lastUpdateCheck = o.optLong("updateCheck")
             reminders = o.optJSONArray("reminders")?.let { a ->
@@ -266,7 +290,7 @@ class Config {
             .put("window", JSONObject().put("x", windowX).put("y", windowY).put("w", windowW).put("h", windowH).put("max", windowMaximised))
             .put("keepRunning", keepRunning).put("startWithWindows", startWithWindows).put("numbers", showNumbers).put("deinterlace", deinterlace)
             .put("normalise", normalise).put("theme", theme).put("textScale", textScale.toDouble()).put("notify", notifications)
-            .put("intros", JSONObject(intros)).put("profilesRaw", profilesRaw).put("profilesAt", profilesAt)
+            .put("intros", JSONObject(intros)).put("profilesRaw", profilesRaw).put("profilesAt", profilesAt).put("more", more)
             .put("recordings", JSONArray().apply { recordings.forEach { put(it.toJson()) } })
             .put("updateCheck", lastUpdateCheck)
             .put("reminders", JSONArray().apply { reminders.forEach { put(JSONObject().put("c", it.channelId).put("cn", it.channelName).put("t", it.title).put("s", it.start)) } })

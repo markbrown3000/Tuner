@@ -221,8 +221,17 @@ class Plex(private val clientId: String) {
         val art: String? = null,
         /** The age rating Plex has ("PG", "gb/12A", "TV-14"…). */
         val contentRating: String? = null,
+        /** Episodes: their show's key and name (to open the show from anywhere). */
+        val showKey: String? = null,
+        val showName: String? = null,
     ) {
         val isShow: Boolean get() = type == "show"
+
+        /** An episode's show, as an entry its page can open. */
+        fun showEntry(): Entry? {
+            val key = showKey?.takeIf { type == "episode" && it.isNotBlank() } ?: return null
+            return Entry(key, showName ?: title, null, null, "show", null, 0L, 0L, false, null, null, 0, 0, 0, 0, server, library, sectionKey, null, contentRating)
+        }
 
         /** For the player (which plays Plex.Item). */
         fun toItem(showTitle: String? = null): Item = Item(
@@ -511,6 +520,8 @@ class Plex(private val clientId: String) {
                     "${s.uri}/photo/:/transcode?width=960&height=540&minSize=1&upscale=1&url=" +
                         URLEncoder.encode(it, "UTF-8") + "&X-Plex-Token=" + s.token
                 },
+                showKey = m.optString("grandparentRatingKey").takeIf { it.isNotBlank() },
+                showName = m.optString("grandparentTitle").takeIf { it.isNotBlank() },
             )
         }
         return out

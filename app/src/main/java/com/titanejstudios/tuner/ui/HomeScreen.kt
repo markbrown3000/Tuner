@@ -99,6 +99,8 @@ enum class HomeRow(val title: String) {
     Favourites("Favourites"),
     Recordings("Recordings"),
     NewEpisodes("New episodes"),
+    FamilyPicks("Family picks"),
+    ComingSoon("Coming soon"),
     MyList("My list"),
     Apps("Your apps"),
     All("All channels"),
@@ -415,6 +417,57 @@ private fun watchCard(vm: TunerViewModel, w: WatchItem, badge: String, removable
     hero = HeroInfo(w.name, (if (w.isSeries) "Series" else "Film") + "  ·  ${w.category}", w.plot, null, w.image, wide = false, label = badge.uppercase()),
 )
 
+/** Family picks: "FROM MARK". Hold OK to take it off everyone's Home. */
+private fun pickedCard(vm: TunerViewModel, p: com.titanejstudios.tuner.data.FamilyPick): HomeCard {
+    val w = p.item
+    val label = "FROM ${p.from.uppercase()}"
+    return HomeCard(
+        key = "fp" + w.id,
+        tag = label, tagBg = Color(0xFF7E57C2), tagFg = Color.White,
+        title = w.name,
+        line1 = (if (w.isSeries) "Series" else "Film") + " · picked by ${p.from}",
+        line2 = "Hold OK to remove",
+        image = w.image,
+        poster = true,
+        channel = null,
+        progress = null,
+        progressColor = TunerColors.Accent,
+        onClick = { vm.openWatchItem(w) },
+        onLongClick = { vm.removeFamilyPick(w.id) },
+        hero = HeroInfo(w.name, "👪 ${p.from} thinks everyone should watch this", w.plot, null, w.image, wide = false, label = label),
+    )
+}
+
+/** Coming soon: the next episode of a series you follow, and when. */
+private fun comingCard(vm: TunerViewModel, c: com.titanejstudios.tuner.data.ComingEpisode): HomeCard {
+    val day = runCatching {
+        val d = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.UK).parse(c.date)!!
+        val today = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.UK).format(java.util.Date())
+        val tomorrow = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.UK).format(java.util.Date(System.currentTimeMillis() + 86_400_000L))
+        when (c.date) {
+            today -> "TODAY"
+            tomorrow -> "TOMORROW"
+            else -> java.text.SimpleDateFormat("EEE d MMM", java.util.Locale.UK).format(d).uppercase()
+        }
+    }.getOrDefault(c.date)
+    val ep = "S${c.season} E${c.episode}" + (c.name?.let { "  $it" } ?: "")
+    return HomeCard(
+        key = "cs" + c.item.id,
+        tag = day, tagBg = if (day == "TODAY") Color(0xFF2E7D32) else TunerColors.Accent, tagFg = Color.White,
+        title = c.item.name,
+        line1 = ep,
+        line2 = "New episode",
+        image = c.item.image,
+        poster = true,
+        channel = null,
+        progress = null,
+        progressColor = TunerColors.Accent,
+        onClick = { vm.openWatchItem(c.item) },
+        onLongClick = null,
+        hero = HeroInfo(c.item.name, "📅 $ep", c.item.plot, null, c.item.image, wide = false, label = "NEW EPISODE · $day"),
+    )
+}
+
 private fun pickCard(vm: TunerViewModel, pick: HomeFeed.Pick, channels: List<Channel>, now: Long, onMenu: (() -> Unit)? = null): HomeCard {
     val p = pick.programme
     val upcoming = p.start > now
@@ -475,6 +528,7 @@ fun HomeScreen(vm: TunerViewModel) {
         vm.yourShows, vm.plexFeature.similar, vm.becauseFilms, vm.trending,
         vm.resume, vm.recordings, vm.followedSeries, vm.watchlist, vm.reminders,
         vm.missed, vm.unfinished, vm.youtube.feed, vm.youtube.history, vm.youtube.recommended,
+        vm.familyPicks, vm.comingSoon,
     ) {
         buildMap {
             put(HomeRow.Continue, buildList {
@@ -502,6 +556,8 @@ fun HomeScreen(vm: TunerViewModel) {
             if (vm.hasVod) {
                 put(HomeRow.NewEpisodes, vm.newEpisodeSeries.map { watchCard(vm, it.series, "${it.newEpisodes} new", removable = false) })
                 put(HomeRow.MyList, vm.watchlist.take(30).map { watchCard(vm, it, if (it.isSeries) "Series" else "Film", removable = true) })
+                put(HomeRow.FamilyPicks, vm.familyPicksForMe.map { pickedCard(vm, it) })
+                put(HomeRow.ComingSoon, vm.comingSoonNow.take(20).map { comingCard(vm, it) })
             }
             put(HomeRow.All, allChannels.take(40).map { channelCard(vm, it, allChannels, now, followed) })
         }

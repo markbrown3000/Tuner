@@ -20,6 +20,15 @@ A TiviMate-style live TV app for Google TV / Android TV. Built with Kotlin, Jetp
 **Films and series**
 - **Film info from TMDB** (your key is built in via `keys.properties`): hold OK on a film or series poster (or the ℹ Info button on a series, or the player menu) for the proper poster, plot, cast, rating, running time and a ▶ Trailer button. Needs a free key from themoviedb.org (Settings › Films & series).
 - **Subtitles from OpenSubtitles**: player menu › Find subtitles online, then pick one. Uses your subtitle language from Settings (English if none). Needs a free key from opensubtitles.com; the free plan allows a few downloads a day.
+- **Previously on…**: starting an episode after a break shows a few lines about the one before (from TMDB; Settings › Films & series to turn off).
+- **Skip credits**: player menu › The credits start here, once per series (or skip to the next episode from the menu and Flicker learns it). Up next then starts when the credits do. Synced with your other devices like the intros.
+- **Each profile's own languages**: sound and subtitle language are now per profile, plus **Audio description** (picks the described soundtrack when there is one).
+- **Coming soon** on Home: the next episode of the series you follow or saved, with the date (from TMDB), and a "New today" message on the day.
+- **Plex + provider**: Films › Plex + provider › shows everything you have once, saying whether it's on Plex, your provider or both. Plays the best copy.
+- **👍 / 👎 everywhere**: in the player menu and on film info. 👎 films are left out of Surprise me and recommendations lean towards 👍.
+- **👪 Family picks**: player menu or film info › Recommend to the family puts it in a Family picks row on everyone else's Home (and the PC's). Hold OK on it to remove.
+- **Kids can ask for more time**: when time's up, 📱 Ask a grown-up sends a request to linked phones and PCs: +15, +30, +1 hour (with the PIN) or Not now.
+- **Go to… from the player**: in the player menu, 📺 Go to series (or Go to show for Plex) opens all the episodes, 🎬 Go to film page shows the cast, trailer and the rest of the series, 🔍 More of… searches for other episodes and showings, and you can add it to My list or skip to the next episode. On phones it keeps playing in the mini player.
 - **Up next**: in the last 20 seconds of an episode, a card shows the next one. OK plays it now, BACK cancels.
 - **Skip intro**: the first time you skip an intro with ▶ near the start of an episode, Tuner learns where it ends for that series. Next time, a "Skip intro – press ▶" button appears.
 
@@ -79,6 +88,11 @@ A TiviMate-style live TV app for Google TV / Android TV. Built with Kotlin, Jetp
   - **Films**: 🎲 Surprise me, and a film's page shows the rest of its series.
   - **Profiles with pictures**: colours and emoji like the TV, and you can edit profiles from the PC (it goes back to the TV).
   - **Windows notifications**, **text size** and **colour themes** in Settings › This PC.
+  - **⋯ More while watching**: go to the series (all the episodes) or the film's page, add it to My list, next episode, download, record, or search for more of the show. It carries on in the mini player while you look around.
+  - **Also on the PC**: Previously on…, skip credits, Coming soon and Family picks on Home, 👍/👎 and Recommend to the family (film page and ⋯ More), per-profile sound/subtitles/audio description (Settings › This PC), and kids asking for more time.
+  - **Keyboard shortcuts**: press F1 or ? for the list.
+  - **Mini player on top**: 📌 in the mini player (or Settings › This PC) keeps it above other windows, or lets it go behind.
+  - **Drag and drop**: drop a video file to play it, or an .m3u file or playlist link to add it.
   - **Problem log**: Settings › Problem log shows recent errors, with 📋 Copy to send them on.
   - **Kids' limits**: the TV's PIN, daily TV time and bedtime apply on the PC too. A grown-up's PIN gives 30 more minutes, and switching from a kids' profile to a grown-up one needs the PIN.
   - **What's On**: now and coming up by kind, sport (with LIVE badges), and My teams, with your teams' fixtures from ESPN and the channel showing each one.

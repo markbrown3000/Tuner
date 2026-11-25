@@ -372,6 +372,31 @@ fun SettingsPage(app: AppState) {
                 }
                 Text("Notifications: reminders and finished recordings pop up in the corner, even with Flicker in the tray.", color = Soft, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
                 Spacer(Modifier.height(10.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Pill(if (app.config.recaps) "✓ Previously on…" else "Previously on…") {
+                        app.config.recaps = !app.config.recaps
+                        app.config.save()
+                        app.listsVersion = v + 1
+                    }
+                    Pill(if (app.miniOnTop) "✓ Mini player stays on top" else "Mini player stays on top") { app.toggleMiniOnTop() }
+                }
+                Text("Previously on…: starting an episode after a break shows what happened in the one before.", color = Soft, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
+                Spacer(Modifier.height(10.dp))
+                Text("Sound and subtitles (${app.profile?.name ?: "this profile"})", color = Color.White, fontSize = 14.sp)
+                val (audio, subs, describe) = app.config.languagesOf(app.profileId)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 4.dp)) {
+                    Pill("Sound: " + app.languageLabel(audio)) {
+                        val c = app.languageChoices
+                        app.setLanguages(c[(c.indexOf(audio) + 1) % c.size], subs, describe)
+                    }
+                    Pill("Subtitles: " + if (subs == null) "Off" else app.languageLabel(subs)) {
+                        val c = app.languageChoices
+                        app.setLanguages(audio, c[(c.indexOf(subs) + 1) % c.size], describe)
+                    }
+                    Pill(if (describe) "✓ Audio description" else "Audio description") { app.setLanguages(audio, subs, !describe) }
+                }
+                Text("Picked a moment after something starts, when it has more than one.", color = Soft, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
+                Spacer(Modifier.height(10.dp))
                 Text("Text size", color = Color.White, fontSize = 14.sp)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 4.dp)) {
                     for ((label, scale) in listOf("Normal" to 1f, "Large" to 1.15f, "Extra large" to 1.3f)) Pill(label, selected = uiScale == scale) {

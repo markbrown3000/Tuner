@@ -23,7 +23,7 @@ object Library {
             try {
                 when (s) {
                     is Source.M3u -> {
-                        val r = Http.open(s.playlistUrl.trim()).use { M3uParser.parse(it, s.id) }
+                        val r = (if (s.playlistUrl.trim().startsWith("file:")) java.io.File(java.net.URI(s.playlistUrl.trim())).inputStream() else Http.open(s.playlistUrl.trim())).use { M3uParser.parse(it, s.id) }
                         all += r.channels
                         (s.epgUrl ?: r.epgUrl)?.let { guideUrls += s.id to it }
                     }

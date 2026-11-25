@@ -35,7 +35,34 @@ object Tmdb {
         val collectionName: String? = null,
         /** The cast's TMDB ids and names (for "what else are they in?"). */
         val castIds: List<Pair<Long, String>> = emptyList(),
+        /** TMDB's own id (for episode details). */
+        val id: Long = 0,
+        /** Series: the next episode to be shown, if one's announced. */
+        val nextAir: Upcoming? = null,
     )
+
+    /** An episode that hasn't been shown yet. [date] is "2026-12-03". */
+    class Upcoming(val date: String, val season: Int, val episode: Int, val name: String?)
+
+    /** One episode's name and plot ("Previously on…"). Null if TMDB doesn't know it. Blocking. */
+    fun episode(apiKey: String, tvId: Long, season: Int, episode: Int): Pair<String, String?>? = runCatching {
+        val o = get(apiKey, "$API/tv/$tvId/season/$season/episode/$episode?language=en-GB")
+        o.optString("name") to o.optString("overview").takeIf { it.isNotBlank() }
+    }.getOrNull()
+
+    /** How many episodes a season has (to find the last one of the season before). Blocking. */
+    fun seasonLength(apiKey: String, tvId: Long, season: Int): Int = runCatching {
+        get(apiKey, "$API/tv/$tvId/season/$season?language=en-GB").optJSONArray("episodes")?.length() ?: 0
+    }.getOrDefault(0)
+
+    /** A series' next announced episode (fresh, not cached). Blocking. */
+    fun upcoming(apiKey: String, name: String): Pair<Info, Upcoming>? {
+        val info = lookup(apiKey, name, isSeries = true) ?: return null
+        val o = runCatching { get(apiKey, "$API/tv/${info.id}?language=en-GB") }.getOrNull() ?: return null
+        val n = o.optJSONObject("next_episode_to_air") ?: return null
+        val date = n.optString("air_date").takeIf { it.length == 10 } ?: return null
+        return info to Upcoming(date, n.optInt("season_number"), n.optInt("episode_number"), n.optString("name").takeIf { it.isNotBlank() })
+    }
 
     /** An actor's best-known films, newest first. */
     fun personFilms(apiKey: String, personId: Long): List<Part> {
@@ -172,6 +199,7 @@ object Tmdb {
                 (0 until minOf(8, a.length())).mapNotNull { i -> a.optJSONObject(i)?.let { c -> c.optLong("id") to c.optString("name") } }
                     .filter { it.first > 0 && it.second.isNotBlank() }
             }.orEmpty(),
+            id = id,
         )
     }
 

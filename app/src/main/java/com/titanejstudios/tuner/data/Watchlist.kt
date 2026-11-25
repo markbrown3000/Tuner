@@ -33,6 +33,12 @@ data class WatchItem(
     }
 }
 
+/** "👪 Recommend to the family": a film or series someone picked for everyone, and who. */
+data class FamilyPick(val item: WatchItem, val from: String, val at: Long)
+
+/** A series you follow and its next announced episode ([date] "2026-12-03"). */
+data class ComingEpisode(val item: WatchItem, val date: String, val season: Int, val episode: Int, val name: String?)
+
 /** A series you've watched, and how many episodes it had last time we looked. */
 data class FollowedSeries(
     val series: WatchItem,
@@ -106,6 +112,29 @@ object Watchlist {
         count > entry.episodeCount -> entry.copy(episodeCount = count, newEpisodes = entry.newEpisodes + (count - entry.episodeCount))
         else -> entry
     }
+
+    /** Family picks: someone's recommendation for everyone, newest first (30 kept, 45 days). */
+    fun encodePicks(list: List<FamilyPick>): String {
+        val arr = JSONArray()
+        list.forEach { arr.put(JSONObject().put("w", toJson(it.item)).put("from", it.from).put("at", it.at)) }
+        return arr.toString()
+    }
+
+    fun decodePicks(json: String?): List<FamilyPick> = try {
+        val arr = JSONArray(json ?: "[]")
+        (0 until arr.length()).mapNotNull { i ->
+            val o = arr.getJSONObject(i)
+            val w = o.optJSONObject("w")?.let { fromJson(it) } ?: return@mapNotNull null
+            FamilyPick(w, o.optString("from"), o.optLong("at"))
+        }
+    } catch (e: Exception) {
+        emptyList()
+    }
+
+    fun addPick(list: List<FamilyPick>, pick: FamilyPick, now: Long): List<FamilyPick> =
+        (listOf(pick) + list.filter { it.item.id != pick.item.id })
+            .filter { now - it.at < 45L * 24 * 3600_000L }
+            .take(30)
 
     private fun toJson(w: WatchItem): JSONObject = JSONObject()
         .put("id", w.id).put("series", w.isSeries).put("name", w.name).put("img", w.image)

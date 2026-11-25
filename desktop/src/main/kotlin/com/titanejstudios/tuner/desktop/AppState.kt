@@ -13,6 +13,7 @@ import com.titanejstudios.tuner.data.Source
 import com.titanejstudios.tuner.data.VodItem
 import com.titanejstudios.tuner.data.WatchItem
 import com.titanejstudios.tuner.data.Watchlist
+import com.titanejstudios.tuner.integrations.Tmdb
 import com.titanejstudios.tuner.data.XtreamClient
 import com.titanejstudios.tuner.integrations.GoogleDrive
 import com.titanejstudios.tuner.integrations.Plex
@@ -69,6 +70,10 @@ class AppState(val config: Config, val player: Player, private val scope: Corout
     var englishOnly by mutableStateOf(config.englishOnly)
     /** A series to open on the Series page (from Home's My list). */
     var openSeriesId by mutableStateOf<String?>(null)
+    /** A film page to open (from the player's "Go to film page"). */
+    var openFilmId by mutableStateOf<String?>(null)
+    /** Something to search for (from the player's "More of…"). */
+    var searchFor by mutableStateOf<String?>(null)
 
     // Lists that sync with the TV (bumped so screens redraw).
     var listsVersion by mutableStateOf(0)
@@ -222,6 +227,7 @@ class AppState(val config: Config, val player: Player, private val scope: Corout
         page = Page.Live
         player.play(c.url)
         player.setVolume(config.volume)
+        pickLanguages()
         config.lastChannel = c.id
         config.recents = (listOf(c.id) + config.recents.filter { it != c.id }).take(20)
         scope.launch(Dispatchers.IO) { config.save() }
@@ -252,6 +258,39 @@ class AppState(val config: Config, val player: Player, private val scope: Corout
         val local = config.downloads.firstOrNull { it.id == w.id && it.state == "done" && java.io.File(it.file).exists() }
         player.play(local?.let { java.io.File(it.file).toURI().toString() } ?: w.url, start)
         player.setVolume(config.volume)
+        pickLanguages()
+        maybeRecap(w, start)
+    }
+
+    // ---------------- "Go to…" from the player ----------------
+
+    /** Keeps what's playing going in the mini player, and opens [to]. */
+    private fun browseWhileWatching(to: Page) {
+        if (watching != null && !mini) toggleMini()
+        page = to
+    }
+
+    fun playingSeries(): SeriesItem? = watching?.seriesId?.let { id -> series?.firstOrNull { it.id == id } }
+
+    fun playingFilm(): VodItem? = watching?.takeIf { it.seriesId == null }?.let { w -> movies?.firstOrNull { it.id == w.id } }
+
+    fun goToSeries() {
+        val s = playingSeries() ?: return
+        openSeriesId = s.id
+        browseWhileWatching(Page.Series)
+    }
+
+    fun goToFilm() {
+        val m = playingFilm() ?: return
+        openFilmId = m.id
+        browseWhileWatching(Page.Films)
+    }
+
+    /** Search everything for the show (other episodes, showings, films, Plex, YouTube). */
+    fun findMoreOf(name: String) {
+        searchFor = com.titanejstudios.tuner.integrations.Tmdb.cleanTitle(name).first
+        if (watching != null && !mini) toggleMini()
+        page = Page.Search
     }
 
     fun playFilm(m: VodItem, fromStart: Boolean = false) =
@@ -436,6 +475,261 @@ class AppState(val config: Config, val player: Player, private val scope: Corout
 
     fun extendWithPin() {
         askPin("A grown-up's PIN gives 30 more minutes") { timesUp = null }
+    }
+
+    // ---------------- Kids: ask a grown-up for more time ----------------
+
+    class TimeRequest(val from: String, val profileId: String, val kidName: String)
+    var timeRequest by mutableStateOf<TimeRequest?>(null)
+    /** The keyboard shortcuts page (F1 or ?). */
+    var showKeys by mutableStateOf(false)
+    /** The mini player stays on top of other windows. */
+    var miniOnTop by mutableStateOf(config.miniOnTop)
+
+    fun toggleMiniOnTop() {
+        miniOnTop = !miniOnTop
+        config.miniOnTop = miniOnTop
+        changed(sync = false)
+        say(if (miniOnTop) "📌 The mini player stays on top" else "The mini player can go behind other windows")
+    }
+
+    fun askForMoreTime() {
+        val kid = profile ?: return
+        if (link.key == null) return say("Ask a grown-up for the PIN")
+        say("📱 Asking a grown-up…")
+        scope.launch {
+            val found = withContext(Dispatchers.IO) { runCatching { link.findPeers() }.getOrDefault(emptyList()) }
+            val what = JSONObject().put("kind", "askmore").put("profile", kid.id).put("name", kid.name)
+            val asked = withContext(Dispatchers.IO) { found.count { link.send(it, what, sync.deviceLabel()) } }
+            say(if (asked > 0) "📱 Asked! You'll see when a grown-up answers" else "Couldn't find a grown-up's phone – is Flicker open on it?")
+        }
+    }
+
+    fun answerTimeRequest(minutes: Int) {
+        val r = timeRequest ?: return
+        timeRequest = null
+        val send = {
+            scope.launch {
+                val found = withContext(Dispatchers.IO) { runCatching { link.findPeers() }.getOrDefault(emptyList()) }.filter { !it.phone }
+                val what = if (minutes > 0) JSONObject().put("kind", "bonus").put("profile", r.profileId).put("minutes", minutes)
+                else JSONObject().put("kind", "askno").put("profile", r.profileId)
+                val told = withContext(Dispatchers.IO) { found.count { link.send(it, what, sync.deviceLabel()) } }
+                if (minutes > 0) say(if (told > 0) "+$minutes minutes for ${r.kidName} ✓" else "Couldn't reach the TV")
+            }
+        }
+        if (minutes > 0) askPin("The PIN to give ${r.kidName} $minutes more minutes") { send() } else send()
+    }
+
+    /** From a linked device: extra time, or "not now". */
+    private fun receiveKids(from: String, j: JSONObject) {
+        val p = profile
+        when (j.optString("kind")) {
+            "askmore" -> if (p == null || !p.kids) timeRequest = TimeRequest(from.ifBlank { "The TV" }, j.optString("profile"), j.optString("name").ifBlank { "Your child" })
+            "bonus" -> if (p != null && p.id == j.optString("profile")) {
+                grownUpUntil = System.currentTimeMillis() + j.optInt("minutes").coerceIn(0, 240) * 60_000L
+                timesUp = null
+                say("🎁 ${from.ifBlank { "A grown-up" }} gave ${p.name} ${j.optInt("minutes")} more minutes")
+            }
+            "askno" -> if (p != null && p.id == j.optString("profile")) say("A grown-up said not now – sorry!")
+        }
+    }
+
+    // ---------------- Sound and subtitle languages (each profile) ----------------
+
+    private val languageNames = mapOf(
+        "en" to listOf("english", "eng"), "fr" to listOf("french", "français", "fre", "fra"), "de" to listOf("german", "deutsch", "ger", "deu"),
+        "es" to listOf("spanish", "español", "spa"), "it" to listOf("italian", "ita"), "pt" to listOf("portuguese", "por"),
+        "pl" to listOf("polish", "pol"), "nl" to listOf("dutch", "nld", "dut"), "ar" to listOf("arabic", "ara"), "tr" to listOf("turkish", "tur"),
+    )
+    val languageChoices = listOf(null) + languageNames.keys
+    fun languageLabel(code: String?) = code?.let { languageNames[it]?.first()?.replaceFirstChar { c -> c.uppercase() } } ?: "Stream's default"
+
+    /** A couple of seconds after something starts: its sound and subtitles in this profile's languages. */
+    private fun pickLanguages() {
+        val (audio, subs, describe) = config.languagesOf(profileId)
+        if (audio == null && subs == null && !describe) return
+        scope.launch {
+            delay(2_500)
+            fun matches(name: String, code: String) = languageNames[code].orEmpty().any { name.lowercase().contains(it) } || name.lowercase().contains("[$code]")
+            val tracks = player.audioTracks().filter { it.first >= 0 }
+            if (tracks.size > 1) {
+                val inLang = if (audio != null) tracks.filter { matches(it.second, audio) }.ifEmpty { tracks } else tracks
+                val ad = inLang.firstOrNull { t -> val n = t.second.lowercase(); "descri" in n || Regex("\\bad\\b").containsMatchIn(n) }
+                val pick = if (describe) ad ?: inLang.first() else inLang.firstOrNull { it != ad } ?: inLang.first()
+                player.setAudioTrack(pick.first)
+            }
+            if (subs != null) player.subtitleTracks().firstOrNull { it.first >= 0 && matches(it.second, subs) }?.let { player.setSubtitleTrack(it.first) }
+        }
+    }
+
+    fun setLanguages(audio: String?, subs: String?, describe: Boolean) {
+        config.saveLanguages(profileId, audio, subs, describe)
+        changed(sync = false)
+    }
+
+    // ---------------- Previously on…, skip credits ----------------
+
+    var previously by mutableStateOf<Pair<String, String>?>(null)
+    private val lastEpisodeStart = HashMap<String, Long>()
+
+    private fun maybeRecap(w: Watching, startMs: Long) {
+        previously = null
+        val m = Regex("S(\\d+) ?E(\\d+)").find(w.subtitle ?: "") ?: return
+        val season = m.groupValues[1].toInt()
+        val ep = m.groupValues[2].toInt()
+        val now = System.currentTimeMillis()
+        val last = lastEpisodeStart.put(w.title, now)
+        val key = Keys.TMDB_KEY
+        if (!config.recaps || key.isBlank() || (season <= 1 && ep <= 1) || startMs > 60_000L) return
+        if (last != null && now - last < 4 * 3600_000L) return
+        scope.launch {
+            val recap = withContext(Dispatchers.IO) {
+                runCatching {
+                    val info = Tmdb.lookup(key, w.title, isSeries = true) ?: return@runCatching null
+                    val (ps, pe) = if (ep > 1) season to ep - 1 else (season - 1) to Tmdb.seasonLength(key, info.id, season - 1)
+                    if (ps < 1 || pe < 1) return@runCatching null
+                    val (name, plot) = Tmdb.episode(key, info.id, ps, pe) ?: return@runCatching null
+                    plot?.let { "Previously on ${w.title} – S$ps E$pe $name".trim() to it }
+                }.getOrNull()
+            } ?: return@launch
+            if (watching !== w) return@launch
+            previously = recap
+            delay(15_000)
+            if (previously === recap) previously = null
+        }
+    }
+
+    /** How long before the end this series' credits start (learnt on the TV or here). */
+    fun creditsFor(seriesId: String?): Long? = seriesId?.let { config.intros["credits:$it"] }
+
+    fun setCreditsHere() {
+        val w = watching ?: return
+        val sid = w.seriesId ?: return
+        val fromEnd = player.durationMs - player.positionMs
+        if (player.durationMs <= 0 || fromEnd !in 15_000L..900_000L) return say("That's not near enough the end")
+        config.intros = config.intros + ("credits:$sid" to fromEnd)
+        changed(sync = false)
+        say("Got it – Up next will start when the credits do")
+    }
+
+    // ---------------- 👍 / 👎 ----------------
+
+    private fun thumbKey(title: String) = com.titanejstudios.tuner.data.FilmName.parse(title).first.lowercase()
+    fun thumbOf(title: String): Int = config.thumbs[thumbKey(title)] ?: 0
+
+    fun thumb(title: String, like: Boolean) {
+        val k = thumbKey(title)
+        val v = if (like) 1 else -1
+        config.thumbs = if (config.thumbs[k] == v) config.thumbs - k else config.thumbs + (k to v)
+        changed(sync = false)
+        say(if (config.thumbs[k] == null) "Rating removed" else if (like) "👍 More like \"$title\"" else "👎 Fewer like \"$title\"")
+    }
+
+    // ---------------- Family picks ----------------
+
+    val familyPicks: List<com.titanejstudios.tuner.data.FamilyPick> get() = Watchlist.decodePicks(config.familyPicksJson)
+    val familyPicksForMe: List<com.titanejstudios.tuner.data.FamilyPick>
+        get() = if (kids) emptyList() else familyPicks.filter { !it.from.equals(profile?.name ?: "", ignoreCase = true) }
+
+    fun recommendToFamily(item: WatchItem) {
+        if (kids) return say("Only grown-ups' profiles can recommend things")
+        val now = System.currentTimeMillis()
+        val from = profile?.name ?: "Someone"
+        config.familyPicksJson = Watchlist.encodePicks(Watchlist.addPick(familyPicks, com.titanejstudios.tuner.data.FamilyPick(item, from, now), now))
+        config.familyPicksAt = now
+        changed()
+        say("👪 ${item.name} is on everyone's Home under Family picks")
+    }
+
+    fun removeFamilyPick(id: String) {
+        config.familyPicksJson = Watchlist.encodePicks(familyPicks.filter { it.item.id != id })
+        config.familyPicksAt = System.currentTimeMillis()
+        changed()
+    }
+
+    /** What's playing, as something to recommend (films and series from your provider). */
+    fun playingWatchItem(): WatchItem? =
+        playingSeries()?.let { WatchItem.of(it, System.currentTimeMillis()) } ?: playingFilm()?.let { WatchItem.of(it, System.currentTimeMillis()) }
+
+    // ---------------- Coming soon ----------------
+
+    val comingSoon: List<com.titanejstudios.tuner.data.ComingEpisode>
+        get() = runCatching {
+            val today = today()
+            val a = org.json.JSONArray(config.comingSoonJson)
+            (0 until a.length()).mapNotNull { i ->
+                val o = a.getJSONObject(i)
+                val w = Watchlist.decode(org.json.JSONArray().put(o.getJSONObject("w")).toString()).firstOrNull() ?: return@mapNotNull null
+                com.titanejstudios.tuner.data.ComingEpisode(w, o.optString("date"), o.optInt("s"), o.optInt("e"), o.optString("name").takeIf { it.isNotBlank() })
+            }.filter { it.date >= today }
+        }.getOrDefault(emptyList())
+
+    /** Twice a day: when the series you follow have their next episode (from TMDB). */
+    fun refreshComingSoon() {
+        val key = Keys.TMDB_KEY
+        if (key.isBlank() || kids) return
+        val now = System.currentTimeMillis()
+        if (now - config.comingSoonAt < 12 * 3600_000L) return tellComingToday()
+        config.comingSoonAt = now
+        val shows = (Watchlist.decodeFollowed(config.followedJson).map { it.series } + watchlist.filter { it.isSeries })
+            .distinctBy { com.titanejstudios.tuner.data.FilmName.parse(it.name).first.lowercase() }.take(40)
+        if (shows.isEmpty()) return
+        scope.launch {
+            val a = withContext(Dispatchers.IO) {
+                val out = org.json.JSONArray()
+                shows.mapNotNull { w -> runCatching { Tmdb.upcoming(key, w.name) }.getOrNull()?.let { w to it.second } }
+                    .sortedBy { it.second.date }
+                    .forEach { (w, up) ->
+                        out.put(JSONObject().put("w", org.json.JSONArray(Watchlist.encode(listOf(w))).getJSONObject(0))
+                            .put("date", up.date).put("s", up.season).put("e", up.episode).put("name", up.name ?: ""))
+                    }
+                out
+            }
+            config.comingSoonJson = a.toString()
+            changed(sync = false)
+            tellComingToday()
+        }
+    }
+
+    private fun tellComingToday() {
+        val today = today()
+        if (config.comingTold == today) return
+        val due = comingSoon.filter { it.date == today }
+        if (due.isEmpty()) return
+        config.comingTold = today
+        val text = due.joinToString(", ") { "${com.titanejstudios.tuner.data.FilmName.parse(it.item.name).first} S${it.season} E${it.episode}" }
+        notify("📅 New episodes today", text)
+        say("📅 New today: $text")
+    }
+
+    // ---------------- Drag and drop ----------------
+
+    private val videoTypes = setOf("mp4", "mkv", "avi", "mov", "ts", "m4v", "webm", "wmv", "mpg", "mpeg", "flv", "m2ts")
+
+    /** A video file plays; an .m3u file or playlist link is added; any other link plays. */
+    fun dropped(files: List<java.io.File>, text: String?) {
+        val f = files.firstOrNull()
+        if (f != null) {
+            val ext = f.extension.lowercase()
+            when {
+                ext in videoTypes -> watch(Watching("file:" + f.absolutePath, f.nameWithoutExtension, "From this PC", null, f.toURI().toString(), null, resumable = true))
+                ext == "m3u" || ext == "m3u8" -> addDroppedPlaylist(f.nameWithoutExtension, f.toURI().toString())
+                else -> say("Drop a video, an .m3u playlist or a link")
+            }
+            return
+        }
+        val url = text?.trim()?.lineSequence()?.firstOrNull { it.startsWith("http") }?.trim() ?: return say("Drop a video, an .m3u playlist or a link")
+        val low = url.lowercase()
+        if (low.contains(".m3u") || low.contains("get.php") || low.contains("type=m3u")) addDroppedPlaylist("Playlist", url)
+        else watch(Watching("url:$url", url.substringAfterLast('/').substringBefore('?').ifBlank { "Video" }, url, null, url, null, resumable = false))
+    }
+
+    private fun addDroppedPlaylist(name: String, url: String) {
+        if (config.sources.any { it is com.titanejstudios.tuner.data.Source.M3u && it.playlistUrl == url }) return say("That playlist's already added")
+        config.sources = config.sources + com.titanejstudios.tuner.data.Source.M3u("pc-" + System.currentTimeMillis(), name, url, null)
+        config.save()
+        say("Added $name – loading its channels")
+        reload()
     }
 
     // ---------------- Downloads (watch without the internet) ----------------
@@ -897,6 +1191,10 @@ class AppState(val config: Config, val player: Player, private val scope: Corout
     private fun playFromLink(from: String, j: JSONObject): Boolean {
         val who = from.ifBlank { "another device" }
         when (j.optString("kind")) {
+            "askmore", "bonus", "askno" -> {
+                receiveKids(from, j)
+                return true
+            }
             "live" -> {
                 val c = channels.firstOrNull { it.id == j.optString("channel") } ?: return false
                 playChannel(c)

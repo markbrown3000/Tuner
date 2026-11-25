@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.layout.PaddingValues
@@ -149,7 +150,8 @@ fun PlayerScreen(vm: TunerViewModel) {
     var upNextCancelled by remember(modeKey) { mutableStateOf(false) }
     val nextEp = vm.nextEpisode
     val remaining = if (duration > 0) duration - position else Long.MAX_VALUE
-    val upNextVisible = mode is PlayMode.Vod && nextEp != null && !upNextCancelled && remaining in 1L..20_000L
+    val creditsAt = vm.creditsFor()
+    val upNextVisible = mode is PlayMode.Vod && nextEp != null && !upNextCancelled && remaining in 1L..maxOf(20_000L, creditsAt ?: 0L)
     // Skip intro: learned the first time you skip it in a series.
     val introEnd = vm.introEndFor()
     val skipIntroVisible = mode is PlayMode.Vod && introEnd != null && position in 3_000L until (introEnd - 5_000L) && position < 300_000L
@@ -609,12 +611,25 @@ fun PlayerScreen(vm: TunerViewModel) {
                     Chip(if (vm.isPhone) "⏭  Skip intro" else "⏭  Skip intro – press ▶")
                 }
             }
+            vm.previously?.let { (title, plot) ->
+                Column(
+                    Modifier.align(Alignment.TopStart).padding(start = if (vm.isPhone) 16.dp else 48.dp, top = if (vm.isPhone) 16.dp else 40.dp)
+                        .widthIn(max = 620.dp)
+                        .clip(RoundedCornerShape(14.dp)).background(Color(0xE60A1030))
+                        .tvClickable({ vm.dismissRecap() }).padding(horizontal = 22.dp, vertical = 16.dp)
+                ) {
+                    Text(title, color = TunerColors.Accent, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(plot, color = Color.White, fontSize = 16.sp, maxLines = 5, overflow = TextOverflow.Ellipsis)
+                }
+            }
             if (upNextVisible && nextEp != null) {
                 Column(
                     Modifier.align(Alignment.BottomEnd).padding(end = 48.dp, bottom = 150.dp)
                         .clip(RoundedCornerShape(14.dp)).background(Color(0xE60A1030)).padding(horizontal = 22.dp, vertical = 16.dp)
                 ) {
-                    Text("Up next in ${(remaining / 1000).coerceAtLeast(1)} s", color = TunerColors.Accent, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                    Text(
+                        if (creditsAt != null && remaining > 20_000L) "Credits – OK for the next episode" else "Up next in ${(remaining / 1000).coerceAtLeast(1)} s",
+                        color = TunerColors.Accent, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                     Text("S${nextEp.season} E${nextEp.number}  ${nextEp.title}", color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text("OK play now  ·  BACK cancel", color = TunerColors.TextSecondary, fontSize = 14.sp)
                 }
@@ -888,9 +903,32 @@ private fun OptionsMenu(
             val detail = if (playback.subtitlesDisabled) "Off" else text.firstOrNull { it.selected }?.label ?: "Auto"
             add(MenuItem("Subtitles", detail) { onOverlay(Overlay.Subtitles) })
         }
+        // Go to… the show, series or film page (on phones it keeps playing in the mini player).
+        vm.playingSeries?.let { s ->
+            add(MenuItem("📺 Go to series", "${s.name} – all the episodes") { vm.goToSeries() })
+            add(MenuItem(if (vm.inWatchlist(s.id)) "✓ In My list" else "＋ Add series to My list") { vm.toggleWatchlist(s) })
+        }
+        vm.playingPlexShow?.let { s -> add(MenuItem("📺 Go to show", "${s.title} on Plex – all the episodes") { vm.goToPlexShow() }) }
+        vm.nextEpisode?.let { e -> add(MenuItem("⏭ Next episode", "S${e.season} E${e.number}  ${e.title}") { vm.playNextEpisodeNow() }) }
+        vm.playingFilm?.let { f ->
+            add(MenuItem(if (vm.inWatchlist(f.id)) "✓ In My list" else "＋ Add film to My list") { vm.toggleWatchlist(f) })
+        }
+        if (mode is PlayMode.Vod && !vm.activeProfile.kids) {
+            add(MenuItem(if (mode.seriesId != null) "🎬 Go to series info & cast" else "🎬 Go to film page", "cast, trailer, the rest of the series") { vm.goToFilmPage() })
+        }
+        vm.playingRateable?.let { (title, genre) ->
+            val t = vm.thumbOf(title)
+            add(MenuItem(if (t == 1) "👍 Liked" else "👍 More like this", title) { vm.thumb(title, genre, true) })
+            add(MenuItem(if (t == -1) "👎 Not for me (said)" else "👎 Less like this", title) { vm.thumb(title, genre, false) })
+        }
+        vm.playingWatchItem?.let { w ->
+            if (!vm.activeProfile.kids) add(MenuItem("👪 Recommend to the family", "shows on everyone's Home") { vm.recommendToFamily(w) })
+        }
+        vm.playingShowName?.let { name ->
+            add(MenuItem("🔍 More of $name", "other showings, episodes, films and Plex") { vm.findMoreOf(name) })
+        }
         if (mode is PlayMode.Vod && !mode.contentId.startsWith("plex:")) {
             add(MenuItem("🔎 Find subtitles online", if (vm.openSubtitlesKey == null) "needs a key in Settings" else null) { vm.findSubtitles() })
-            add(MenuItem("ℹ Film info & trailer") { vm.openFilmInfo(mode.title, isSeries = mode.seriesId != null) })
         }
         if (mode is PlayMode.Vod && mode.seriesId != null) {
             val pos = playback.positionMs
@@ -898,6 +936,11 @@ private fun OptionsMenu(
                 add(MenuItem("⏭ The intro ends here", "${pos / 60_000}:${"%02d".format((pos / 1000) % 60)} – skip to here on every episode") { vm.setIntroEndHere(pos) })
             }
             if (vm.introEndFor() != null) add(MenuItem("Forget this series' intro") { vm.forgetIntro() })
+            val dur = playback.durationMs
+            if (dur > 0 && dur - pos in 15_000L..900_000L) {
+                add(MenuItem("🎬 The credits start here", "Up next will start here on every episode") { vm.setCreditsHere(pos, dur) })
+            }
+            if (vm.creditsFor() != null) add(MenuItem("Forget this series' credits") { vm.forgetCredits() })
         }
         if (mode is PlayMode.Live) {
             if (channel != null && vm.versionsFor(channel).size > 1) {

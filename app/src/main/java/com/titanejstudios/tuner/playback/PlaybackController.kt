@@ -886,11 +886,13 @@ class PlaybackController(private val context: Context) {
     private var seamlessFps = false
     private var audioLang: String? = null
     private var subtitleLang: String? = null
+    private var describe = false
 
     /** Preferred sound and subtitle languages ("en", …; null = the stream's default). */
-    fun setLanguages(audio: String?, subtitles: String?) {
+    fun setLanguages(audio: String?, subtitles: String?, audioDescription: Boolean = describe) {
         audioLang = audio
         subtitleLang = subtitles
+        describe = audioDescription
         listOfNotNull(primary, standby).forEach { applyLanguages(it) }
     }
 
@@ -898,6 +900,7 @@ class PlaybackController(private val context: Context) {
         p.trackSelectionParameters = p.trackSelectionParameters.buildUpon()
             .setPreferredAudioLanguage(audioLang)
             .setPreferredTextLanguage(subtitleLang)
+            .setPreferredAudioRoleFlags(if (describe) C.ROLE_FLAG_DESCRIBES_VIDEO else 0)
             .build()
     }
 

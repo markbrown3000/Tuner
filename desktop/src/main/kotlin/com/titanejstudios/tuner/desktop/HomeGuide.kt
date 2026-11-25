@@ -174,6 +174,33 @@ fun HomePage(app: AppState) {
                 }
             }
         }
+        val picks = app.familyPicksForMe
+        if (picks.isNotEmpty()) row(app, "👪 Family picks") {
+            items(picks, key = { "fp" + it.item.id }) { p ->
+                val w = p.item
+                WithMenu(listOf("✕ Remove from Family picks" to { app.removeFamilyPick(w.id) })) {
+                    PosterTile(w.name, w.image, "From ${p.from}", width = 140.dp) {
+                        if (w.isSeries) {
+                            app.openSeriesId = w.id
+                            app.page = Page.Series
+                        } else w.toVod()?.let { app.playFilm(it) }
+                    }
+                }
+            }
+        }
+        val coming = if (app.kids) emptyList() else app.comingSoon
+        if (coming.isNotEmpty()) row(app, "📅 Coming soon") {
+            items(coming.take(20), key = { "cs" + it.item.id }) { c ->
+                val today = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.UK).format(java.util.Date())
+                val day = if (c.date == today) "Today" else runCatching {
+                    java.text.SimpleDateFormat("EEE d MMM", java.util.Locale.UK).format(java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.UK).parse(c.date)!!)
+                }.getOrDefault(c.date)
+                PosterTile(c.item.name, c.item.image, "$day · S${c.season} E${c.episode}", width = 140.dp) {
+                    app.openSeriesId = c.item.id
+                    app.page = Page.Series
+                }
+            }
+        }
         if (app.plexDeck.isNotEmpty() && !app.kids) row(app, "Continue on Plex") {
             items(app.plexDeck, key = { it.ratingKey }) { p ->
                 WideTile(p.title, p.image, p.subtitle, progress = if (p.durationMs > 0) p.viewOffsetMs.toFloat() / p.durationMs else null, width = 260.dp) {

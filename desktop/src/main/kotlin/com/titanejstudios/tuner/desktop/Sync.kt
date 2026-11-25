@@ -44,6 +44,7 @@ class Sync(private val config: Config) {
             .put("favourites", JSONObject().put("at", config.favouritesAt).put("data", favs))
             .put("watchlist", JSONObject().put("at", config.watchlistAt).put("data", config.watchlistJson))
             .put("followed", JSONObject().put("at", config.followedAt).put("data", config.followedJson))
+            .put("picks", JSONObject().put("at", config.familyPicksAt).put("data", config.familyPicksJson))
             .put("resume", JSONObject().put("data", JSONArray().apply { config.resume.values.forEach { put(it.toJson()) } }))
             .put("done", JSONObject().apply { config.done.entries.sortedByDescending { it.value }.take(200).forEach { (k, v) -> put(k, v.toString()) } })
         // Profiles changed on this PC go back to the TV (the newest change wins there).
@@ -126,6 +127,15 @@ class Sync(private val config: Config) {
                 if ((stamp > config.watchlistAt || (config.watchlistAt == 0L && config.watchlistJson == "[]")) && data != config.watchlistJson && data != "[]") {
                     config.watchlistJson = data
                     config.watchlistAt = stamp
+                    listsChanged = true
+                }
+            }
+            sections.optJSONObject("picks")?.let { r ->
+                val stamp = r.optLong("at")
+                val data = r.optString("data", "[]")
+                if (stamp > config.familyPicksAt && data != config.familyPicksJson) {
+                    config.familyPicksJson = data
+                    config.familyPicksAt = stamp
                     listsChanged = true
                 }
             }

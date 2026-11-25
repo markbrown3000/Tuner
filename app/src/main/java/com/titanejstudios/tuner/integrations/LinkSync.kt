@@ -17,6 +17,8 @@ object LinkSync {
     const val STARTED = "started"
     const val PROFILES = "profiles"
     const val YOUTUBE = "youtube"
+    /** Family picks (shared by every profile). */
+    const val PICKS = "picks"
     private const val DONE = "done"
 
     /** Remembers that [contentId] was finished (keeps the newest 200). */
@@ -40,6 +42,7 @@ object LinkSync {
         sections.put(TvSync.FAVOURITES, JSONObject().put("at", store.syncStamp(TvSync.FAVOURITES)).put("data", favs))
         sections.put(TvSync.WATCHLIST, JSONObject().put("at", store.syncStamp(TvSync.WATCHLIST)).put("data", store.watchlistJson))
         sections.put(TvSync.FOLLOWED, JSONObject().put("at", store.syncStamp(TvSync.FOLLOWED)).put("data", store.followedSeriesJson))
+        sections.put(PICKS, JSONObject().put("at", store.syncStamp(PICKS)).put("data", store.familyPicksJson))
         val resume = JSONArray()
         store.resume.values.forEach { resume.put(TvSync.resumeToJson(it)) }
         sections.put(TvSync.RESUME, JSONObject().put("data", resume))
@@ -208,6 +211,7 @@ object LinkSync {
         for ((section, read, write) in listOf(
             Triple(TvSync.WATCHLIST, { store.watchlistJson }, { v: String -> store.watchlistJson = v }),
             Triple(TvSync.FOLLOWED, { store.followedSeriesJson }, { v: String -> store.followedSeriesJson = v }),
+            Triple(PICKS, { store.familyPicksJson }, { v: String -> store.familyPicksJson = v }),
         )) {
             val r = sections.optJSONObject(section) ?: continue
             val theirs = r.optString("data", "[]")

@@ -153,6 +153,8 @@ private fun <T> CatalogueScreen(
     onPlex: (() -> Unit)? = null,
     /** 🎲 Surprise me (films). */
     onSurprise: (() -> Unit)? = null,
+    /** Everything you have, Plex and your provider together. */
+    onEverything: (() -> Unit)? = null,
     /** Poster and details for the strip above the grid. */
     imageOf: (T) -> String? = { null },
     detailsOf: (T) -> String? = { null },
@@ -163,7 +165,7 @@ private fun <T> CatalogueScreen(
     phone: PhoneCatalogueInfo<T>? = null,
 ) {
     if (compact && phone != null) {
-        PhoneCatalogue(phone, title, items, status, categoryOf, nameOf, continueEntries, onReload, onSwitch, tile, onResume, myList, updating, onPlex)
+        PhoneCatalogue(phone, title, items, status, categoryOf, nameOf, continueEntries, onReload, onSwitch, tile, onResume, myList, updating, onPlex, onEverything)
         return
     }
     var focusedItem by remember { mutableStateOf<T?>(null) }
@@ -217,6 +219,10 @@ private fun <T> CatalogueScreen(
             }
             if (onPlex != null) {
                 PillButton("Plex ›", onPlex, compact = true)
+                Spacer(Modifier.width(8.dp))
+            }
+            if (onEverything != null) {
+                PillButton("Plex + provider ›", onEverything, compact = true)
                 Spacer(Modifier.width(8.dp))
             }
             PillButton(switchLabel, onSwitch, compact = true)
@@ -337,6 +343,7 @@ fun MoviesScreen(vm: TunerViewModel) {
         updating = vm.vodUpdating,
         onSurprise = { vm.surpriseMe() },
         onPlex = if (vm.plexLinked) ({ vm.openPlexLibrary() }) else null,
+        onEverything = if (vm.plexLinked) ({ vm.openLibrary(shows = false) }) else null,
         tintOn = vm.tintFromPicture,
         compact = compactLayout(vm),
         phone = PhoneCatalogueInfo(vm, { it.id }, { vm.ratingValueFor(it.name, false, it.rating) }, { it.rating }, isSeries = false),
@@ -407,6 +414,7 @@ fun SeriesScreen(vm: TunerViewModel) {
         },
         myList = remember(vm.watchlist) { vm.watchlist.filter { it.isSeries }.mapNotNull { it.toSeries() } },
         updating = vm.vodUpdating,
+        onEverything = if (vm.plexLinked) ({ vm.openLibrary(shows = true) }) else null,
         onPlex = if (vm.plexLinked) ({ vm.openPlexLibrary() }) else null,
         tintOn = vm.tintFromPicture,
         compact = compactLayout(vm),
@@ -642,6 +650,7 @@ private fun <T> PhoneCatalogue(
     myList: List<T>,
     updating: Boolean,
     onPlex: (() -> Unit)?,
+    onEverything: (() -> Unit)? = null,
 ) {
     val vm = info.vm
     var category by remember { mutableStateOf(BROWSE) }
@@ -673,6 +682,7 @@ private fun <T> PhoneCatalogue(
                 PillButton("Films", { if (info.isSeries) onSwitch() }, selected = !info.isSeries, compact = true)
                 PillButton("Series", { if (!info.isSeries) onSwitch() }, selected = info.isSeries, compact = true)
                 if (onPlex != null) PillButton("Plex", onPlex, compact = true)
+                if (onEverything != null) PillButton("Plex + provider", onEverything, compact = true)
             }
             if (!info.isSeries) {
                 PillButton("🎲", { vm.surpriseMe() }, compact = true)
@@ -790,3 +800,43 @@ private fun RowTitle(text: String, seeAll: (() -> Unit)?) {
 
 /** A tap target for phones (no TV focus). */
 private fun Modifier.clickableNoFocus(onClick: () -> Unit): Modifier = this.clickable(onClick = onClick)
+
+
+/** Plex and your provider in one list: each title once, saying where you have it. */
+@Composable
+fun LibraryScreen(vm: TunerViewModel) {
+    val shows = vm.libraryShows
+    LaunchedEffect(shows) { vm.loadLibrary() }
+    CatalogueScreen(
+        title = if (shows) "All my series" else "All my films",
+        items = vm.library,
+        status = vm.libraryStatus,
+        categoryOf = { it.where },
+        nameOf = { it.title },
+        imageOf = { it.poster },
+        detailsOf = { t -> listOfNotNull(t.year, t.rating, t.where).joinToString("  ·  ") },
+        continueEntries = emptyList(),
+        onReload = { vm.loadLibrary(force = true) },
+        switchLabel = if (shows) "Films ›" else "Series ›",
+        onSwitch = { vm.switchLibrary() },
+        onResume = {},
+        tile = { t, mod ->
+            PosterCard(
+                title = t.title,
+                image = t.poster,
+                caption = when {
+                    t.plex != null && (t.film != null || t.series != null) -> "Plex + provider"
+                    t.plex != null -> "Plex"
+                    else -> "Provider"
+                },
+                progress = null,
+                onClick = { vm.openLibraryTitle(t) },
+                onLongClick = { vm.openFilmInfo(t.title + (t.year?.let { " ($it)" } ?: ""), isSeries = shows) },
+                modifier = mod,
+            )
+        },
+        tintOn = vm.tintFromPicture,
+        compact = compactLayout(vm),
+        phone = PhoneCatalogueInfo(vm, { it.key }, { t -> t.rating?.filter { it.isDigit() || it == '.' }?.toDoubleOrNull() ?: 0.0 }, { null }, isSeries = shows),
+    )
+}

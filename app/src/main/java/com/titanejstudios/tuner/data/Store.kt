@@ -408,6 +408,17 @@ class Store(context: Context) {
         get() = prefs.getString("sub_lang", null)
         set(value) = prefs.edit().putString("sub_lang", value).apply()
 
+    /** Each profile's own sound/subtitle language ("-" = the stream's default / off); the shared one until set. */
+    fun audioLanguageOf(profileId: String): String? =
+        if (prefs.contains("audio_lang_$profileId")) prefs.getString("audio_lang_$profileId", null)?.takeIf { it != "-" } else audioLanguage
+    fun saveAudioLanguage(profileId: String, value: String?) = prefs.edit().putString("audio_lang_$profileId", value ?: "-").apply()
+    fun subtitleLanguageOf(profileId: String): String? =
+        if (prefs.contains("sub_lang_$profileId")) prefs.getString("sub_lang_$profileId", null)?.takeIf { it != "-" } else subtitleLanguage
+    fun saveSubtitleLanguage(profileId: String, value: String?) = prefs.edit().putString("sub_lang_$profileId", value ?: "-").apply()
+    /** Audio description (the soundtrack that describes what's on screen) picked when there is one. */
+    fun audioDescriptionOf(profileId: String): Boolean = prefs.getBoolean("audio_desc_$profileId", false)
+    fun saveAudioDescription(profileId: String, on: Boolean) = prefs.edit().putBoolean("audio_desc_$profileId", on).apply()
+
     /** Category editor: original name → new name (two renamed to the same name are merged). */
     var groupRenames: Map<String, String>
         get() = stringMap("group_renames")
@@ -561,6 +572,23 @@ class Store(context: Context) {
         set(value) = prefs.edit().putString("watching_slots", value).apply()
 
     /** Film trailers play (muted) on the info card. */
+    var familyPicksJson: String
+        get() = prefs.getString("family_picks", null) ?: "[]"
+        set(value) = prefs.edit().putString("family_picks", value).apply()
+    var comingSoonJson: String?
+        get() = prefs.getString("coming_soon", null)
+        set(value) = prefs.edit().putString("coming_soon", value).apply()
+    var comingSoonAt: Long
+        get() = prefs.getLong("coming_soon_at", 0L)
+        set(value) = prefs.edit().putLong("coming_soon_at", value).apply()
+    var comingSoonTold: String
+        get() = prefs.getString("coming_soon_told", null) ?: ""
+        set(value) = prefs.edit().putString("coming_soon_told", value).apply()
+
+    var recaps: Boolean
+        get() = prefs.getBoolean("recaps", true)
+        set(value) = prefs.edit().putBoolean("recaps", value).apply()
+
     var trailerAutoplay: Boolean
         get() = prefs.getBoolean("trailer_autoplay", true)
         set(value) = prefs.edit().putBoolean("trailer_autoplay", value).apply()

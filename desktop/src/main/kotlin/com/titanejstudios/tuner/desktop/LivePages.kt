@@ -33,6 +33,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import com.titanejstudios.tuner.data.WatchItem
 import androidx.compose.ui.input.pointer.onPointerEvent
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -189,6 +190,8 @@ fun LivePage(app: AppState, fullScreen: Boolean, toggleFullScreen: () -> Unit) {
                         Spacer(Modifier.width(8.dp))
                         SendToTv(app)
                         Spacer(Modifier.width(8.dp))
+                        WatchingMenu(app)
+                        Spacer(Modifier.width(8.dp))
                         Pill("⛶ Full screen", onClick = toggleFullScreen)
                     }
                     if (app.timeshift != null) {
@@ -244,14 +247,14 @@ fun PlayerPage(app: AppState, fullScreen: Boolean, toggleFullScreen: () -> Unit)
         val introEnd = app.introEnd()
         val left = if (dur > 0) dur - pos else Long.MAX_VALUE
         val showSkip = w.seriesId != null && pos in 5_000L..240_000L && (introEnd == null || pos < introEnd - 3_000L)
-        val showNext = w.next != null && left < 30_000L && app.upNextCancelled != w.id
+        val showNext = w.next != null && left < maxOf(30_000L, app.creditsFor(w.seriesId) ?: 0L) && app.upNextCancelled != w.id
         if (showSkip || showNext) {
             Row(Modifier.fillMaxWidth().background(Ink).padding(horizontal = 20.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (showSkip) Pill(if (introEnd != null) "⏭ Skip intro" else "⏭ Skip intro (85s)", selected = true) {
                     if (introEnd != null) app.skipIntro() else app.skipIntroGuess()
                 }
                 if (showNext) {
-                    Text("Up next in ${(left / 1000).coerceAtLeast(0)}s", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                    Text(if (left > 30_000L) "Credits – next episode" else "Up next in ${(left / 1000).coerceAtLeast(0)}s", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
                     w.next?.let { n -> Pill("▶ Play now", selected = true) { app.saveProgress(); n() } }
                     Pill("Cancel") { app.upNextCancelled = w.id }
                 }
@@ -288,6 +291,7 @@ fun PlayerPage(app: AppState, fullScreen: Boolean, toggleFullScreen: () -> Unit)
                     Pill(if (app.mini) "▣ Back from mini player" else "▣ Mini player") { app.toggleMini() }
                     if (app.secondScreen != null || app.otherScreen() != null) Pill(if (app.secondScreen != null) "🖥 Back to this screen" else "🖥 Other screen") { app.toggleSecondScreen() }
                     PictureMenu(app, films = true)
+                    WatchingMenu(app)
                     VolumeSlider(app)
                     SendToTv(app)
                     Spacer(Modifier.weight(1f))
@@ -394,5 +398,68 @@ fun VolumeSlider(app: AppState) {
             modifier = Modifier.width(120.dp),
             colors = SliderDefaults.colors(thumbColor = Sky, activeTrackColor = Sky, inactiveTrackColor = PanelLight),
         )
+    }
+}
+
+
+/** ⋯ More: go to the series or film, My list, more of this show. Playing carries on in the mini player. */
+@Composable
+fun WatchingMenu(app: AppState) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        Pill("⋯ More") { open = true }
+        androidx.compose.material3.DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            val w = app.watching
+            val series = app.playingSeries()
+            val film = app.playingFilm()
+            val channel = app.playingChannel
+            val programme = app.catchupOf ?: channel?.let { c -> app.guide[c.id]?.firstOrNull { it.start <= app.now && it.stop > app.now } }
+            val lines = buildList {
+                if (series != null) {
+                    add(MenuLine("📺 Go to series – all the episodes") { app.goToSeries() })
+                    add(MenuLine(if (app.inWatchlist(series.id)) "✓ In My list (remove)" else "＋ Add series to My list") {
+                        app.toggleWatchlist(WatchItem.of(series, System.currentTimeMillis()))
+                    })
+                }
+                w?.next?.let { n -> add(MenuLine("⏭ Next episode") { app.saveProgress(); n() }) }
+                if (film != null) {
+                    add(MenuLine("🎬 Go to film page – cast and the rest of the series") { app.goToFilm() })
+                    add(MenuLine(if (app.inWatchlist(film.id)) "✓ In My list (remove)" else "＋ Add film to My list") {
+                        app.toggleWatchlist(WatchItem.of(film, System.currentTimeMillis()))
+                    })
+                    if (app.downloadFor(film.id) == null && !app.kids) add(MenuLine("⤓ Download to this PC") {
+                        app.download(film.id, film.name, film.category, film.poster, film.url)
+                    })
+                }
+                if (w != null && w.resumable) add(MenuLine("⏮ Start again") { app.player.seekTo(0L) })
+                if (channel != null && programme != null) {
+                    if (!app.kids) add(MenuLine("● Record ${programme.title}") { app.toggleRecording(channel, programme) })
+                    add(MenuLine("📅 Go to the guide") { app.page = Page.Guide })
+                }
+                val name = w?.title ?: programme?.title
+                if (name != null) {
+                    val t = app.thumbOf(name)
+                    add(MenuLine(if (t == 1) "👍 Liked (undo)" else "👍 More like this") { app.thumb(name, true) })
+                    add(MenuLine(if (t == -1) "👎 Not for me (undo)" else "👎 Less like this") { app.thumb(name, false) })
+                }
+                app.playingWatchItem()?.let { item ->
+                    if (!app.kids) add(MenuLine("👪 Recommend to the family") { app.recommendToFamily(item) })
+                }
+                if (w?.seriesId != null) {
+                    val d = app.player.durationMs
+                    if (d > 0 && d - app.player.positionMs in 15_000L..900_000L) add(MenuLine("🎬 The credits start here") { app.setCreditsHere() })
+                }
+                if (name != null) add(MenuLine("🔍 More of $name – episodes, showings, Plex") { app.findMoreOf(name) })
+                if (w != null || channel != null) add(MenuLine(if (app.mini) "⤢ Back to the big picture" else "▣ Keep watching small and look around") { app.toggleMini() })
+            }
+            if (lines.isEmpty()) Text("Nothing more for this", color = Soft, fontSize = 13.sp, modifier = Modifier.padding(12.dp))
+            for (l in lines) androidx.compose.material3.DropdownMenuItem(
+                text = { Text(l.text) },
+                onClick = {
+                    open = false
+                    l.action?.invoke()
+                },
+            )
+        }
     }
 }

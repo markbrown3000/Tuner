@@ -274,6 +274,17 @@ class PlexFeature(private val store: Store, private val scope: CoroutineScope) {
         }.getOrDefault(emptyList())
     }
 
+    /** Every film (or every show) in all your Plex libraries – for the combined library. */
+    suspend fun allOf(shows: Boolean): List<Plex.Entry> = withContext(Dispatchers.IO) {
+        runCatching {
+            if (servers.isEmpty()) activeToken()?.let { servers = client().servers(it) }
+            val secs = sections.ifEmpty { client().sections(servers) }
+            secs.filter { it.isShows == shows }.flatMap { sec ->
+                runCatching { client().sectionItems(sec) }.onFailure { AppLog.warn("Plex: couldn't load ${sec.title}", it) }.getOrDefault(emptyList())
+            }
+        }.getOrDefault(emptyList())
+    }
+
     suspend fun showNamed(title: String): Plex.Entry? = withContext(Dispatchers.IO) {
         runCatching {
             if (servers.isEmpty()) activeToken()?.let { servers = client().servers(it) }

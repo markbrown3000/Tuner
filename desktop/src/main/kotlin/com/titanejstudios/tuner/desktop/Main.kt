@@ -2,6 +2,8 @@ package com.titanejstudios.tuner.desktop
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.draganddrop.dragAndDropTarget
+import androidx.compose.ui.draganddrop.awtTransferable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -141,6 +143,8 @@ private fun runApp() = application {
         if (config.activeProfile == null && config.profiles.size > 1) app.askWhoIsWatching = true
         app.startLink()
         app.checkForUpdate()
+        delay(20_000)
+        app.refreshComingSoon()
     }
     // The clock, reminders, recordings, saving your place, and syncing every few minutes.
     LaunchedEffect(Unit) {
@@ -155,6 +159,7 @@ private fun runApp() = application {
             if (app.watching != null) app.saveProgress()
             if (ticks % 18 == 0) app.syncSoon(0)
             if (ticks % 1080 == 0) app.checkForUpdate()
+            if (ticks % 360 == 0) app.refreshComingSoon()
         }
     }
     // Flicker in the system tray: closing the window leaves it running (recordings and reminders carry on).
@@ -193,9 +198,11 @@ private fun runApp() = application {
         icon = icon,
         onKeyEvent = handler@{ e ->
             if (e.type != KeyEventType.KeyDown) return@handler false
-            val watching = app.watching != null
+            val watching = app.watching != null && !app.mini
             when {
                 e.key == Key.F11 || (e.key == Key.F && e.isCtrlPressed) -> { toggleFullScreen(); true }
+                e.key == Key.F1 || (e.key == Key.Slash && e.isShiftPressed && app.page != Page.Search && app.page != Page.Settings) -> { app.showKeys = !app.showKeys; true }
+                e.key == Key.Escape && app.showKeys -> { app.showKeys = false; true }
                 e.key == Key.Escape && fullScreen() -> { windowState.placement = WindowPlacement.Floating; true }
                 e.key == Key.Escape && watching -> { app.stopWatching(save = true); true }
                 e.key == Key.Spacebar && watching && app.player.component != null -> { app.player.togglePause(); true }
@@ -267,7 +274,7 @@ private fun runApp() = application {
             state = miniState,
             title = "Flicker – mini player",
             icon = icon,
-            alwaysOnTop = true,
+            alwaysOnTop = app.miniOnTop,
         ) {
             MaterialTheme(colorScheme = darkColorScheme(primary = Sky, background = Ink, surface = Panel)) {
                 Column(Modifier.fillMaxSize().background(Color.Black)) {
@@ -279,6 +286,7 @@ private fun runApp() = application {
                             Pill("▼") { app.zapBy(1) }
                         }
                         Spacer(Modifier.weight(1f))
+                        Pill(if (app.miniOnTop) "📌 On top" else "📌", selected = app.miniOnTop) { app.toggleMiniOnTop() }
                         Pill("⤢ Back") { app.toggleMini() }
                     }
                 }
@@ -289,12 +297,12 @@ private fun runApp() = application {
 
 @Composable
 private fun Shell(app: AppState, fullScreen: Boolean, toggleFullScreen: () -> Unit) {
-    Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Ink, InkBottom)))) {
+    Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Ink, InkBottom))).dropFiles(app)) {
         Row(Modifier.fillMaxSize()) {
             if (!fullScreen) NavRail(app)
             Box(Modifier.weight(1f).fillMaxHeight()) {
                 when {
-                    app.watching != null -> PlayerPage(app, fullScreen, toggleFullScreen)
+                    app.watching != null && !app.mini -> PlayerPage(app, fullScreen, toggleFullScreen)
                     else -> when (app.page) {
                         Page.Home -> HomePage(app)
                         Page.Live -> LivePage(app, fullScreen, toggleFullScreen)
@@ -328,6 +336,17 @@ private fun Shell(app: AppState, fullScreen: Boolean, toggleFullScreen: () -> Un
             modifier = Modifier.align(Alignment.TopEnd).padding(28.dp).clip(RoundedCornerShape(14.dp)).background(Ink.copy(alpha = 0.85f)).padding(horizontal = 22.dp, vertical = 8.dp),
         )
         app.timesUp?.let { why -> TimesUp(app, why) }
+        app.timeRequest?.let { r -> TimeRequestDialog(app, r) }
+        app.previously?.let { (title, plot) ->
+            if (app.watching != null && !app.mini) Column(
+                Modifier.align(Alignment.TopStart).padding(start = if (fullScreen) 30.dp else 220.dp, top = 30.dp).width(560.dp)
+                    .clip(RoundedCornerShape(14.dp)).background(Ink.copy(alpha = 0.92f)).clickable { app.previously = null }.padding(18.dp),
+            ) {
+                Text(title, color = Gold, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                Text(plot, color = Color.White, fontSize = 15.sp, maxLines = 6)
+            }
+        }
+        if (app.showKeys) KeysHelp(app)
         app.pinPrompt?.let { (why, _) -> PinPrompt(app, why) }
         if (app.askWhoIsWatching && app.config.profiles.size > 1) WhoIsWatching(app)
     }
@@ -343,11 +362,12 @@ private fun NavRail(app: AppState) {
         val kids = app.kids
         for (p in Page.entries) {
             if (kids && (p == Page.Films || p == Page.Series || p == Page.YouTube || p == Page.Recordings || p == Page.Multi)) continue
-            val sel = app.page == p && app.watching == null
+            val sel = app.page == p && (app.watching == null || app.mini)
             Row(
                 Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(if (sel) Sky.copy(alpha = 0.35f) else Color.Transparent)
                     .clickable {
-                        if (app.watching != null) app.stopWatching(save = true)
+                        // In the mini player it keeps going while you look around.
+                        if (app.watching != null && !app.mini) app.stopWatching(save = true)
                         app.endPreview()
                         if (app.page == Page.Multi && p != Page.Multi) app.leaveMulti()
                         if (p == Page.Multi && app.page != Page.Multi) app.enterMulti()
@@ -457,6 +477,7 @@ private fun TimesUp(app: AppState, why: String) {
             Text("See you tomorrow!", color = Soft, fontSize = 16.sp)
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 if (app.config.pin != null) Pill("Grown-up: enter the PIN") { app.extendWithPin() }
+                if (app.link.key != null) Pill("📱 Ask a grown-up") { app.askForMoreTime() }
                 Pill("OK") { app.timesUp = null }
             }
         }
@@ -481,6 +502,78 @@ private fun PinPrompt(app: AppState, why: String) {
                 Pill("OK", selected = true) { if (!app.checkPin(pin)) wrong = true }
                 Pill("Cancel") { app.pinPrompt = null }
             }
+        }
+    }
+}
+
+
+/** Drop a video file, an .m3u playlist or a link on the window. */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class, androidx.compose.ui.ExperimentalComposeUiApi::class)
+@Composable
+private fun Modifier.dropFiles(app: AppState): Modifier {
+    val target = remember {
+        object : androidx.compose.ui.draganddrop.DragAndDropTarget {
+            override fun onDrop(event: androidx.compose.ui.draganddrop.DragAndDropEvent): Boolean {
+                val t = event.awtTransferable
+                val files = runCatching {
+                    if (t.isDataFlavorSupported(java.awt.datatransfer.DataFlavor.javaFileListFlavor))
+                        (t.getTransferData(java.awt.datatransfer.DataFlavor.javaFileListFlavor) as List<*>).filterIsInstance<java.io.File>()
+                    else emptyList()
+                }.getOrDefault(emptyList())
+                val text = runCatching {
+                    if (t.isDataFlavorSupported(java.awt.datatransfer.DataFlavor.stringFlavor)) t.getTransferData(java.awt.datatransfer.DataFlavor.stringFlavor) as? String else null
+                }.getOrNull()
+                if (files.isEmpty() && text == null) return false
+                app.dropped(files, text)
+                return true
+            }
+        }
+    }
+    return this.then(Modifier.dragAndDropTarget(shouldStartDragAndDrop = { true }, target = target))
+}
+
+/** A child's asking for more time (from a TV or another PC). */
+@Composable
+private fun TimeRequestDialog(app: AppState, r: AppState.TimeRequest) {
+    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.6f)), contentAlignment = Alignment.Center) {
+        Column(Modifier.width(460.dp).clip(RoundedCornerShape(16.dp)).background(Panel).padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("📱 ${r.kidName} is asking for more TV", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            Text("From ${r.from}" + if (app.config.pin != null) " · you'll need the PIN" else "", color = Soft, fontSize = 14.sp)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Pill("+15 min", selected = true) { app.answerTimeRequest(15) }
+                Pill("+30 min") { app.answerTimeRequest(30) }
+                Pill("+1 hour") { app.answerTimeRequest(60) }
+                Pill("Not now") { app.answerTimeRequest(0) }
+            }
+        }
+    }
+}
+
+/** F1 or ?: every keyboard shortcut. */
+@Composable
+private fun KeysHelp(app: AppState) {
+    val keys = listOf(
+        "Space" to "Pause / play (on live TV it pauses and keeps recording)",
+        "← →" to "Back 10 seconds / forward 30 seconds",
+        "Page Up / Page Down" to "Previous / next channel (also ↑ ↓ in full screen)",
+        "0–9" to "Type a channel's number (Live TV, Home, the guide)",
+        "F11 or Ctrl+F" to "Full screen (or double-click the picture)",
+        "Esc" to "Leave full screen, then close the player",
+        "Ctrl+M" to "Mute",
+        "Ctrl+↑ / Ctrl+↓" to "Volume up / down",
+        "Media keys" to "Play/pause, next, previous, stop, volume",
+        "Right-click" to "Menus on channels, films and Continue watching",
+        "F1 or ?" to "This page",
+        "Drag and drop" to "A video file plays; an .m3u file or playlist link is added",
+    )
+    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.7f)).clickable { app.showKeys = false }, contentAlignment = Alignment.Center) {
+        Column(Modifier.width(640.dp).clip(RoundedCornerShape(16.dp)).background(Panel).padding(26.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("⌨ Keyboard shortcuts", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+            for ((k, what) in keys) Row {
+                Text(k, color = Gold, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.width(190.dp))
+                Text(what, color = Color.White, fontSize = 15.sp)
+            }
+            Text("Click anywhere or press Esc to close", color = Soft, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
         }
     }
 }
