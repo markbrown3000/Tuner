@@ -165,7 +165,8 @@ class Player {
     /** Adds a downloaded subtitle file to what's playing and shows it. */
     fun addSubtitleFile(file: java.io.File): Boolean = runCatching { player()?.subpictures()?.setSubTitleFile(file) == true }.getOrDefault(false)
 
-    val isPaused: Boolean get() = player()?.status()?.isPlaying == false && lastUrl != null
+    /** Paused by you (not just buffering). */
+    val isPaused: Boolean get() = player()?.status()?.state() == uk.co.caprica.vlcj.player.base.State.PAUSED
 
     fun pause() {
         player()?.controls()?.setPause(true)

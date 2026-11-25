@@ -94,6 +94,16 @@ A TiviMate-style live TV app for Google TV / Android TV. Built with Kotlin, Jetp
   - **Keyboard shortcuts**: press F1 or ? for the list.
   - **Mini player on top**: 📌 in the mini player (or Settings › This PC) keeps it above other windows, or lets it go behind.
   - **Drag and drop**: drop a video file to play it, or an .m3u file or playlist link to add it.
+  - **TV guide**: pick any group (or Favourites / Recently watched), Earlier / Now / Later, jump to a day (up to a week each way, as far as your guide goes), search the guide, 👍/👎, record every episode, and watch it on the TV.
+  - **Groups and channels** (Settings › Channels › Manage): hide, rename, reorder and lock groups (locked ones need the PIN), hide channels, and give a channel with no guide another channel's guide. 🩺 Check my channels finds ones that don't answer, and they can be hidden.
+  - **Player**: sleep timer, night mode, clearer speech, sound timing (lip sync), subtitle size, subtitles online (OpenSubtitles key in Settings), the channel's other copies (HD/SD), 🛠 Fix it, stream info, ⏮ From the start on live TV, and 👫 watch together with the TV or a phone.
+  - **Catch-up page**: channels with catch-up, a day, then what was on.
+  - **Recordings**: series links (every episode), delete old recordings after a while, and save them anywhere (a network drive too).
+  - **Home**: Top picks, Your shows tonight, Missed it?, Because you watched and Trending this week – learnt from what each profile watches on the PC. Settings › Home shows, hides and reorders the rows.
+  - **Profiles**: add and delete profiles, and set kids' channels and age rating – they go to the TV at the next sync.
+  - **Plex**: sort and find in a library, seasons, mark watched (right-click), Go to show from the player, and kids see only their libraries. Films › Plex + provider shows everything once.
+  - **Films**: Next in the series when a film ends, and click an actor for their other films.
+  - **Backup and restore**, a **Reminders** list, two more colour themes, and an **artwork screensaver** when nothing's playing.
   - **Problem log**: Settings › Problem log shows recent errors, with 📋 Copy to send them on.
   - **Kids' limits**: the TV's PIN, daily TV time and bedtime apply on the PC too. A grown-up's PIN gives 30 more minutes, and switching from a kids' profile to a grown-up one needs the PIN.
   - **What's On**: now and coming up by kind, sport (with LIVE badges), and My teams, with your teams' fixtures from ESPN and the channel showing each one.
