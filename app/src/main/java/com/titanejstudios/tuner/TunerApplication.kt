@@ -15,6 +15,33 @@ class TunerApplication : Application(), ImageLoaderFactory {
         AppLog.init(this)
         if (com.titanejstudios.tuner.data.SafeMode.active) AppLog.info("Started in safe mode")
         logHowItLastClosed()
+        // Older Android (Fire OS 6/7) keeps no record of why: Flicker's own note tells us.
+        com.titanejstudios.tuner.data.SafeMode.endedWhileOpen()?.let { what ->
+            AppLog.warn(what)
+            com.titanejstudios.tuner.data.SafeMode.noteExit("Closed while you were using it – most likely the TV ran out of memory", System.currentTimeMillis() - 1)
+        }
+    }
+
+    private var lastTrimLogged = 0L
+
+    /** Android asking Flicker to use less memory: logged (it often comes just before Android closes an app), and images let go. */
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (level == TRIM_MEMORY_UI_HIDDEN) return
+        val rt = Runtime.getRuntime()
+        val now = System.currentTimeMillis()
+        if (now - lastTrimLogged > 60_000L || level >= TRIM_MEMORY_RUNNING_CRITICAL) {
+            lastTrimLogged = now
+            val what = when (level) {
+                TRIM_MEMORY_RUNNING_MODERATE -> "the TV is getting low on memory"
+                TRIM_MEMORY_RUNNING_LOW -> "the TV is low on memory"
+                TRIM_MEMORY_RUNNING_CRITICAL -> "the TV is very low on memory – Android may close apps"
+                else -> "memory level $level"
+            }
+            AppLog.warn("Android: $what (Flicker using ${(rt.totalMemory() - rt.freeMemory()) / 1_048_576} MB + ${android.os.Debug.getNativeHeapAllocatedSize() / 1_048_576} MB native, while: ${com.titanejstudios.tuner.data.SafeMode.doing})")
+        }
+        // Pictures are the easiest thing to give back; they reload when needed.
+        if (level >= TRIM_MEMORY_RUNNING_LOW) runCatching { coil.Coil.imageLoader(this).memoryCache?.clear() }
     }
 
     /**

@@ -1887,6 +1887,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     }
 
     private fun startLive(channel: Channel, force: Boolean = false, preview: Boolean = false) {
+        com.titanejstudios.tuner.data.SafeMode.doing = "Watching live TV: ${channel.name}"
         if (vpnBlocks()) return
         if (zapPreview != null) {
             zapJob?.cancel()
@@ -2056,6 +2057,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         playback.stop()
         mode = null
         if (wasPlaying) sendHa("stopped")
+        com.titanejstudios.tuner.data.SafeMode.doing = "Browsing"
     }
 
     fun onAppStopped() {
@@ -3248,6 +3250,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     }
 
     private fun startVod(m: PlayMode.Vod, fromStart: Boolean, startAt: Long? = null) {
+        com.titanejstudios.tuner.data.SafeMode.doing = "Watching ${m.title}" + (m.subtitle?.let { " $it" } ?: "")
         // Downloads play from the phone itself, so the VPN kill switch doesn't apply.
         if (!m.url.startsWith("file:") && vpnBlocks()) {
             AppLog.info("Didn't play ${m.title}: the VPN kill switch is on and the VPN isn't connected")
@@ -4206,6 +4209,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         val meta = MediaMetadata.Builder().setTitle(item.title).setArtist(item.subtitle)
         playback.play(url, live = false, startPositionMs = if (fromStart) 0L else item.viewOffsetMs, metadata = meta.build())
         (mode as? PlayMode.Vod)?.let { maybeRecap(it, if (fromStart) 0L else item.viewOffsetMs) }
+        com.titanejstudios.tuner.data.SafeMode.doing = "Watching ${item.title}" + (item.subtitle?.let { " $it" } ?: "") + " on Plex"
         lookUpPlexPlaying(item)
         sendHa("playing", mapOf("kind" to "plex", "title" to item.title, "subtitle" to item.subtitle))
         navigate(Screen.Player)

@@ -130,11 +130,23 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         vm.onAppStarted()
+        heartbeat.run()
     }
 
     override fun onStop() {
         super.onStop()
         vm.onAppStopped()
+        heartbeatHandler.removeCallbacks(heartbeat)
+        com.titanejstudios.tuner.data.SafeMode.cleanStop()
+    }
+
+    /** Every 5 seconds on screen: "still running, doing this" (see SafeMode – how a silent close is noticed). */
+    private val heartbeatHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val heartbeat: Runnable = object : Runnable {
+        override fun run() {
+            runCatching { com.titanejstudios.tuner.data.SafeMode.heartbeat(this@MainActivity) }
+            heartbeatHandler.postDelayed(this, 5_000L)
+        }
     }
 
     /** Colour / Guide / DVR / TV buttons work from any screen (see TunerViewModel.handleShortcut). */
