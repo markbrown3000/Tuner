@@ -5869,30 +5869,45 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
             showNotice("Getting your films ready – try again in a moment")
             return
         }
+        if (surpriseJob?.isActive == true) return
         val seen = resume.keys + store.resumeDone.keys
         val learned = Taste.fromJson(taste.toJson())
+        val shown = surpriseShown.toSet()
+        val ratings = vodRatings.toMap()
+        val noKey = tmdbKey == null
         val t = System.currentTimeMillis()
-        // Each film scored once (rating, nudged by your taste), then a random one of the best 60.
-        val pool = list.asSequence()
-            .filter { it.id !in seen && it.id !in surpriseShown }
-            .filter { thumbOf(it.name) >= 0 }
-            .filter { !com.titanejstudios.tuner.ui.isAdultTitle(it.name, it.category) }
-            .map { it to ratingValueFor(it.name, false, it.rating) }
-            .filter { it.second >= 6.8 }
-            .map { (m, r) -> m to r + learned.score(FilmName.parse(m.name).first, null, t).first / 20.0 }
-            .toList()
-            .sortedByDescending { it.second }
-            .take(60)
-        if (pool.isEmpty()) {
-            showNotice(if (tmdbKey == null) "Surprise me needs film ratings – add a TMDB key in Settings" else "Browse Films & TV a little first so Flicker can find the ratings")
-            requestRatings(list.take(200).map { it.name }, false)
-            return
+        // Worked out away from the screen: a big film list on the main thread froze the TV (and Android closed Flicker).
+        surpriseJob = viewModelScope.launch {
+            val pool = runCatching {
+                withContext(Dispatchers.Default) {
+                    // Each film scored once (rating, nudged by your taste), then a random one of the best 60.
+                    list.asSequence()
+                        .filter { it.id !in seen && it.id !in shown }
+                        .map { it to (ratings[ratingKey(it.name, false)]?.value ?: if (noKey) it.rating?.replace(',', '.')?.toDoubleOrNull() ?: 0.0 else 0.0) }
+                        .filter { it.second >= 6.8 }
+                        .filter { !com.titanejstudios.tuner.ui.isAdultTitle(it.first.name, it.first.category) }
+                        .mapNotNull { (m, r) ->
+                            val title = FilmName.parse(m.name).first
+                            // 👎 films are left out.
+                            if (Taste.key(title) in learned.disliked) null else m to r + learned.score(title, null, t).first / 20.0
+                        }
+                        .toList()
+                        .sortedByDescending { it.second }
+                        .take(60)
+                }
+            }.onFailure { AppLog.warn("Surprise me failed", it) }.getOrDefault(emptyList())
+            if (pool.isEmpty()) {
+                showNotice(if (tmdbKey == null) "Surprise me needs film ratings – add a TMDB key in Settings" else "Browse Films & TV a little first so Flicker can find the ratings")
+                requestRatings(list.take(200).map { it.name }, false)
+                return@launch
+            }
+            val pick = pool.random().first
+            surpriseShown += pick.id
+            surprise = pick
+            requestRatings(listOf(pick.name), false)
         }
-        val pick = pool.random().first
-        surpriseShown += pick.id
-        surprise = pick
-        requestRatings(listOf(pick.name), false)
     }
+    private var surpriseJob: Job? = null
 
     fun closeSurprise() {
         surprise = null
