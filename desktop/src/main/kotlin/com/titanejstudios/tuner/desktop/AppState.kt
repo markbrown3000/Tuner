@@ -1140,9 +1140,33 @@ class AppState(val config: Config, val player: Player, private val scope: Corout
 
     var secondScreen by mutableStateOf<java.awt.Rectangle?>(null)
 
+    /** Full screen on this monitor (its own borderless window – Windows' own full screen leaves the title bar). */
+    var fullHere by mutableStateOf(false)
+
+    fun goFull(r: java.awt.Rectangle) {
+        if (watching == null && playingChannel == null) return say("Play something first")
+        mini = false
+        fullHere = true
+        secondScreen = r
+        scope.launch {
+            delay(500)
+            player.restart()
+        }
+    }
+
+    fun leaveFull() {
+        secondScreen = null
+        fullHere = false
+        scope.launch {
+            delay(500)
+            player.restart()
+        }
+    }
+
     fun toggleSecondScreen() {
         if (secondScreen != null) {
             secondScreen = null
+            fullHere = false
         } else {
             val r = otherScreen() ?: return say("Only one screen found")
             if (watching == null && playingChannel == null) return say("Play something first")
@@ -1250,7 +1274,10 @@ class AppState(val config: Config, val player: Player, private val scope: Corout
     fun toggleMini() {
         if (watching == null && playingChannel == null) return say("Play something first")
         mini = !mini
-        if (mini) secondScreen = null
+        if (mini) {
+            secondScreen = null
+            fullHere = false
+        }
         // VLC has to be told where to draw once the video's moved window.
         scope.launch {
             delay(500)

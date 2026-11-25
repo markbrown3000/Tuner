@@ -194,8 +194,23 @@ object Updater {
         throw IllegalStateException("Too many redirects")
     }
 
-    /** Starts the installer (it replaces this version) – Flicker then closes. */
+    /**
+     * Starts the installer (it replaces this version) – Flicker then closes, and a little script
+     * opens the new Flicker once the installer has finished.
+     */
     fun install(file: File) {
-        ProcessBuilder("msiexec", "/i", file.absolutePath, "/passive").start()
+        val exe = System.getProperty("jpackage.app-path")
+        val script = File(System.getProperty("java.io.tmpdir"), "flicker-update.cmd")
+        script.writeText(
+            listOfNotNull(
+                "@echo off",
+                // Give Flicker a moment to close first, so its files can be replaced.
+                "timeout /t 3 /nobreak >nul",
+                "start \"\" /wait msiexec /i \"${file.absolutePath}\" /passive /norestart",
+                exe?.takeIf { it.isNotBlank() }?.let { "start \"\" \"$it\"" },
+                "del \"%~f0\"",
+            ).joinToString("\r\n"),
+        )
+        ProcessBuilder("cmd", "/c", "start", "FlickerUpdate", "/min", "cmd", "/c", script.absolutePath).start()
     }
 }

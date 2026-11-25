@@ -115,9 +115,17 @@ private fun runApp() = application {
             )
         }.getOrNull()
     }
-    fun fullScreen() = windowState.placement == WindowPlacement.Fullscreen
+    // Full screen: a borderless window over the whole monitor the window's on (taskbar too).
+    val mainWindowRef = remember { arrayOfNulls<java.awt.Window>(1) }
+    fun fullScreen() = app.secondScreen != null && app.fullHere
     fun toggleFullScreen() {
-        windowState.placement = if (fullScreen()) WindowPlacement.Floating else WindowPlacement.Fullscreen
+        if (app.secondScreen != null) {
+            app.leaveFull()
+            return
+        }
+        val r = mainWindowRef[0]?.graphicsConfiguration?.bounds
+            ?: java.awt.GraphicsEnvironment.getLocalGraphicsEnvironment().defaultScreenDevice.defaultConfiguration.bounds
+        app.goFull(r)
     }
     fun rememberWindow() {
         if (windowState.placement == WindowPlacement.Floating) {
@@ -189,6 +197,39 @@ private fun runApp() = application {
             },
         )
     }
+    // The keys work the same in the main window and the full-screen one.
+    val onKey: (androidx.compose.ui.input.key.KeyEvent) -> Boolean = handler@{ e ->
+        app.activity()
+        if (e.type != KeyEventType.KeyDown) return@handler false
+        val watching = app.watching != null && !app.mini
+        when {
+            e.key == Key.F11 || (e.key == Key.F && e.isCtrlPressed) -> { toggleFullScreen(); true }
+            e.key == Key.F1 || (e.key == Key.Slash && e.isShiftPressed && app.page != Page.Search && app.page != Page.Settings) -> { app.showKeys = !app.showKeys; true }
+            e.key == Key.Escape && app.showKeys -> { app.showKeys = false; true }
+            e.key == Key.Escape && app.secondScreen != null -> { app.leaveFull(); true }
+            e.key == Key.Escape && watching -> { app.stopWatching(save = true); true }
+            e.key == Key.Spacebar && watching && app.player.ready -> { app.player.togglePause(); true }
+            // Live TV: Space pauses (and keeps recording), then carries on from there.
+            e.key == Key.Spacebar && app.page == Page.Live && app.player.ready -> { app.togglePauseLive(); true }
+            // Typing a channel number (not while typing in a search box – that keeps the keys).
+            !watching && digitOf(e.key) != null && app.page in setOf(Page.Live, Page.Home, Page.Guide) -> { app.typeDigit(digitOf(e.key)!!); true }
+            watching && e.key == Key.DirectionLeft -> { app.player.skip(-10_000L); true }
+            watching && e.key == Key.DirectionRight -> { app.player.skip(30_000L); true }
+            !watching && (e.key == Key.PageUp || (fullScreen() && e.key == Key.DirectionUp)) -> { app.zapBy(-1); true }
+            !watching && (e.key == Key.PageDown || (fullScreen() && e.key == Key.DirectionDown)) -> { app.zapBy(1); true }
+            e.key == Key.M && e.isCtrlPressed -> { app.player.toggleMute(); true }
+            // The keyboard's media and volume keys.
+            e.key == Key.MediaPlayPause || e.key == Key.MediaPlay || e.key == Key.MediaPause ->
+                { if (watching) app.player.togglePause() else app.togglePauseLive(); true }
+            e.key == Key.MediaNext -> { if (!watching) app.zapBy(1) else app.player.skip(30_000L); true }
+            e.key == Key.MediaPrevious -> { if (!watching) app.zapBy(-1) else app.player.skip(-10_000L); true }
+            e.key == Key.MediaStop -> { app.stopWatching(save = true); true }
+            e.key == Key.VolumeUp || (e.key == Key.DirectionUp && e.isCtrlPressed) -> { app.setVolume(app.config.volume + 10); true }
+            e.key == Key.VolumeDown || (e.key == Key.DirectionDown && e.isCtrlPressed) -> { app.setVolume(app.config.volume - 10); true }
+            e.key == Key.VolumeMute -> { app.player.toggleMute(); true }
+            else -> false
+        }
+    }
     Window(
         onCloseRequest = {
             if (config.keepRunning && icon != null) {
@@ -206,38 +247,7 @@ private fun runApp() = application {
         state = windowState,
         title = "Flicker",
         icon = icon,
-        onKeyEvent = handler@{ e ->
-            app.activity()
-            if (e.type != KeyEventType.KeyDown) return@handler false
-            val watching = app.watching != null && !app.mini
-            when {
-                e.key == Key.F11 || (e.key == Key.F && e.isCtrlPressed) -> { toggleFullScreen(); true }
-                e.key == Key.F1 || (e.key == Key.Slash && e.isShiftPressed && app.page != Page.Search && app.page != Page.Settings) -> { app.showKeys = !app.showKeys; true }
-                e.key == Key.Escape && app.showKeys -> { app.showKeys = false; true }
-                e.key == Key.Escape && fullScreen() -> { windowState.placement = WindowPlacement.Floating; true }
-                e.key == Key.Escape && watching -> { app.stopWatching(save = true); true }
-                e.key == Key.Spacebar && watching && app.player.ready -> { app.player.togglePause(); true }
-                // Live TV: Space pauses (and keeps recording), then carries on from there.
-                e.key == Key.Spacebar && app.page == Page.Live && app.player.ready -> { app.togglePauseLive(); true }
-                // Typing a channel number (not while typing in a search box – that keeps the keys).
-                !watching && digitOf(e.key) != null && app.page in setOf(Page.Live, Page.Home, Page.Guide) -> { app.typeDigit(digitOf(e.key)!!); true }
-                watching && e.key == Key.DirectionLeft -> { app.player.skip(-10_000L); true }
-                watching && e.key == Key.DirectionRight -> { app.player.skip(30_000L); true }
-                !watching && (e.key == Key.PageUp || (fullScreen() && e.key == Key.DirectionUp)) -> { app.zapBy(-1); true }
-                !watching && (e.key == Key.PageDown || (fullScreen() && e.key == Key.DirectionDown)) -> { app.zapBy(1); true }
-                e.key == Key.M && e.isCtrlPressed -> { app.player.toggleMute(); true }
-                // The keyboard's media and volume keys.
-                e.key == Key.MediaPlayPause || e.key == Key.MediaPlay || e.key == Key.MediaPause ->
-                    { if (watching) app.player.togglePause() else app.togglePauseLive(); true }
-                e.key == Key.MediaNext -> { if (!watching) app.zapBy(1) else app.player.skip(30_000L); true }
-                e.key == Key.MediaPrevious -> { if (!watching) app.zapBy(-1) else app.player.skip(-10_000L); true }
-                e.key == Key.MediaStop -> { app.stopWatching(save = true); true }
-                e.key == Key.VolumeUp || (e.key == Key.DirectionUp && e.isCtrlPressed) -> { app.setVolume(app.config.volume + 10); true }
-                e.key == Key.VolumeDown || (e.key == Key.DirectionDown && e.isCtrlPressed) -> { app.setVolume(app.config.volume - 10); true }
-                e.key == Key.VolumeMute -> { app.player.toggleMute(); true }
-                else -> false
-            }
-        },
+        onKeyEvent = onKey,
     ) {
         MaterialTheme(colorScheme = darkColorScheme(primary = Sky, background = Ink, surface = Panel)) {
             // Text size (Settings › This PC): everything scales together.
@@ -245,7 +255,8 @@ private fun runApp() = application {
             androidx.compose.runtime.CompositionLocalProvider(
                 androidx.compose.ui.platform.LocalDensity provides androidx.compose.ui.unit.Density(d.density * uiScale, d.fontScale),
             ) {
-                Shell(app, fullScreen(), ::toggleFullScreen)
+                LaunchedEffect(Unit) { mainWindowRef[0] = window }
+                Shell(app, false, ::toggleFullScreen)
             }
         }
     }
@@ -262,15 +273,20 @@ private fun runApp() = application {
             title = "Flicker",
             icon = icon,
             undecorated = true,
-            onKeyEvent = { e ->
-                if (e.type == KeyEventType.KeyDown && e.key == Key.Escape) {
-                    app.toggleSecondScreen()
-                    true
-                } else false
-            },
+            alwaysOnTop = app.fullHere,
+            onKeyEvent = onKey,
         ) {
             MaterialTheme(colorScheme = darkColorScheme(primary = Sky, background = Ink, surface = Panel)) {
-                VideoBox(app, Modifier.fillMaxSize(), inMini = true)
+                Box(Modifier.fillMaxSize().background(Color.Black)) {
+                    VideoBox(app, Modifier.fillMaxSize(), inMini = true)
+                    // A reminder of how to get out, for a few seconds.
+                    var hint by remember { mutableStateOf(true) }
+                    LaunchedEffect(Unit) { delay(3_500); hint = false }
+                    if (hint) Text(
+                        "Esc or double-click to leave full screen", color = Color.White, fontSize = 15.sp,
+                        modifier = Modifier.align(Alignment.TopCenter).padding(24.dp).clip(RoundedCornerShape(10.dp)).background(Color.Black.copy(alpha = 0.7f)).padding(horizontal = 14.dp, vertical = 8.dp),
+                    )
+                }
             }
         }
     }
