@@ -14,6 +14,53 @@ class TunerApplication : Application(), ImageLoaderFactory {
         com.titanejstudios.tuner.data.SafeMode.onAppStart(this)
         AppLog.init(this)
         if (com.titanejstudios.tuner.data.SafeMode.active) AppLog.info("Started in safe mode")
+        logHowItLastClosed()
+    }
+
+    /**
+     * Android 11+ keeps why an app last stopped – including the ones Flicker can't log itself:
+     * the TV running out of memory, a freeze ("not responding"), or a crash inside the video decoder.
+     * Writes any new ones to the problem log (and makes them the "closed unexpectedly" notice).
+     */
+    private fun logHowItLastClosed() {
+        if (android.os.Build.VERSION.SDK_INT < 30) return
+        runCatching {
+            val am = getSystemService(ACTIVITY_SERVICE) as android.app.ActivityManager
+            val prefs = getSharedPreferences("exit_reasons", MODE_PRIVATE)
+            val seen = prefs.getLong("seen_at", 0L)
+            val exits = am.getHistoricalProcessExitReasons(packageName, 0, 5).filter { it.timestamp > seen }
+            if (exits.isEmpty()) return
+            prefs.edit().putLong("seen_at", exits.maxOf { it.timestamp }).apply()
+            val fmt = java.text.SimpleDateFormat("d MMM HH:mm:ss", java.util.Locale.UK)
+            for (e in exits.sortedBy { it.timestamp }) {
+                val why = when (e.reason) {
+                    android.app.ApplicationExitInfo.REASON_LOW_MEMORY -> "the TV ran out of memory"
+                    android.app.ApplicationExitInfo.REASON_ANR -> "it froze (Android said \"not responding\")"
+                    android.app.ApplicationExitInfo.REASON_CRASH_NATIVE -> "a crash inside the video or sound decoder"
+                    android.app.ApplicationExitInfo.REASON_CRASH -> "a crash"
+                    android.app.ApplicationExitInfo.REASON_SIGNALED -> "Android stopped it (signal ${e.status})"
+                    android.app.ApplicationExitInfo.REASON_EXCESSIVE_RESOURCE_USAGE -> "it used too much of the TV's power"
+                    android.app.ApplicationExitInfo.REASON_USER_REQUESTED, android.app.ApplicationExitInfo.REASON_USER_STOPPED -> "you closed it"
+                    android.app.ApplicationExitInfo.REASON_EXIT_SELF -> "it closed itself"
+                    android.app.ApplicationExitInfo.REASON_PACKAGE_UPDATED -> "it was updated"
+                    android.app.ApplicationExitInfo.REASON_OTHER -> "Android closed it (other)"
+                    else -> "reason ${e.reason}"
+                }
+                val memory = if (e.pss > 0) " · it was using ${e.pss / 1024} MB" else ""
+                val unexpected = e.reason in setOf(
+                    android.app.ApplicationExitInfo.REASON_LOW_MEMORY, android.app.ApplicationExitInfo.REASON_ANR,
+                    android.app.ApplicationExitInfo.REASON_CRASH_NATIVE, android.app.ApplicationExitInfo.REASON_SIGNALED,
+                    android.app.ApplicationExitInfo.REASON_EXCESSIVE_RESOURCE_USAGE,
+                )
+                val line = "Last closed ${fmt.format(java.util.Date(e.timestamp))}: $why$memory" + (e.description?.let { " ($it)" } ?: "")
+                if (unexpected) {
+                    // The first lines of Android's report say where it was stuck or crashed.
+                    val trace = runCatching { e.traceInputStream?.bufferedReader()?.use { r -> r.lineSequence().take(40).joinToString("\n") } }.getOrNull()
+                    AppLog.warn(line + (trace?.let { "\n$it" } ?: ""))
+                    com.titanejstudios.tuner.data.SafeMode.noteExit("${why.replaceFirstChar { it.uppercase() }}$memory", e.timestamp)
+                } else AppLog.info(line)
+            }
+        }.onFailure { AppLog.warn("Couldn't read how Flicker last closed", it) }
     }
 
     /** Logos and programme pictures are cached on disk so they appear instantly next time. */

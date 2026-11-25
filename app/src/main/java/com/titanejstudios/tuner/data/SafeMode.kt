@@ -39,6 +39,15 @@ object SafeMode {
         lastCrashAt = p.getLong("last_crash_at", 0L)
     }
 
+    /** A closing Flicker couldn't catch itself (out of memory, frozen, decoder crash): shown once at start. */
+    fun noteExit(summary: String, at: Long) {
+        val p = prefs ?: return
+        if (at <= lastCrashAt) return
+        lastCrash = summary
+        lastCrashAt = at
+        p.edit().putString("last_crash", summary).putLong("last_crash_at", at).apply()
+    }
+
     /** Called by the crash handler (AppLog). */
     fun onCrash(error: Throwable) {
         val p = prefs ?: return
