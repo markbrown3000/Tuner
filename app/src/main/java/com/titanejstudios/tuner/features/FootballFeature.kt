@@ -80,7 +80,7 @@ class FootballFeature(
         val name = team.shortName
         espnTeams = espnTeams + (name to team)
         saveTeams()
-        if (name !in teams) setTeams(teams + name)
+        if (name !in teams) saveTeamNames(teams + name)
         notify("Following $name – their fixtures are on My teams")
         scope.launch { loadFixtures(force = true) }
     }
@@ -90,19 +90,19 @@ class FootballFeature(
         val name = team.trim()
         if (name.isEmpty()) return
         if (name in teams) {
-            setTeams(teams - name)
+            saveTeamNames(teams - name)
             espnTeams = espnTeams - name
             saveTeams()
             fixtures = fixtures.filter { it.team != name }
             store.espnFixtures = JSONArray().apply { fixtures.forEach { put(it.toJson()) } }.toString()
             notify("Stopped following $name")
         } else {
-            setTeams(teams + name)
+            saveTeamNames(teams + name)
             notify("Following $name – their games will stand out in the guide")
         }
     }
 
-    private fun setTeams(t: Set<String>) {
+    private fun saveTeamNames(t: Set<String>) {
         teams = t
         store.footballTeams = t
         store.setSyncStamp(com.titanejstudios.tuner.integrations.LinkSync.TEAMS, System.currentTimeMillis())
