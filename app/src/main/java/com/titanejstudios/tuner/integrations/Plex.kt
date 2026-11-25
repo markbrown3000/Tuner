@@ -242,6 +242,13 @@ class Plex(private val clientId: String) {
         )
     }
 
+    /** A film or episode as Plex has it now (watched or not; an episode's show and season). Null if Plex doesn't answer. */
+    fun entryFor(s: Server, ratingKey: String): Entry? = runCatching {
+        val md = JSONObject(read(open("${s.uri}/library/metadata/$ratingKey", token = s.token)))
+            .optJSONObject("MediaContainer")?.optJSONArray("Metadata") ?: return null
+        entries(md, s, poster = false).firstOrNull()
+    }.getOrNull()
+
     /** Film and TV libraries on every server (music and photos are left out). */
     fun sections(servers: List<Server>): List<Section> {
         val out = ArrayList<Section>()

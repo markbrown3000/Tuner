@@ -68,7 +68,7 @@ import com.titanejstudios.tuner.data.Programme
 import kotlinx.coroutines.delay
 import android.view.KeyEvent as AndroidKey
 
-private enum class Overlay { None, Channels, Options, Audio, Subtitles, MiniGuide, Favourites, Sleep, LipSync, Versions, Send, Controls }
+private enum class Overlay { None, Channels, Options, Audio, Subtitles, MiniGuide, Favourites, Sleep, LipSync, Versions, Send, Controls, PictureSound }
 
 @Composable
 fun PlayerScreen(vm: TunerViewModel) {
@@ -709,6 +709,19 @@ fun PlayerScreen(vm: TunerViewModel) {
                     MiniGuideOverlay(vm, ch, Modifier.align(Alignment.BottomCenter)) { overlay = Overlay.None }
                 }
                 Overlay.Channels -> ChannelListOverlay(vm, Modifier.align(Alignment.CenterStart)) { overlay = Overlay.None }
+                Overlay.PictureSound -> MenuDialog(
+                    title = "Picture & sound",
+                    items = listOf(
+                        // Each change keeps the menu open, so you can press again.
+                        MenuItem("🌙 Night mode sound", if (vm.nightMode) "On" else "Off") { vm.toggleNightMode(); overlay = Overlay.PictureSound },
+                        MenuItem("🗣 Clearer speech", if (vm.clearSpeech) "On" else "Off") { vm.toggleClearSpeech(); overlay = Overlay.PictureSound },
+                        MenuItem("Subtitle size", vm.subtitleSizeLabel) { vm.cycleSubtitleSize(); overlay = Overlay.PictureSound },
+                        MenuItem("📐 Picture size", vm.pictureModeLabel) { vm.cyclePictureMode(); overlay = Overlay.PictureSound },
+                        MenuItem("👄 Sound timing (lip sync)", vm.lipSyncLabel()) { overlay = Overlay.LipSync },
+                        MenuItem("ℹ Stream info", if (showStats) "On" else "Off") { showStats = !showStats },
+                    ),
+                    onDismiss = { overlay = Overlay.None },
+                )
                 Overlay.Sleep -> MenuDialog(
                     title = "Sleep timer",
                     subtitle = vm.sleepLabel,
@@ -895,26 +908,25 @@ private fun OptionsMenu(
             if (mode is PlayMode.CatchupPlay) add(MenuItem("Back to live TV") { vm.backToLive() })
             add(MenuItem("Restart from the beginning") { playback.seekTo(0L) })
         }
-        // Shown whenever there's sound to choose or explain – films and Plex often have several tracks.
-        if (audio.size > 1 || (audio.isNotEmpty() && mode !is PlayMode.Live)) {
-            add(MenuItem("🔈 Audio", audio.firstOrNull { it.selected }?.label ?: "${audio.size} tracks") { onOverlay(Overlay.Audio) })
-        }
-        if (text.isNotEmpty()) {
-            val detail = if (playback.subtitlesDisabled) "Off" else text.firstOrNull { it.selected }?.label ?: "Auto"
-            add(MenuItem("Subtitles", detail) { onOverlay(Overlay.Subtitles) })
-        }
         // Go to… the show, series or film page (on phones it keeps playing in the mini player).
         vm.playingSeries?.let { s ->
             add(MenuItem("📺 Go to series", "${s.name} – all the episodes") { vm.goToSeries() })
             add(MenuItem(if (vm.inWatchlist(s.id)) "✓ In My list" else "＋ Add series to My list") { vm.toggleWatchlist(s) })
         }
-        vm.playingPlexShow?.let { s -> add(MenuItem("📺 Go to show", "${s.title} on Plex – all the episodes") { vm.goToPlexShow() }) }
+        vm.playingPlexShow?.let { s ->
+            add(MenuItem("📺 Go to show", "${s.title} – all the episodes") { vm.goToPlexShow() })
+            vm.playingPlexSeason?.let { n -> add(MenuItem("📂 Go to Season $n") { vm.goToPlexShow(season = n) }) }
+        }
+        vm.playingPlexEntry?.let { e ->
+            add(MenuItem(if (e.watched) "↺ Mark as unwatched" else "✓ Mark as watched", if (e.type == "episode") "on Plex" else null) { vm.togglePlexWatchedPlaying() })
+        }
         vm.nextEpisode?.let { e -> add(MenuItem("⏭ Next episode", "S${e.season} E${e.number}  ${e.title}") { vm.playNextEpisodeNow() }) }
         vm.playingFilm?.let { f ->
             add(MenuItem(if (vm.inWatchlist(f.id)) "✓ In My list" else "＋ Add film to My list") { vm.toggleWatchlist(f) })
         }
         if (mode is PlayMode.Vod && !vm.activeProfile.kids) {
-            add(MenuItem(if (mode.seriesId != null) "🎬 Go to series info & cast" else "🎬 Go to film page", "cast, trailer, the rest of the series") { vm.goToFilmPage() })
+            val episode = mode.seriesId != null || vm.playingPlexEntry?.type == "episode" || vm.playingPlexShow != null
+            add(MenuItem(if (episode) "🎬 Show info & cast" else "🎬 Go to film page", if (episode) "plot, cast, trailer" else "cast, trailer, the rest of the series") { vm.goToFilmPage() })
         }
         vm.playingRateable?.let { (title, genre) ->
             val t = vm.thumbOf(title)
@@ -926,6 +938,14 @@ private fun OptionsMenu(
         }
         vm.playingShowName?.let { name ->
             add(MenuItem("🔍 More of $name", "other showings, episodes, films and Plex") { vm.findMoreOf(name) })
+        }
+        // Shown whenever there's sound to choose or explain – films and Plex often have several tracks.
+        if (audio.size > 1 || (audio.isNotEmpty() && mode !is PlayMode.Live)) {
+            add(MenuItem("🔈 Audio", audio.firstOrNull { it.selected }?.label ?: "${audio.size} tracks") { onOverlay(Overlay.Audio) })
+        }
+        if (text.isNotEmpty()) {
+            val detail = if (playback.subtitlesDisabled) "Off" else text.firstOrNull { it.selected }?.label ?: "Auto"
+            add(MenuItem("Subtitles", detail) { onOverlay(Overlay.Subtitles) })
         }
         if (mode is PlayMode.Vod && !mode.contentId.startsWith("plex:")) {
             add(MenuItem("🔎 Find subtitles online", if (vm.openSubtitlesKey == null) "needs a key in Settings" else null) { vm.findSubtitles() })
@@ -960,12 +980,7 @@ private fun OptionsMenu(
             )
         }
         add(MenuItem("😴 Sleep timer", vm.sleepLabel) { onOverlay(Overlay.Sleep) })
-        add(MenuItem("🌙 Night mode sound", if (vm.nightMode) "On" else "Off") { vm.toggleNightMode() })
-        add(MenuItem("🗣 Clearer speech", if (vm.clearSpeech) "On" else "Off") { vm.toggleClearSpeech() })
-        add(MenuItem("Subtitle size", vm.subtitleSizeLabel) { vm.cycleSubtitleSize() })
-        add(MenuItem("📐 Picture size", vm.pictureModeLabel) { vm.cyclePictureMode() })
-        add(MenuItem("👄 Sound timing (lip sync)", vm.lipSyncLabel()) { onOverlay(Overlay.LipSync) })
-        add(MenuItem("Stream info", if (showStats) "On" else "Off") { onToggleStats() })
+        add(MenuItem("⚙ Picture & sound ›", "night mode, clearer speech, sizes, lip sync, info") { onOverlay(Overlay.PictureSound) })
         if (pipSupported(context)) add(MenuItem("Picture-in-picture") { onPip() })
     }
     val title = when (mode) {
@@ -974,7 +989,7 @@ private fun OptionsMenu(
         is PlayMode.Vod -> mode.title
         is PlayMode.RecordingPlay -> mode.recording.title
     }
-    MenuDialog(title, items, onDismiss)
+    MenuDialog(title, items, onDismiss, subtitle = (mode as? PlayMode.Vod)?.subtitle)
 }
 
 @Composable

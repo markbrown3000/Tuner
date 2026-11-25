@@ -4160,6 +4160,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         val meta = MediaMetadata.Builder().setTitle(item.title).setArtist(item.subtitle)
         playback.play(url, live = false, startPositionMs = if (fromStart) 0L else item.viewOffsetMs, metadata = meta.build())
         (mode as? PlayMode.Vod)?.let { maybeRecap(it, if (fromStart) 0L else item.viewOffsetMs) }
+        lookUpPlexPlaying(item)
         sendHa("playing", mapOf("kind" to "plex", "title" to item.title, "subtitle" to item.subtitle))
         navigate(Screen.Player)
     }
@@ -4415,7 +4416,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     /** What the player shows the name of (the series or show for episodes, the programme on live TV). */
     val playingShowName: String?
         get() = when (val m = mode) {
-            is PlayMode.Vod -> m.title
+            is PlayMode.Vod -> playingPlexShow?.title ?: playingPlexEntry?.showName ?: m.title
             is PlayMode.CatchupPlay -> m.programme.title
             is PlayMode.Live -> nowNext(m.channel.id, now).first?.title
             else -> null
@@ -4432,17 +4433,48 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         openSeriesDetail(s)
     }
 
-    fun goToPlexShow() {
+    fun goToPlexShow(season: Int? = null) {
         val s = playingPlexShow ?: return
         leavePlayer()
+        plexFeature.openAtSeason = season
         openPlexShow(s)
+    }
+
+    /** The Plex film or episode that's playing, as Plex has it (looked up when it starts). */
+    var playingPlexEntry by mutableStateOf<com.titanejstudios.tuner.integrations.Plex.Entry?>(null); private set
+    val playingPlexSeason: Int? get() = playingPlexEntry?.takeIf { it.type == "episode" && it.season > 0 }?.season
+
+    /** Looks up what's playing on Plex: its show and season, and whether it's watched. */
+    private fun lookUpPlexPlaying(item: Plex.Item) {
+        playingPlexEntry = null
+        viewModelScope.launch {
+            val e = runCatching { plexFeature.entryFor(item.server, item.ratingKey) }.getOrNull() ?: return@launch
+            if ((mode as? PlayMode.Vod)?.contentId != "plex:" + item.ratingKey) return@launch
+            playingPlexEntry = e
+            if (e.type == "episode" && (plexShowPlaying == null || plexShowFor != item.ratingKey)) {
+                plexShowPlaying = e.showEntry()
+                plexShowFor = item.ratingKey
+            }
+        }
+    }
+
+    fun togglePlexWatchedPlaying() {
+        val e = playingPlexEntry ?: return
+        val now = !e.watched
+        plexFeature.setWatched(e, now, { showNotice(it) }) {}
+        playingPlexEntry = com.titanejstudios.tuner.integrations.Plex.Entry(
+            e.ratingKey, e.title, e.year, e.image, e.type, e.playUrl, e.viewOffsetMs, e.durationMs, now, e.summary, e.rating,
+            e.season, e.episode, e.leafCount, e.viewedLeafCount, e.server, e.library, e.sectionKey, e.art, e.contentRating, e.showKey, e.showName,
+        )
+        showNotice(if (now) "✓ Marked as watched on Plex" else "Marked as unwatched on Plex")
     }
 
     fun goToFilmPage() {
         val m = mode as? PlayMode.Vod ?: return
-        val isSeries = m.seriesId != null || playingPlexShow != null || (m.contentId.startsWith("plex:") && m.subtitle?.matches(Regex("S\\d+ E\\d+.*")) == true)
+        val isSeries = m.seriesId != null || playingPlexShow != null || playingPlexEntry?.type == "episode" || (m.contentId.startsWith("plex:") && m.subtitle?.matches(Regex("S\\d+ E\\d+.*")) == true)
+        val name = playingPlexShow?.title ?: playingPlexEntry?.showName ?: m.title
         leavePlayer()
-        openFilmInfo(m.title, isSeries)
+        openFilmInfo(name, isSeries)
     }
 
     /** Search everything (guide, films, series, Plex, YouTube) for the show. */

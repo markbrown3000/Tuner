@@ -128,13 +128,14 @@ fun WideTile(title: String, image: String?, caption: String? = null, progress: F
 fun VideoBox(app: AppState, modifier: Modifier, inMini: Boolean = false) {
     val player = app.player
     Box(modifier.background(Color.Black), contentAlignment = Alignment.Center) {
-        val video = player.component
+        val video = if (player.ready) player.component else null
         if (app.videoElsewhere && !inMini) Text(
             if (app.secondScreen != null) "🖥 Playing on your other screen\nClick to bring it back here" else "▣ Playing in the mini player\nClick to bring it back here",
             color = Soft, fontSize = 15.sp,
             modifier = Modifier.clickable { if (app.secondScreen != null) app.toggleSecondScreen() else app.toggleMini() }.padding(24.dp),
         )
         else if (video != null) SwingPanel(factory = { video }, modifier = Modifier.fillMaxSize())
+        else if (!player.ready) Text("Starting the video player…", color = Soft, fontSize = 15.sp)
         else Text(
             "Flicker couldn't start its video player.\nInstall VLC (64-bit) from videolan.org, then open Flicker again.",
             color = Color.White, fontSize = 16.sp, modifier = Modifier.padding(24.dp),

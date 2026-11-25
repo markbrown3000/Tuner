@@ -206,9 +206,9 @@ private fun runApp() = application {
                 e.key == Key.Escape && app.showKeys -> { app.showKeys = false; true }
                 e.key == Key.Escape && fullScreen() -> { windowState.placement = WindowPlacement.Floating; true }
                 e.key == Key.Escape && watching -> { app.stopWatching(save = true); true }
-                e.key == Key.Spacebar && watching && app.player.component != null -> { app.player.togglePause(); true }
+                e.key == Key.Spacebar && watching && app.player.ready -> { app.player.togglePause(); true }
                 // Live TV: Space pauses (and keeps recording), then carries on from there.
-                e.key == Key.Spacebar && app.page == Page.Live && app.player.component != null -> { app.togglePauseLive(); true }
+                e.key == Key.Spacebar && app.page == Page.Live && app.player.ready -> { app.togglePauseLive(); true }
                 // Typing a channel number (not while typing in a search box – that keeps the keys).
                 !watching && digitOf(e.key) != null && app.page in setOf(Page.Live, Page.Home, Page.Guide) -> { app.typeDigit(digitOf(e.key)!!); true }
                 watching && e.key == Key.DirectionLeft -> { app.player.skip(-10_000L); true }

@@ -17,7 +17,8 @@ class MultiPlayers(private val main: Player) {
         if (!main.available) return null
         slots[i]?.let { return it }
         return runCatching {
-            EmbeddedMediaPlayerComponent().apply {
+            // Shares the main player's engine (making another one loads every plugin again).
+            (main.factory?.let { EmbeddedMediaPlayerComponent(it, null, null, null, null) } ?: EmbeddedMediaPlayerComponent()).apply {
                 isFocusable = false
                 videoSurfaceComponent().isFocusable = false
             }
@@ -84,7 +85,7 @@ class Recorder(private val main: Player) {
     fun start(r: PcRecording, url: String): Boolean {
         if (!main.available) return false
         return runCatching {
-            val f = factory ?: MediaPlayerFactory("--no-video-title-show").also { factory = it }
+            val f = main.factory ?: factory ?: MediaPlayerFactory("--no-video-title-show").also { factory = it }
             val p = f.mediaPlayers().newMediaPlayer()
             val dst = r.file.replace("\\", "/")
             p.media().play(url, ":sout=#std{access=file,mux=ts,dst=\"$dst\"}", ":sout-keep", ":network-caching=3000", ":http-reconnect")

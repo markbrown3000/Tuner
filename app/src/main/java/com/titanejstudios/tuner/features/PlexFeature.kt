@@ -285,6 +285,11 @@ class PlexFeature(private val store: Store, private val scope: CoroutineScope) {
         }.getOrDefault(emptyList())
     }
 
+    suspend fun entryFor(server: Plex.Server, ratingKey: String): Plex.Entry? = withContext(Dispatchers.IO) { client().entryFor(server, ratingKey) }
+
+    /** The season to open a show at ("Go to Season 29"), used once. */
+    var openAtSeason by mutableStateOf<Int?>(null)
+
     suspend fun showNamed(title: String): Plex.Entry? = withContext(Dispatchers.IO) {
         runCatching {
             if (servers.isEmpty()) activeToken()?.let { servers = client().servers(it) }

@@ -16,16 +16,45 @@ class Player {
         findVlc().also { com.titanejstudios.tuner.data.AppLog.info("VLC engine found: $it (${System.currentTimeMillis() - t} ms)") }
     }
 
-    /** Loads VLC's engine off the main thread, so the window opens straight away. */
+    /**
+     * True once the video player is made. Until then screens show "Starting the video player…"
+     * rather than waiting – making it (loading VLC and its plugins) can take several seconds.
+     */
+    var ready by androidx.compose.runtime.mutableStateOf(false)
+        private set
+
+    /** VLC's engine (the slow part: it loads every plugin), made in the background at start. */
+    @Volatile
+    var factory: uk.co.caprica.vlcj.factory.MediaPlayerFactory? = null
+        private set
+
+    /** Loads VLC's engine off the main thread, so the window opens straight away and Live TV is quick. */
     fun warmUp() {
-        Thread({ runCatching { available } }, "vlc-warm-up").apply { isDaemon = true }.start()
+        Thread({
+            runCatching {
+                if (!available) return@runCatching
+                val t = System.currentTimeMillis()
+                factory = uk.co.caprica.vlcj.factory.MediaPlayerFactory("--quiet", "--intf=dummy", "--no-snapshot-preview", "--no-video-title-show")
+                com.titanejstudios.tuner.data.AppLog.info("VLC ready (${System.currentTimeMillis() - t} ms)")
+                // The video window itself is a Swing component: made on Swing's thread, which is quick now.
+                javax.swing.SwingUtilities.invokeLater {
+                    runCatching { component }
+                    ready = true
+                    pending?.let { (u, s) -> pending = null; play(u, s) }
+                }
+            }.onFailure {
+                com.titanejstudios.tuner.data.AppLog.warn("VLC warm-up failed", it)
+                javax.swing.SwingUtilities.invokeLater { ready = true }
+            }
+        }, "vlc-warm-up").apply { isDaemon = true }.start()
     }
 
     val component: EmbeddedMediaPlayerComponent? get() = componentLazy.value
 
     private val componentLazy = lazy {
         if (!available) null else runCatching {
-            EmbeddedMediaPlayerComponent().apply {
+            val f = factory
+            (if (f != null) EmbeddedMediaPlayerComponent(f, null, null, null, null) else EmbeddedMediaPlayerComponent()).apply {
                 // Keys stay with Flicker (Space, arrows, F11), not the video.
                 isFocusable = false
                 videoSurfaceComponent().isFocusable = false
@@ -74,11 +103,16 @@ class Player {
         return runCatching { NativeDiscovery().discover() }.getOrDefault(false)
     }
 
-    private fun player() = component?.mediaPlayer()
+    private fun player() = if (ready) component?.mediaPlayer() else null
 
     /** Plays [url]; [startMs] jumps there once it's going (films you're part way through). */
     fun play(url: String, startMs: Long = 0L) {
         lastUrl = url
+        // Still warming up: start it as soon as the player's ready (rather than freezing the window).
+        if (!ready) {
+            pending = url to startMs
+            return
+        }
         val opts = mutableListOf(":network-caching=1500", ":http-reconnect")
         if (deinterlace) opts += listOf(":deinterlace=1", ":deinterlace-mode=yadif")
         if (normalise) opts += listOf(":audio-filter=normvol", ":norm-max-level=1.5")
@@ -88,8 +122,12 @@ class Player {
 
     fun stop() {
         lastUrl = null
+        pending = null
         player()?.controls()?.stop()
     }
+
+    /** Something asked to play before the player was ready. */
+    private var pending: Pair<String, Long>? = null
 
     /** What's playing (null when stopped). */
     var lastUrl: String? = null

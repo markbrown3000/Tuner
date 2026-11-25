@@ -384,8 +384,10 @@ fun PlexShowScreen(vm: TunerViewModel) {
             ?: list.firstOrNull { !it.watched }
     }
     var season by remember(episodes) {
-        mutableStateOf(upTo?.season ?: seasons.firstOrNull() ?: 1)
+        // "Go to Season N" from the player opens that season.
+        mutableStateOf(plex.openAtSeason?.takeIf { it in seasons } ?: upTo?.season ?: seasons.firstOrNull() ?: 1)
     }
+    LaunchedEffect(episodes != null) { if (episodes != null) plex.openAtSeason = null }
     val shown = remember(episodes, season) { episodes.orEmpty().filter { it.season == season } }
     val first = remember { FocusRequester() }
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()

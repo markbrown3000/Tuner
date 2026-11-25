@@ -28,6 +28,7 @@ A TiviMate-style live TV app for Google TV / Android TV. Built with Kotlin, Jetp
 - **👍 / 👎 everywhere**: in the player menu and on film info. 👎 films are left out of Surprise me and recommendations lean towards 👍.
 - **👪 Family picks**: player menu or film info › Recommend to the family puts it in a Family picks row on everyone else's Home (and the PC's). Hold OK on it to remove.
 - **Kids can ask for more time**: when time's up, 📱 Ask a grown-up sends a request to linked phones and PCs: +15, +30, +1 hour (with the PIN) or Not now.
+- **Plex-style player menu**: for Plex episodes, 📺 Go to show, 📂 Go to Season N and ✓ Mark as watched/unwatched (works however the episode was started, Home included). The "go to" options now sit near the top, and night mode, clearer speech, sizes, lip sync and stream info are tucked into ⚙ Picture & sound ›.
 - **Go to… from the player**: in the player menu, 📺 Go to series (or Go to show for Plex) opens all the episodes, 🎬 Go to film page shows the cast, trailer and the rest of the series, 🔍 More of… searches for other episodes and showings, and you can add it to My list or skip to the next episode. On phones it keeps playing in the mini player.
 - **Up next**: in the last 20 seconds of an episode, a card shows the next one. OK plays it now, BACK cancels.
 - **Skip intro**: the first time you skip an intro with ▶ near the start of an episode, Tuner learns where it ends for that series. Next time, a "Skip intro – press ▶" button appears.
