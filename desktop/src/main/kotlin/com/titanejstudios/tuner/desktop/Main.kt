@@ -21,6 +21,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -86,7 +87,27 @@ fun main(args: Array<String>) {
     }
 }
 
+/** A problem that didn't close Flicker (shown at the top, with a button to copy the log). */
+val problemNow = androidx.compose.runtime.mutableStateOf<String?>(null)
+
+@OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
 private fun runApp() = application {
+    // A mistake in a button or a screen is logged and shown, instead of closing Flicker.
+    CompositionLocalProvider(
+        androidx.compose.ui.window.LocalWindowExceptionHandlerFactory provides androidx.compose.ui.window.WindowExceptionHandlerFactory { _ ->
+            androidx.compose.ui.window.WindowExceptionHandler { e ->
+                com.titanejstudios.tuner.data.AppLog.warn("Problem in the window", e)
+                val root = generateSequence(e) { it.cause }.last()
+                problemNow.value = root.javaClass.simpleName + (root.message?.let { ": " + it.take(160) } ?: "")
+            }
+        },
+    ) {
+        FlickerApp()
+    }
+}
+
+@Composable
+private fun androidx.compose.ui.window.ApplicationScope.FlickerApp() {
     val config = remember { Config() }
     val player = remember {
         Player().also {
@@ -381,6 +402,16 @@ private fun Shell(app: AppState, fullScreen: Boolean, toggleFullScreen: () -> Un
             }
         }
         if (app.showKeys) KeysHelp(app)
+        problemNow.value?.let { why ->
+            Row(
+                Modifier.align(Alignment.TopCenter).padding(16.dp).clip(RoundedCornerShape(12.dp)).background(Panel).padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text("⚠ Something went wrong ($why)", color = Color.White, fontSize = 14.sp, maxLines = 1, modifier = Modifier.width(560.dp))
+                Pill("📋 Copy the problem log", selected = true) { app.copyLog() }
+                Pill("OK") { problemNow.value = null }
+            }
+        }
         app.lastCrash?.let { why ->
             Row(
                 Modifier.align(Alignment.TopCenter).padding(16.dp).clip(RoundedCornerShape(12.dp)).background(Panel).padding(horizontal = 16.dp, vertical = 10.dp),
