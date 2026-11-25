@@ -211,6 +211,7 @@ object Updater {
                 "del \"%~f0\"",
             ).joinToString("\r\n"),
         )
-        ProcessBuilder("cmd", "/c", "start", "FlickerUpdate", "/min", "cmd", "/c", script.absolutePath).start()
+        // "start" takes the window's title first, in quotes.
+        ProcessBuilder("cmd", "/c", "start", "\"Flicker update\"", "/min", "cmd", "/c", script.absolutePath).start()
     }
 }
