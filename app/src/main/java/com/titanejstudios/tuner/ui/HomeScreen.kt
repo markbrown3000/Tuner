@@ -137,7 +137,7 @@ private fun timeLeft(ms: Long): String {
 
 private fun channelCard(vm: TunerViewModel, c: Channel, list: List<Channel>, now: Long, followed: Set<String>): HomeCard {
     val (cur, next) = vm.nowNext(c.id, now)
-    val score = cur?.let { vm.liveScoreFor(it) }
+    val score: String? = null
     val yourTeam = cur != null && followed.any { com.titanejstudios.tuner.data.SportFollow.mentions(cur.title, it) }
     val sport = cur != null && com.titanejstudios.tuner.data.Sports.classify(cur, c.group) != null
     val tag = when {
@@ -473,7 +473,7 @@ fun HomeScreen(vm: TunerViewModel) {
     val cards: Map<HomeRow, List<HomeCard>> = remember(
         minute, recent, favourites, allChannels, vm.sportNow, vm.topPicks, vm.plexItems, vm.plexRecent, vm.started, vm.activeProfile.id,
         vm.yourShows, vm.plexFeature.similar, vm.becauseFilms, vm.trending,
-        vm.resume, vm.recordings, vm.followedSeries, vm.watchlist, vm.football.matches, vm.reminders,
+        vm.resume, vm.recordings, vm.followedSeries, vm.watchlist, vm.reminders,
         vm.missed, vm.unfinished, vm.youtube.feed, vm.youtube.history, vm.youtube.recommended,
     ) {
         buildMap {
@@ -622,8 +622,9 @@ fun HomeScreen(vm: TunerViewModel) {
             LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
                 // The channel you normally watch at this time (the news at 6, say).
                 vm.usualOffer?.let { u -> item { PillButton("★  Your usual: ${u.name}", { vm.playUsual() }, compact = true, selected = true) } }
+                // Your team: match day (watch it), or the next fixture.
                 val md = vm.matchDay
-                if (md != null) item { PillButton(matchDayText(md, vm.now), { vm.openMatchDay(md) }, compact = true, selected = true) }
+                if (md != null) item { PillButton(fixturePill(md, matchDay = true), { vm.openMatchDay(md) }, compact = true, selected = true) }
                 else vm.nextTeamFixture?.let { f -> item { PillButton(fixturePill(f), { vm.navigate(Screen.Teams) }, compact = true) } }
                 vm.lastChannel?.takeIf { it.id != vm.usualOffer?.id }?.let { last -> item { PillButton("▶  ${last.name}", { vm.play(last, allChannels) }, compact = true) } }
                 item { PillButton("TV Guide", { vm.navigate(Screen.Channels) }, compact = true) }
@@ -743,8 +744,6 @@ private fun PhoneHomeBody(
             }
         }
         if (vm.safeMode && !vm.safeModeBannerHidden) item(key = "safe") { Box(Modifier.padding(horizontal = 12.dp)) { SafeModeBanner(vm) } }
-        // Match day: your team's game, big, at the top.
-        vm.matchDay?.let { md -> item(key = "matchday") { MatchDayCard(vm, md) } }
         // The featured item: the first tile of the first row, big.
         val hero = featured?.hero ?: h
         if (hero != null) item(key = "hero") {
@@ -772,7 +771,9 @@ private fun PhoneHomeBody(
         item(key = "quick") {
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)) {
                 vm.usualOffer?.let { u -> item { PillButton("★  Your usual: ${u.name}", { vm.playUsual() }, compact = true, selected = true) } }
-                if (vm.matchDay == null) vm.nextTeamFixture?.let { f -> item { PillButton(fixturePill(f), { vm.navigate(Screen.Teams) }, compact = true) } }
+                val md = vm.matchDay
+                if (md != null) item { PillButton(fixturePill(md, matchDay = true), { vm.openMatchDay(md) }, compact = true, selected = true) }
+                else vm.nextTeamFixture?.let { f -> item { PillButton(fixturePill(f), { vm.navigate(Screen.Teams) }, compact = true) } }
                 if (vm.christmasSeason) item { PillButton("🎄 Christmas TV", { vm.navigate(Screen.Christmas) }, compact = true) }
                 if (vm.link.linked && !vm.activeProfile.kids) item { PillButton("📺 TV remote", { vm.navigate(Screen.Remote) }, compact = true) }
                 item { PillButton("▶ YouTube", { vm.navigate(Screen.YouTube) }, compact = true) }
@@ -1345,64 +1346,21 @@ private fun SkeletonRows(status: String) {
     }
 }
 
+
 /** "⚽ Newcastle v Arsenal · Sat 17:30 · Sky Sports Main Event" for Home's quick buttons. */
-private fun fixturePill(f: com.titanejstudios.tuner.TeamFixture): String {
+private fun fixturePill(f: com.titanejstudios.tuner.TeamFixture, matchDay: Boolean = false): String {
     val m = f.match
     val now = System.currentTimeMillis()
     val dayFmt = java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.UK)
-    val day = when {
-        m.live -> "LIVE"
-        dayFmt.format(java.util.Date(m.kickoff)) == dayFmt.format(java.util.Date(now)) -> "Today"
+    val day = when (dayFmt.format(java.util.Date(m.kickoff))) {
+        dayFmt.format(java.util.Date(now)) -> "Today"
+        dayFmt.format(java.util.Date(now + 86_400_000L)) -> "Tomorrow"
         else -> java.text.SimpleDateFormat("EEE", java.util.Locale.UK).format(java.util.Date(m.kickoff))
     }
-    return "⚽  " + com.titanejstudios.tuner.data.Football.shortName(m.home) + " v " + com.titanejstudios.tuner.data.Football.shortName(m.away) + " · " + day + " " + hhmm(m.kickoff) +
-        (f.channel?.let { " · " + it.name } ?: "")
-}
-
-/** "⚽ Kick-off in 2h 10m: Newcastle v Arsenal · Sky Sports Main Event" (or LIVE / about to start). */
-private fun matchDayText(f: com.titanejstudios.tuner.TeamFixture, now: Long): String {
-    val m = f.match
-    val teams = com.titanejstudios.tuner.data.Football.shortName(m.home) + " v " + com.titanejstudios.tuner.data.Football.shortName(m.away)
-    val ch = f.channel?.let { " · " + it.name } ?: ""
-    val mins = (m.kickoff - now) / 60_000
-    return when {
-        m.live || mins <= 0 -> "⚽  LIVE: $teams$ch  ▶"
-        mins <= 15 -> "⚽  Kick-off in $mins min: $teams$ch  ▶"
-        mins < 60 -> "⚽  Match day · kick-off in $mins min: $teams$ch"
-        else -> "⚽  Match day · ${hhmm(m.kickoff)} (in ${mins / 60}h ${mins % 60}m): $teams$ch"
+    val time = when {
+        m.live || (f.programme != null && f.programme.start <= now && m.kickoff <= now) -> "on now"
+        m.timeKnown -> "$day ${hhmm(m.kickoff)}"
+        else -> day
     }
-}
-
-/** Phones: your team's match at the top of Home on match day, with a countdown. */
-@Composable
-private fun MatchDayCard(vm: TunerViewModel, f: com.titanejstudios.tuner.TeamFixture) {
-    val m = f.match
-    val now = vm.now
-    val mins = (m.kickoff - now) / 60_000
-    Column(
-        Modifier.padding(horizontal = 12.dp, vertical = 6.dp).fillMaxWidth().clip(RoundedCornerShape(16.dp))
-            .background(Brush.horizontalGradient(listOf(Color(0xFF1B5E3A), Color(0xFF0E2A5C))))
-            .tvClickable({ vm.openMatchDay(f) })
-            .padding(16.dp),
-    ) {
-        Text(if (m.live) "● LIVE NOW" else "⚽ MATCH DAY", color = if (m.live) Color(0xFFFF6B6B) else Color(0xFFFFD66B), fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp)
-        Text(
-            com.titanejstudios.tuner.data.Football.shortName(m.home) + "  v  " + com.titanejstudios.tuner.data.Football.shortName(m.away),
-            color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis,
-        )
-        Text(
-            when {
-                m.live -> m.scoreText.takeIf { it != "v" }?.let { "Score $it" } ?: "On now"
-                mins <= 0 -> "Kicking off now"
-                mins < 60 -> "Kick-off in $mins min (${hhmm(m.kickoff)})"
-                else -> "Kick-off ${hhmm(m.kickoff)} – in ${mins / 60}h ${mins % 60}m"
-            } + " · " + m.competition,
-            color = Color(0xFFD4DDF5), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
-        )
-        Spacer(Modifier.height(4.dp))
-        Text(
-            f.channel?.let { "📺 " + it.name + if (m.live || mins <= 15) "  ·  tap to watch" else "" } ?: "Channel not in the guide yet",
-            color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
-        )
-    }
+    return (if (matchDay) "⚽  Match day: " else "⚽  ") + f.title + " · " + time + (f.channel?.let { " · ${it.name}" } ?: "")
 }

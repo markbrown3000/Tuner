@@ -46,7 +46,7 @@ A TiviMate-style live TV app for Google TV / Android TV. Built with Kotlin, Jetp
 - **Match day**: when your team plays within 12 hours, Home leads with it – kick-off countdown and channel (a card on phones, a highlighted button on TVs); from 15 minutes before kick-off it plays the match straight away.
 - **Form and table**: My teams shows each team's league place, points, goal difference and last five results (W D L); open a fixture for the head-to-head of their last 10 meetings.
 - **Text size** (Settings): Normal, Large or Larger text everywhere, per device. **🗣 Clearer speech** (Settings, or ⋮ in the player): lifts voices over music and effects and turns down rumble (needs Audio passthrough off).
-- **My teams** (Sport › ★ My teams, or Settings): pick your teams (Premier League, Championship, Champions League and the big European leagues, from football-data.org with your free key). It lists their next fixtures and, from the TV guide around each kick-off, which of your channels shows it – or "not in the guide yet". OK on one to watch, set a reminder or record it. Home shows the next one ("⚽ Newcastle v Arsenal · Sat 17:30 · Sky Sports Main Event"), and on match day Flicker says which channel it's on when you open it.
+- **My teams** (Sport › ★ My teams, or Settings): add your team from the list (the English, Scottish, Welsh and Irish leagues, and the big European ones). Their fixtures come from ESPN's public data (no key needed), cups included, and Flicker checks the TV guide around each kick-off for which of your channels shows it. Choose one to watch it, set a reminder or record it. Home shows the next game ("⚽ Newcastle v Arsenal · Sat 17:30 · Sky Sports Main Event"), and on match day Flicker says which channel it's on. Teams added by name only, or any time ESPN can't be reached, have their games found in the TV guide instead.
 - **Linked devices** (Settings › 🔗 Linked devices): show a 4-digit code on one device and enter it on the other (same Wi-Fi) – or copy settings to another TV, which links it too. Then:
   - **Send to TV / phone**: ⋮ › *Send to another TV or phone* (📺 on the phone's player) hands over the channel, catch-up, film or episode at the same spot, and stops it here. Flicker must be open on the other device (a TV can have it in the background).
   - **Carry on where you left off**: films and episodes, favourites, My list, followed series and learned intros stay in step. When you stop watching on one device, the others pick it up straight away; finished films don't come back.
@@ -111,7 +111,6 @@ A TiviMate-style live TV app for Google TV / Android TV. Built with Kotlin, Jetp
   - Link your account with a code at plex.tv/link.
   - Your Plex "Continue watching" then appears on Home.
   - It plays in Tuner and keeps Plex up to date with where you got to.
-- **Football live scores & goal alerts**: uses a free football-data.org key. It's also on the Sport screen (⚽ Live scores). Follow teams to get "GOAL" pop-ups and a `goal` event for Home Assistant.
 - **Record from your phone**: the phone remote has a new **Record** tab. Search the guide, then tap ● to record or 🔁 for a series link.
 - **Update Tuner from your computer**: Settings › Update Tuner shows an address to open in your PC's browser. Upload the new `app-release.apk` there and confirm on the TV. Alternatively, Tuner can check a GitHub repo's releases.
 
@@ -448,7 +447,6 @@ The answer lists up to four programmes, favourites first. The JSON also has `ite
 - **Opening other apps**: Back or Home on the remote returns you to Tuner. Google TV may not list some apps that don't have a TV launcher entry.
 - **Multi-view**: four pictures need four video decoders at once. Most Google TV boxes have four, but some cheaper sticks have only two or three. The fourth picture then shows "Your TV can't decode this many streams at once".
 - **Plex** plays files directly. Something Plex would normally convert (some 4K HDR or unusual audio) may not play in Tuner; hold OK › *Open the Plex app* instead.
-- **Football scores** on the free football-data.org plan only cover their free leagues, and scores can lag a little behind the TV.
 - **App updates** must be signed with the same key. Build on the same computer as before, otherwise Android refuses the update.
 - **Night mode** and **frame-rate matching** depend on the TV's hardware; if the TV doesn't support them, Tuner says so in a notice or the problem log.
 - **Copy to another TV** sends playlist logins over your home network, protected by the 4-digit code. The code stops working after 5 wrong tries or when you leave the screen.

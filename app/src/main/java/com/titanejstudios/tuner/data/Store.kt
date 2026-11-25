@@ -455,10 +455,6 @@ class Store(context: Context) {
     fun savePlexUser(profileId: String, user: Triple<String, String, String>?) =
         prefs.edit().putString("plex_user_$profileId", user?.let { "${it.first}\t${it.second}\t${it.third}" }).apply()
 
-    // Football scores (football-data.org)
-    var footballKey: String?
-        get() = prefs.getString("football_key", null)
-        set(value) = prefs.edit().putString("football_key", value).apply()
     var whatsOnTidy: Boolean
         get() = prefs.getBoolean("whats_on_tidy", true)
         set(value) = prefs.edit().putBoolean("whats_on_tidy", value).apply()
@@ -468,24 +464,30 @@ class Store(context: Context) {
     var footballTeams: Set<String>
         get() = getList("football_teams").toSet()
         set(value) = putList("football_teams", value)
-    /** Followed team name → its football-data.org id (for their fixtures). */
-    var footballTeamIds: Map<String, String>
-        get() = stringMap("football_team_ids")
-        set(value) = setStringMap("football_team_ids", value)
-    /** Teams you can pick from (cached for a week). */
-    var footballTeamList: String?
-        get() = prefs.getString("football_team_list", null)
-        set(value) = prefs.edit().putString("football_team_list", value).putLong("football_team_list_at", System.currentTimeMillis()).apply()
-    val footballTeamListAt: Long get() = prefs.getLong("football_team_list_at", 0L)
-    /** Your teams' coming fixtures (raw JSON, cached for a few hours). */
-    var footballFixtures: String?
-        get() = prefs.getString("football_fixtures", null)
-        set(value) = prefs.edit().putString("football_fixtures", value).putLong("football_fixtures_at", System.currentTimeMillis()).apply()
-    val footballFixturesAt: Long get() = prefs.getLong("football_fixtures_at", 0L)
+    /** Followed team name → its ESPN team (JSON), for fixtures. */
+    var espnTeams: String?
+        get() = prefs.getString("espn_teams", null)
+        set(value) = prefs.edit().putString("espn_teams", value).apply()
+    /** Teams you can pick from (cached for a fortnight). */
+    var espnTeamList: String?
+        get() = prefs.getString("espn_team_list", null)
+        set(value) = prefs.edit().putString("espn_team_list", value).putLong("espn_team_list_at", System.currentTimeMillis()).apply()
+    val espnTeamListAt: Long get() = prefs.getLong("espn_team_list_at", 0L)
+    /** Your teams' coming fixtures (cached for a few hours). */
+    var espnFixtures: String?
+        get() = prefs.getString("espn_fixtures", null)
+        set(value) = prefs.edit().putString("espn_fixtures", value).putLong("espn_fixtures_at", System.currentTimeMillis()).apply()
+    val espnFixturesAt: Long get() = prefs.getLong("espn_fixtures_at", 0L)
     /** Fixtures already announced ("Newcastle play today at 5:30 on…"). */
     var teamAnnounced: Set<String>
         get() = prefs.getStringSet("team_announced", emptySet())?.toSet() ?: emptySet()
         set(value) = prefs.edit().putStringSet("team_announced", value).apply()
+
+    /** Clears what the old football scores service left behind (key, fixtures, team lists). */
+    fun forgetFootballScores() {
+        prefs.edit().remove("football_key").remove("football_team_ids").remove("football_team_list").remove("football_team_list_at")
+            .remove("football_fixtures").remove("football_fixtures_at").apply()
+    }
 
     /** App updates from a GitHub repo's releases ("owner/repo"). */
     /** GitHub repo checked for updates ("owner/repo"). Defaults to Tuner's own repo; "" = turned off. */

@@ -79,7 +79,6 @@ import com.titanejstudios.tuner.integrations.HomeAssistantWebhook
 import com.titanejstudios.tuner.integrations.ReminderAlarms
 import com.titanejstudios.tuner.integrations.TvShare
 import com.titanejstudios.tuner.integrations.Plex
-import com.titanejstudios.tuner.data.Football
 import com.titanejstudios.tuner.integrations.PhoneSetupServer
 import com.titanejstudios.tuner.integrations.RemoteHandler
 import com.titanejstudios.tuner.playback.MultiViewController
@@ -107,7 +106,7 @@ import java.util.Locale
 enum class Screen {
     Home, Channels, Guide, Player, Search, Movies, Series, SeriesDetail, Settings, SourceEdit, Manage,
     ProfilePicker, ProfileEdit, PhoneSetup, EpgMap, Recordings, MultiView, Sports, Apps, Log,
-    WhatsOn, Stats, ShareTv, Catchup, Categories, Plex, Football, Update, SelfTest, PlexLibrary, PlexShow, HomeRows, Languages, Recommendations, Vpn,
+    WhatsOn, Stats, ShareTv, Catchup, Categories, Plex, Update, SelfTest, PlexLibrary, PlexShow, HomeRows, Languages, Recommendations, Vpn,
     Link, Downloads, Teams, Remote, Christmas, Cloud, YouTube, YouTubePlayer, YouTubeList, More,
 }
 
@@ -145,17 +144,21 @@ class SearchResults(
     val seriesFound: List<SeriesItem> = emptyList(),
 )
 
-/** One of your teams' fixtures, and which of your channels shows it (if the guide says yet). */
 /** Tracks how long a live programme has been watched (for "finish what you started"). */
 private class LiveWatch(val channelId: String, val start: Long, var seconds: Long, var lastSeen: Long)
 
+/** One of your teams' matches, and which of your channels shows it (if the guide says yet). */
 class TeamFixture(
-    val match: Football.Match,
+    val match: com.titanejstudios.tuner.integrations.Espn.Fixture,
     val channel: Channel?,
     val programme: Programme?,
     /** The guide reaches that day, so "no channel" really means none of yours shows it. */
     val guideCoversIt: Boolean,
-)
+) {
+    /** "Newcastle v Arsenal" (or the guide's title for games found only in the guide). */
+    val title: String get() = if (match.away.isBlank()) match.home else "${match.home} v ${match.away}"
+}
+
 
 /** One programme in the Christmas TV planner. [section] is "specials", "films" or "sport". */
 class FestiveItem(val channel: Channel, val programme: Programme, val section: String)
@@ -1011,11 +1014,11 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         get() = if (activeProfile.kids) plexFeature.recent.filter { plexFeature.isKidsEntry(it) } else plexFeature.recent
     private var plexPlaying: Plex.Item? = null
 
-    val football = FootballFeature(store, viewModelScope, { inForeground }, { showNotice(it) }, { e, d -> sendHa(e, d) })
-    val footballKey: String? get() = football.key
+    val football = FootballFeature(store, viewModelScope) { showNotice(it) }
+    /** Your teams' coming matches with their channels (My teams, Home). */
+    var teamFixtures by mutableStateOf<List<TeamFixture>>(emptyList()); private set
+    private var teamFixturesJob: Job? = null
     val footballTeams: Set<String> get() = football.teams
-    val footballMatches: List<Football.Match> get() = football.matches
-    val footballStatus: String? get() = football.status
 
     val updates = UpdateFeature(app, store, viewModelScope)
     val updateRepo: String? get() = updates.repo
@@ -1193,8 +1196,6 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     var unfinished by mutableStateOf(loadUnfinished()); private set
     /** The live programme being watched: channel, programme start, seconds watched, last seen. */
     private var liveWatch: LiveWatch? = null
-    /** Your teams' next fixtures with their channels (My teams). */
-    var teamFixtures by mutableStateOf<List<TeamFixture>>(emptyList()); private set
     var epgOverrides by mutableStateOf<Map<String, String>>(emptyMap()); private set
 
     var mappingChannel by mutableStateOf<Channel?>(null); private set
@@ -1231,6 +1232,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     private var startupHandled = false
 
     init {
+        store.forgetFootballScores()
         loadSettingsFromStore()
         playback.onEnded = { onPlaybackEnded() }
         playback.onRecovery = { showNotice(it) }
@@ -1320,10 +1322,9 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         loadApps()
         reportCrashToHomeAssistant()
         if (SafeMode.active) {
-            AppLog.info("Safe mode: Plex, football scores, Live tab, TV sync and update checks are off")
+            AppLog.info("Safe mode: Plex, Live tab, TV sync and update checks are off")
             return
         }
-        football.start()
         plexFeature.refresh()
         checkNewEpisodes()
         startSync()
@@ -1492,8 +1493,8 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         refreshHomeFeed()
         updateWidget()
         checkUsual()
-        refreshTeamFixtures()
         applySportFollow()
+        refreshTeamFixtures()
     }
 
     /**
@@ -1504,6 +1505,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         if (!initialLoadDone || epgLoadedAt == 0L || refreshJob?.isActive == true) return
         checkNewEpisodes()
         importTraktWatched()
+        refreshTeamFixtures()
         val t = System.currentTimeMillis()
         val newer = activeSources().any { store.lastRefresh(it.id) > epgLoadedAt }
         if (newer) {
@@ -2828,18 +2830,6 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     fun toggleHomeSmart() {
         homeSmart = !homeSmart
         store.homeSmart = homeSmart
-    }
-
-    /** "Newcastle 1–0 Arsenal" when a followed league's match in this programme is on (football-data.org). */
-    fun liveScoreFor(p: Programme): String? {
-        val m = football.matches.firstOrNull { (it.live || (it.finished && now - it.kickoff < 3 * 3_600_000L)) && Football.inTitle(p.title, it.home) && Football.inTitle(p.title, it.away) }
-            ?: return null
-        val tail = when {
-            m.status == "PAUSED" -> "  HT"
-            m.finished -> "  FT"
-            else -> ""
-        }
-        return "${Football.shortName(m.home)} ${m.homeGoals ?: 0}–${m.awayGoals ?: 0} ${Football.shortName(m.away)}$tail"
     }
 
     fun allChannelsById(id: String): Channel? = allChannels.firstOrNull { it.id == id }
@@ -4377,13 +4367,11 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         if (plexApp != null) launchApp(plexApp) else if (!InstalledApps.launch(app, "com.plexapp.android")) showNotice("The Plex app isn't installed")
     }
 
-    // ---------------- Football scores (see features/FootballFeature) ----------------
+    // ---------------- Your football teams (see features/FootballFeature) ----------------
 
-    fun setFootballKey(key: String?) = football.changeKey(key)
 
     fun toggleFollowTeam(team: String) = football.toggleTeam(team)
 
-    fun channelForMatch(m: Football.Match): Channel? = Football.channelFor(m, allowedAll, epg, System.currentTimeMillis())
 
     // ---------------- App updates (see features/UpdateFeature) ----------------
 
@@ -6301,9 +6289,10 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         playCatchup(pick.channel, pick.programme, channelsFor(ALL))
     }
 
-    // ---------------- My teams: next fixtures and which channel ----------------
+    // ---------------- My teams: fixtures (ESPN) and which channel ----------------
 
-    /** The next fixture in the coming week (for Home). */
+
+    /** The next match in the coming week (for Home). */
     val nextTeamFixture: TeamFixture?
         get() {
             val t = System.currentTimeMillis()
@@ -6323,54 +6312,103 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         if (f.channel != null && (f.match.live || f.match.kickoff - now <= 15 * 60_000L)) watchFixture(f) else navigate(Screen.Teams)
     }
 
+    fun watchFixture(f: TeamFixture) {
+        val ch = f.channel ?: return
+        play(ch, channelsFor(ALL))
+    }
+
+    /** The teams to pick from on My teams (from ESPN). */
+    fun loadTeamList() {
+        viewModelScope.launch { football.loadTeamList() }
+    }
+
+    /** Fetches fixtures (every 6 hours, or now with [force]) and finds their channels in the guide. */
     fun refreshTeamFixtures(force: Boolean = false) {
-        if (football.key == null || football.teams.isEmpty()) {
+        if (football.teams.isEmpty() || activeProfile.kids) {
             teamFixtures = emptyList()
             return
         }
-        viewModelScope.launch {
+        if (teamFixturesJob?.isActive == true && !force) return
+        teamFixturesJob?.cancel()
+        teamFixturesJob = viewModelScope.launch {
             football.loadFixtures(force)
             matchFixtureChannels()
         }
     }
 
-    fun loadTeamList() {
-        viewModelScope.launch { football.loadTeamList() }
-    }
-
-    /** Looks in the guide around each kick-off for a channel showing it. */
+    /**
+     * Looks in the stored guide (about a week) around each kick-off for a channel showing it. With
+     * no ESPN fixtures (teams added by name, or ESPN unreachable), your teams' games are found in
+     * the guide itself.
+     */
     private suspend fun matchFixtureChannels() {
-        val now = System.currentTimeMillis()
-        val list = football.fixtures.take(12)
-        if (list.isEmpty()) {
-            teamFixtures = emptyList()
-            return
-        }
+        val t = System.currentTimeMillis()
         val ids = activeSources().map { it.id }
         val chans = allowedAll
         val favs = favouriteSet
-        teamFixtures = withContext(Dispatchers.IO) {
-            list.map { m ->
-                if (m.kickoff > now + 21 * 86_400_000L) return@map TeamFixture(m, null, null, false)
-                val guide = runCatching {
-                    shiftGuide(chans, db.loadEpg(ids, m.kickoff - 90 * 60_000L, m.kickoff + 30 * 60_000L, emptyMap()))
-                }.getOrDefault(emptyMap())
-                val b = Football.broadcastFor(m, chans, guide, favs)
-                TeamFixture(m, b?.first, b?.second, guide.values.any { it.isNotEmpty() })
+        val teams = football.teams.toList()
+        val espnTeams = football.espnTeams
+        val list = football.fixtures.filter { !it.finished && it.kickoff > t - 3 * 3_600_000L }.take(12)
+        val result = withContext(Dispatchers.IO) {
+            val week = runCatching { shiftGuide(chans, db.loadEpg(ids, t - 3 * 3_600_000L, t + 8 * 86_400_000L, emptyMap())) }.getOrDefault(emptyMap())
+            val guideEnd = week.values.maxOfOrNull { l -> l.maxOfOrNull { it.stop } ?: 0L } ?: 0L
+            val byId = chans.associateBy { it.id }
+            fun names(n: String): List<String> = listOfNotNull(n, espnTeams.values.firstOrNull { it.shortName == n || it.name == n }?.name)
+                .flatMap { listOf(it, it.removeSuffix(" FC").removeSuffix(" AFC").removePrefix("AFC ")) }.distinct()
+            fun mentions(title: String, team: String) = names(team).any { com.titanejstudios.tuner.data.SportFollow.mentions(title, it) }
+            // ESPN's fixtures, each with the channel showing it (both teams named, near kick-off).
+            val fromEspn = list.map { m ->
+                var best: Pair<Channel, Programme>? = null
+                var bestScore = Int.MIN_VALUE
+                for ((cid, progs) in week) {
+                    val c = byId[cid] ?: continue
+                    for (p in progs) {
+                        if (p.stop < m.kickoff - 30 * 60_000L || p.start > m.kickoff + 30 * 60_000L) continue
+                        val both = mentions(p.title, m.home) && mentions(p.title, m.away)
+                        val one = !both && (mentions(p.title, m.home) || mentions(p.title, m.away)) && com.titanejstudios.tuner.data.Sports.classify(p, c.group) != null
+                        if (!both && !one) continue
+                        var score = if (both) 100 else 50
+                        if (c.id in favs) score += 20
+                        if (com.titanejstudios.tuner.data.Sports.looksLive(p)) score += 10
+                        score -= (kotlin.math.abs(p.start - (m.kickoff - 30 * 60_000L)) / 60_000L).toInt().coerceAtMost(60) / 10
+                        if (score > bestScore) {
+                            bestScore = score
+                            best = c to p
+                        }
+                    }
+                }
+                TeamFixture(m, best?.first, best?.second, m.kickoff < guideEnd)
             }
+            // Games in the guide for teams ESPN doesn't cover (or when it didn't answer).
+            val guideOnly = teams.filter { n -> espnTeams[n] == null || fromEspn.none { it.match.team == n } }.flatMap { n ->
+                week.flatMap { (cid, progs) ->
+                    val c = byId[cid] ?: return@flatMap emptyList()
+                    progs.filter { p ->
+                        p.stop > t && mentions(p.title, n) && com.titanejstudios.tuner.data.Sports.classify(p, c.group) != null &&
+                            com.titanejstudios.tuner.data.Sports.looksLive(p)
+                    }.map { p ->
+                        TeamFixture(
+                            com.titanejstudios.tuner.integrations.Espn.Fixture(
+                                "guide:$cid@${p.start}", p.title, "", p.start, null,
+                                if (p.start <= t) "in" else "pre", true, n,
+                            ),
+                            c, p, true,
+                        )
+                    }
+                }
+            }.sortedBy { it.match.kickoff }
+                .distinctBy { it.match.home.lowercase() + "@" + it.match.kickoff / 3_600_000L }
+                // A game already in ESPN's list isn't listed twice.
+                .filter { g -> fromEspn.none { it.programme?.start == g.match.kickoff && it.programme?.title == g.match.home } }
+            (fromEspn + guideOnly).sortedBy { it.match.kickoff }.take(15)
         }
+        teamFixtures = result
         // "Newcastle v Arsenal today at 17:30 on Sky Sports Main Event" – once per match.
-        val today = teamFixtures.firstOrNull { it.channel != null && it.match.kickoff in now..(now + 14 * 3_600_000L) }
-        if (today != null && today.match.id.toString() !in store.teamAnnounced) {
-            store.teamAnnounced = (store.teamAnnounced + today.match.id.toString()).toList().takeLast(50).toSet()
-            val ch = today.channel
-            showNotice("⚽ ${today.match.home} v ${today.match.away} today at ${hhmm(today.match.kickoff)} on ${ch?.name}")
+        val today = result.firstOrNull { it.channel != null && it.match.kickoff in t..(t + 14 * 3_600_000L) }
+        if (today != null && today.match.id !in store.teamAnnounced) {
+            store.teamAnnounced = (store.teamAnnounced + today.match.id).toList().takeLast(50).toSet()
+            showNotice("⚽ ${today.title} today at ${hhmm(today.match.kickoff)} on ${today.channel?.name}")
         }
-    }
-
-    fun watchFixture(f: TeamFixture) {
-        val ch = f.channel ?: return
-        play(ch, channelsFor(ALL))
     }
 
     // ---------------- Your usual channel ----------------

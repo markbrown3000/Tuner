@@ -459,7 +459,7 @@ fun SettingsScreen(vm: TunerViewModel) {
             item {
                 SettingRow(
                     "⚽ My teams",
-                    subtitle = "Pick your teams to see their next fixtures and which channel shows each one",
+                    subtitle = "Your teams' fixtures and which channel shows each one; their games stand out in the guide",
                     detail = vm.footballTeams.sorted().joinToString(", ").ifEmpty { "Pick" },
                     onClick = { vm.navigate(Screen.Teams) },
                 )
@@ -497,14 +497,6 @@ fun SettingsScreen(vm: TunerViewModel) {
                         onClick = { if (vm.preferredCopy != null) vm.choosePreferredCopy(null) else vm.showNotice("Next time you're asked which copy, choose \"☆ Always use…\"") },
                     )
                 }
-            }
-            item {
-                SettingRow(
-                    "Football live scores & goal alerts",
-                    subtitle = if (vm.footballKey == null) "Needs a free football-data.org account" else "${vm.footballTeams.size} team(s) followed",
-                    detail = if (vm.footballKey == null) "Set up" else "On",
-                    onClick = { vm.navigate(Screen.Football) },
-                )
             }
             item {
                 SettingRow(

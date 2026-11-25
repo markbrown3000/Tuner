@@ -39,7 +39,6 @@ import com.titanejstudios.tuner.ui.MenuItem
 import com.titanejstudios.tuner.ui.CategoriesScreen
 import com.titanejstudios.tuner.ui.CategoryPicker
 import com.titanejstudios.tuner.ui.ChannelsScreen
-import com.titanejstudios.tuner.ui.FootballScreen
 import com.titanejstudios.tuner.ui.PlexScreen
 import com.titanejstudios.tuner.ui.UpdateScreen
 import com.titanejstudios.tuner.ui.FrameRateMatcher
@@ -245,7 +244,6 @@ private fun TunerApp(vm: TunerViewModel) {
                 Screen.Catchup -> CatchupScreen(vm)
                 Screen.Categories -> CategoriesScreen(vm)
                 Screen.Plex -> PlexScreen(vm)
-                Screen.Football -> FootballScreen(vm)
                 Screen.Update -> UpdateScreen(vm)
                 Screen.SelfTest -> SelfTestScreen(vm)
                 Screen.PlexLibrary -> com.titanejstudios.tuner.ui.PlexLibraryScreen(vm)

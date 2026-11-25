@@ -123,9 +123,6 @@ fun SportsScreen(vm: TunerViewModel) {
             item(key = "teams") {
                 PillButton("★ My teams", { vm.navigate(com.titanejstudios.tuner.Screen.Teams) }, compact = true)
             }
-            item(key = "scores") {
-                PillButton("⚽ Live scores", { vm.navigate(com.titanejstudios.tuner.Screen.Football) }, compact = true)
-            }
         }
         Spacer(Modifier.height(14.dp))
 

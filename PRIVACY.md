@@ -20,7 +20,7 @@ You can stop at any time with Settings › Sync between houses › Sign out, and
 
 ## Other services Flicker talks to
 
-Only when you use them, and directly from your device: your IPTV provider and guide sources, your Plex server and plex.tv, TMDB (film information), football-data.org (scores and fixtures), OpenSubtitles (subtitles), GitHub (app updates), and your own Home Assistant or network drive if you set them up. Each has its own privacy policy.
+Only when you use them, and directly from your device: your IPTV provider and guide sources, your Plex server and plex.tv, TMDB (film information), OpenSubtitles (subtitles), GitHub (app updates), and your own Home Assistant or network drive if you set them up. Each has its own privacy policy.
 
 ## Children
 

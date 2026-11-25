@@ -54,7 +54,7 @@ features/  (5.3) Self-contained parts the VM owns and forwards to: PlexFeature, 
 data/      Models, Store (SharedPreferences settings), Database (SQLite), Repository (refresh),
            M3uParser, XtreamClient, XmltvParser, Catchup, Http, HealthCheck, Sports (sport finder),
            HomeFeed (Top picks / Sport rows), SeriesLinks (+ RecordingPaths), StreamAlternates (backup links),
-           VoiceMatch, WatchStats, WhatsOn (+ Genres), Football (football-data.org), AppLog (problem log),
+           VoiceMatch, WatchStats, WhatsOn (+ Genres), AppLog (problem log),
            SafeMode, KidsRules (bedtime), Watchlist (My list + followed series), VodCache, RecordingPlanner
 playback/  PlaybackController (the shared ExoPlayer + everything around it), PlayerFactory (player config,
            LipSync audio sink), Timeshift, MultiView, NightMode, StreamCushion (bigger start buffer for flaky channels)
@@ -143,7 +143,7 @@ Home, Channels (the Sky-style "TV Guide" list with category tabs), Guide (grid E
 - **Sport finder:**
   - Classifies the guide; "v"/"vs" titles only count as live within 4 hours.
   - `Sports.normalise` turns "Next: A v B – Sun 29 Nov 16:30" placeholders into real timed events.
-- **Live football scores and goal alerts:** uses football-data.org with the user's own free key, and lets him follow teams.
+- **Football:** live scores, fixtures and the football-data.org key were removed at the user's request (Nov 2026). Followed teams are just names now (features/FootballFeature.kt), used to pick out their games in the guide.
 - **Reminders:** a pop-up in the app. A Home Assistant event also fires via alarm when the app is closed.
 
 ### Recording

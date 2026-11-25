@@ -73,7 +73,7 @@ object LinkSync {
         sections.put(
             TEAMS,
             JSONObject().put("at", store.syncStamp(TEAMS)).put("names", JSONArray(store.footballTeams.toList()))
-                .put("ids", JSONObject(store.footballTeamIds)),
+                .put("espn", runCatching { JSONObject(store.espnTeams ?: "{}") }.getOrDefault(JSONObject())),
         )
         sections.put(DONE, JSONObject(store.resumeDone))
         // Kids' weeks (watch time and anything blocked), read by a grown-up's phone for the report.
@@ -253,9 +253,14 @@ object LinkSync {
             val names = r.optJSONArray("names")?.let { a -> (0 until a.length()).map { a.getString(it) }.toSet() } ?: emptySet()
             if ((theirStamp > mine || (mine == 0L && store.footballTeams.isEmpty())) && names.isNotEmpty() && names != store.footballTeams) {
                 store.footballTeams = names
-                val ids = HashMap(store.footballTeamIds)
-                r.optJSONObject("ids")?.let { o -> for (k in o.keys()) ids[k] = o.optString(k) }
-                store.footballTeamIds = ids.filterKeys { it in names }
+                // Their fixtures' ESPN teams come along too.
+                r.optJSONObject("espn")?.let { theirs ->
+                    val mine = runCatching { JSONObject(store.espnTeams ?: "{}") }.getOrDefault(JSONObject())
+                    val out = JSONObject()
+                    for (k in mine.keys()) if (k in names) out.put(k, mine.get(k))
+                    for (k in theirs.keys()) if (k in names) out.put(k, theirs.get(k))
+                    store.espnTeams = out.toString()
+                }
                 store.setSyncStamp(TEAMS, theirStamp)
                 changed += TEAMS
             }

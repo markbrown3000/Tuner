@@ -1016,7 +1016,7 @@ private fun InfoBanner(vm: TunerViewModel, channel: Channel, modifier: Modifier,
     val now = vm.now
     val (current, next) = vm.nowNext(channel.id, now)
     val isFavourite = channel.id in vm.favouriteSet
-    val score = current?.let { vm.liveScoreFor(it) }
+    val score: String? = null
     val name = channel.name.uppercase()
     val badges = buildList {
         when {

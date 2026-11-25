@@ -38,7 +38,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.titanejstudios.tuner.TunerViewModel
-import com.titanejstudios.tuner.data.Football
 import com.titanejstudios.tuner.integrations.Plex
 import kotlinx.coroutines.delay
 
@@ -128,91 +127,6 @@ fun PlexRail(vm: TunerViewModel, items: List<Plex.Item>, firstModifier: Modifier
                 MenuItem("Play from the start") { vm.playPlex(item, fromStart = true) },
                 MenuItem("Open the Plex app") { vm.openPlexApp() },
             ),
-            onDismiss = { menuFor = null },
-        )
-    }
-}
-
-// ---------------- Football ----------------
-
-@Composable
-fun FootballScreen(vm: TunerViewModel) {
-    var askKey by remember { mutableStateOf(false) }
-    var menuFor by remember { mutableStateOf<Football.Match?>(null) }
-    val first = remember { FocusRequester() }
-    LaunchedEffect(vm.footballKey) {
-        delay(80)
-        runCatching { first.requestFocus() }
-    }
-    Column(Modifier.fillMaxSize().skyBackground().padding(screenPadding(64.dp, 32.dp))) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("⚽ Live scores", fontSize = 32.sp, fontWeight = FontWeight.Bold, color = TunerColors.TextPrimary)
-            Spacer(Modifier.weight(1f))
-            PillButton(if (vm.footballKey == null) "Add API key" else "Change API key", { askKey = true }, if (vm.footballKey == null) Modifier.focusRequester(first) else Modifier, compact = true)
-        }
-        Text(
-            if (vm.footballTeams.isEmpty()) "Goal alerts pop up for every match below – follow teams (OK on a match) to only hear about them."
-            else "Goal alerts for: " + vm.footballTeams.sorted().joinToString(", "),
-            color = TunerColors.TextSecondary, fontSize = 15.sp,
-        )
-        Spacer(Modifier.height(14.dp))
-        when {
-            vm.footballKey == null -> Text(
-                "Scores come from football-data.org. Sign up there for a free account (Premier League, Championship, " +
-                    "the main European leagues and the Champions League), copy your API key from the email, and add it here.",
-                color = Color.White, fontSize = 17.sp, modifier = Modifier.widthIn(max = 900.dp),
-            )
-            vm.footballStatus != null && vm.footballMatches.isEmpty() -> CenterMessage(vm.footballStatus ?: "")
-            vm.footballMatches.isEmpty() -> CenterMessage("No matches today in the leagues your key covers")
-            else -> LazyColumn(Modifier.widthIn(max = 1000.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                val matches = vm.footballMatches
-                items(matches.size, key = { matches[it].id }) { i ->
-                    val m = matches[i]
-                    val followed = m.home in vm.footballTeams || m.away in vm.footballTeams
-                    FocusSurface(
-                        onClick = { menuFor = m },
-                        baseColor = TunerColors.Panel,
-                        modifier = (if (i == 0) Modifier.focusRequester(first) else Modifier).fillMaxWidth().height(60.dp),
-                    ) { _ ->
-                        Row(Modifier.fillMaxSize().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                when {
-                                    m.live -> if (m.status == "PAUSED") "HT" else "LIVE"
-                                    m.finished -> "FT"
-                                    else -> hhmm(m.kickoff)
-                                },
-                                color = if (m.live) TunerColors.NowLine else TunerColors.TextSecondary,
-                                fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.width(64.dp),
-                            )
-                            Text((if (followed) "★ " else "") + m.home, color = Color.White, fontSize = 18.sp, modifier = Modifier.weight(1f), maxLines = 1)
-                            Text(m.scoreText, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold, modifier = Modifier.width(90.dp))
-                            Text(m.away, color = Color.White, fontSize = 18.sp, modifier = Modifier.weight(1f), maxLines = 1)
-                            Text(m.competition, color = TunerColors.TextSecondary, fontSize = 13.sp, modifier = Modifier.width(180.dp), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        }
-                    }
-                }
-            }
-        }
-    }
-    if (askKey) {
-        TextInputDialog(
-            title = "football-data.org API key",
-            initial = vm.footballKey.orEmpty(),
-            hint = "From the email football-data.org sends when you sign up (free). Leave empty to turn scores off.",
-            label = "API key",
-            onDismiss = { askKey = false },
-        ) { vm.setFootballKey(it) }
-    }
-    menuFor?.let { m ->
-        val ch = remember(m.id) { vm.channelForMatch(m) }
-        MenuDialog(
-            title = "${m.home} ${m.scoreText} ${m.away}",
-            subtitle = m.competition,
-            items = buildList {
-                if (ch != null) add(MenuItem("Watch on ${ch.name}") { vm.play(ch, vm.channelsFor(com.titanejstudios.tuner.ALL)) })
-                add(MenuItem(if (m.home in vm.footballTeams) "Stop following ${m.home}" else "Follow ${m.home}") { vm.toggleFollowTeam(m.home) })
-                add(MenuItem(if (m.away in vm.footballTeams) "Stop following ${m.away}" else "Follow ${m.away}") { vm.toggleFollowTeam(m.away) })
-            },
             onDismiss = { menuFor = null },
         )
     }

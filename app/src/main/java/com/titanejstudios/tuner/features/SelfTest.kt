@@ -15,7 +15,6 @@ import android.provider.Settings
 import android.view.Display
 import com.titanejstudios.tuner.data.Channel
 import com.titanejstudios.tuner.data.Database
-import com.titanejstudios.tuner.data.Football
 import com.titanejstudios.tuner.data.HealthCheck
 import com.titanejstudios.tuner.data.Http
 import com.titanejstudios.tuner.data.Programme
@@ -81,7 +80,6 @@ class SelfTest(private val context: Context, private val store: Store) {
             "Home Assistant" to { homeAssistant(snap) },
             "Network drive" to { nas() },
             "Plex" to { plex() },
-            "Football scores" to { football() },
             "App updates" to { updates() },
             "Film info (TMDB)" to { tmdb() },
             "Subtitles online" to { subtitles() },
@@ -334,12 +332,6 @@ class SelfTest(private val context: Context, private val store: Store) {
             }
         }
         return Result("Plex", worst, lines.joinToString("\n"))
-    }
-
-    private fun football(): Result {
-        val key = store.footballKey ?: return Result("Football scores", State.Info, "No football-data.org key set")
-        val n = Football.today(key).size
-        return Result("Football scores", State.Pass, "Key works · $n matches today")
     }
 
     private fun updates(): Result {
