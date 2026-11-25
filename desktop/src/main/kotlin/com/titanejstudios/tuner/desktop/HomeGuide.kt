@@ -501,7 +501,7 @@ private fun ProgrammeMenu(app: AppState, c: Channel, p: Programme, onDismiss: ()
     val now = app.now
     Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.55f)).clickable(onClick = onDismiss), contentAlignment = Alignment.Center) {
         Column(
-            Modifier.width(520.dp).clip(RoundedCornerShape(16.dp)).background(Panel).clickable(enabled = false) {}.padding(24.dp),
+            Modifier.width(680.dp).clip(RoundedCornerShape(16.dp)).background(Panel).clickable(enabled = false) {}.padding(24.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(p.title, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
@@ -517,9 +517,10 @@ private fun ProgrammeMenu(app: AppState, c: Channel, p: Programme, onDismiss: ()
             }
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 val t = remember(app.listsVersion) { app.thumbOf(p.title) }
-                Pill(if (t == 1) "👍 Liked" else "👍 More like this", selected = t == 1) { app.thumb(p.title, true) }
-                Pill(if (t == -1) "👎 Not for me" else "👎 Less like this", selected = t == -1) { app.thumb(p.title, false) }
-                if (app.link.key != null) Pill("📺 Watch it on the TV") { onDismiss(); app.watchOnTv(c, p.takeIf { it.stop <= now }) }
+                Pill("👍", selected = t == 1) { app.thumb(p.title, true) }
+                Pill("👎", selected = t == -1) { app.thumb(p.title, false) }
+                if (!app.kids) Pill(if (app.seriesLinkFor(c, p)) "Cancel the series link" else "🔁 Every episode") { app.toggleSeriesLink(c, p); onDismiss() }
+                if (app.link.key != null) Pill("📺 On the TV") { onDismiss(); app.watchOnTv(c, p.takeIf { it.stop <= now }) }
             }
         }
     }

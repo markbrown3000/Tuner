@@ -155,6 +155,20 @@ class Config {
     var hideOffline: Boolean get() = more.optBoolean("hideOffline"); set(v) { more.put("hideOffline", v) }
     var offlineCheckedAt: Long get() = more.optLong("offlineAt"); set(v) { more.put("offlineAt", v) }
 
+    // Picture and sound.
+    var nightMode: Boolean get() = more.optBoolean("nightMode"); set(v) { more.put("nightMode", v) }
+    var clearSpeech: Boolean get() = more.optBoolean("clearSpeech"); set(v) { more.put("clearSpeech", v) }
+    var subtitleScale: Int get() = more.optInt("subScale", 100); set(v) { more.put("subScale", v) }
+    var lipSyncMs: Long get() = more.optLong("lipSync"); set(v) { more.put("lipSync", v) }
+    var openSubtitlesKey: String? get() = moreStr("osKey", "").ifBlank { null }; set(v) { more.put("osKey", v ?: "") }
+    // Recordings.
+    /** Series links: "channelId<TAB>title" – every showing records. */
+    var seriesLinks: List<String> get() = moreList("seriesLinks"); set(v) { more.put("seriesLinks", JSONArray(v)) }
+    /** Finished recordings older than this many days are deleted (0 = keep them). */
+    var keepRecordingsDays: Int get() = more.optInt("keepDays"); set(v) { more.put("keepDays", v) }
+    /** Where recordings go (a network drive is fine); blank = Videos\Flicker. */
+    var recordFolder: String get() = moreStr("recFolder", ""); set(v) { more.put("recFolder", v) }
+
     /** Each profile's sound language, subtitle language and audio description: "en|en|1". */
     fun languagesOf(profile: String): Triple<String?, String?, Boolean> {
         val p = moreStr("lang_$profile", "").split('|')

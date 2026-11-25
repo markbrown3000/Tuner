@@ -27,7 +27,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 enum class Page(val label: String, val icon: String) {
-    Search("Search", "🔍"), Home("Home", "⌂"), Live("Live TV", "📺"), Guide("TV Guide", "▦"), WhatsOn("What's On", "☰"),
+    Search("Search", "🔍"), Home("Home", "⌂"), Live("Live TV", "📺"), Guide("TV Guide", "▦"), Catchup("Catch-up", "↺"), WhatsOn("What's On", "☰"),
     Multi("Multi-view", "⊞"), Films("Films", "🎬"), Series("Series", "🎞"),
     Plex("Plex", "▶"), YouTube("YouTube", "▷"), Recordings("Recordings", "●"), Settings("Settings", "⚙"),
 }
@@ -353,7 +353,9 @@ class AppState(val config: Config, val player: Player, private val scope: Corout
             }
             channels = loaded.channels
             guide = loaded.guide
+            versions = loaded.versions
             applyEpgMap()
+            scheduleSeriesLinks()
             problems = loaded.problems
             status = null
             now = System.currentTimeMillis()
@@ -1183,7 +1185,9 @@ class AppState(val config: Config, val player: Player, private val scope: Corout
 
     // ---------------- Recordings ----------------
 
-    val recorder = Recorder(player)
+    val recorder = Recorder(player).also { r ->
+        config.recordFolder.takeIf { it.isNotBlank() }?.let { java.io.File(it) }?.takeIf { it.isDirectory || it.mkdirs() }?.let { r.folder = it }
+    }
     var recordings by mutableStateOf(config.recordings)
 
     private fun saveRecordings() {
@@ -1248,6 +1252,393 @@ class AppState(val config: Config, val player: Player, private val scope: Corout
         runCatching { java.io.File(r.file).delete() }
         recordings = recordings.filterNot { it.id == r.id }
         saveRecordings()
+    }
+
+    // ---------------- Sleep timer ----------------
+
+    /** When to stop (0 = off; -1 = at the end of this programme). */
+    var sleepAt by mutableStateOf(0L)
+
+    fun setSleep(minutes: Int) {
+        sleepAt = when {
+            minutes == 0 -> 0L
+            minutes < 0 -> playingChannel?.let { c -> guide[c.id]?.firstOrNull { it.start <= now && it.stop > now }?.stop } ?: -1L
+            else -> System.currentTimeMillis() + minutes * 60_000L
+        }
+        say(when {
+            sleepAt == 0L -> "Sleep timer off"
+            sleepAt < 0 -> "Nothing to time – stops when this ends"
+            else -> "😴 Stops at ${time(sleepAt)}"
+        })
+    }
+
+    val sleepLabel: String get() = if (sleepAt <= 0L) "Off" else "Stops at ${time(sleepAt)}"
+
+    fun tickSleep() {
+        val at = sleepAt
+        if (at > 0 && System.currentTimeMillis() >= at) {
+            sleepAt = 0L
+            stopWatching(save = true)
+            endTimeshift()
+            player.stop()
+            playingChannel = null
+            say("😴 Sleep timer – stopped. Goodnight!")
+        } else if (at < 0 && watching == null) sleepAt = 0L
+    }
+
+    // ---------------- Picture and sound ----------------
+
+    var soundVersion by mutableStateOf(0)
+
+    fun toggleNightMode() {
+        config.nightMode = !config.nightMode
+        player.nightMode = config.nightMode
+        player.restart()
+        soundChanged(if (config.nightMode) "🌙 Night mode: quiet bangs, louder voices" else "Night mode off")
+    }
+
+    fun toggleClearSpeech() {
+        config.clearSpeech = !config.clearSpeech
+        player.clearSpeech = config.clearSpeech
+        player.applySoundTweaks()
+        soundChanged(if (config.clearSpeech) "🗣 Clearer speech on" else "Clearer speech off")
+    }
+
+    val subtitleSizes = listOf(75 to "Small", 100 to "Normal", 130 to "Large", 160 to "Extra large")
+    fun cycleSubtitleSize() {
+        val i = subtitleSizes.indexOfFirst { it.first == config.subtitleScale }
+        val next = subtitleSizes[(i + 1) % subtitleSizes.size]
+        config.subtitleScale = next.first
+        player.subtitleScale = next.first
+        player.restart()
+        soundChanged("Subtitles: ${next.second}")
+    }
+    val subtitleSizeLabel: String get() = subtitleSizes.firstOrNull { it.first == config.subtitleScale }?.second ?: "Normal"
+
+    fun setLipSync(ms: Long) {
+        config.lipSyncMs = ms
+        player.audioDelayMs = ms
+        player.applySoundTweaks()
+        soundChanged("Sound timing: " + lipSyncLabel(ms))
+    }
+
+    fun lipSyncLabel(ms: Long = config.lipSyncMs): String = when {
+        ms == 0L -> "In sync"
+        ms < 0 -> "Sound ${-ms} ms earlier"
+        else -> "Sound $ms ms later"
+    }
+
+    private fun soundChanged(message: String) {
+        soundVersion++
+        changed(sync = false)
+        say(message)
+    }
+
+    // ---------------- HD / SD copies, Fix it ----------------
+
+    /** Merged channels' copies (HD, SD, backups), best first. */
+    var versions by mutableStateOf<Map<String, List<Channel>>>(emptyMap())
+
+    fun versionsFor(c: Channel): List<Channel> = versions[c.id].orEmpty()
+
+    /** Plays another copy of the channel that's on (keeps it in the list as the same channel). */
+    fun playVersion(main: Channel, copy: Channel) {
+        playingChannel = main
+        catchupOf = null
+        player.play(copy.url)
+        player.setVolume(config.volume)
+        say("Playing ${copy.name}")
+    }
+
+    var fixing by mutableStateOf(false)
+
+    /** 🛠 Fix it: starts it again, then tries the other copies of the channel. */
+    fun fixIt() {
+        if (fixing) return
+        val c = playingChannel
+        fixing = true
+        say("🛠 Starting it again…")
+        scope.launch {
+            player.restart()
+            delay(8_000)
+            if (!player.isPlaying && c != null) {
+                for (v in versionsFor(c).drop(1)) {
+                    say("🛠 Trying ${v.name}…")
+                    player.play(v.url)
+                    delay(8_000)
+                    if (player.isPlaying) break
+                }
+            }
+            fixing = false
+            say(
+                if (player.isPlaying) "🛠 Playing again ✓"
+                else "🛠 Still not playing – the channel may be down. Is the internet OK? (Settings › Problem log has details)"
+            )
+        }
+    }
+
+    var showStreamInfo by mutableStateOf(false)
+
+    // ---------------- Catch-up ----------------
+
+    /** Live TV, joined part way: watch this programme from its start (with catch-up). */
+    fun startOverProgramme(): Pair<Channel, Programme>? {
+        val c = playingChannel ?: return null
+        if (catchupOf != null || timeshift != null) return null
+        val p = guide[c.id]?.firstOrNull { it.start <= now && it.stop > now } ?: return null
+        if (now - p.start < 3 * 60_000L || !com.titanejstudios.tuner.data.Catchup.isAvailable(c, p, now)) return null
+        return c to p
+    }
+
+    /** Channels with catch-up (for the Catch-up page). */
+    val catchupChannels: List<Channel> get() = visibleChannels.filter { it.hasCatchup }
+
+    // ---------------- Watch together ----------------
+
+    var togetherWith by mutableStateOf<String?>(null)
+    private var togetherPeer: PcLink.Peer? = null
+    private var togetherJob: kotlinx.coroutines.Job? = null
+    private var tPaused = false
+    private var tPos = 0L
+    private var tAt = 0L
+
+    /** Plays what's on here on [peer] too, and keeps pauses and skips in step. */
+    fun watchTogether(peer: PcLink.Peer) {
+        val what = sendable()?.put("together", true) ?: return say("This can't be watched together")
+        if (watching != null) saveProgress()
+        scope.launch {
+            val ok = withContext(Dispatchers.IO) { link.send(peer, what, sync.deviceLabel()) }
+            if (!ok) return@launch say("${peer.name} didn't answer")
+            startTogether(peer)
+            say("👫 Watching together with ${peer.name} – pause or skip on either")
+        }
+    }
+
+    private fun togetherBaseline() {
+        tPaused = player.isPaused
+        tPos = player.positionMs
+        tAt = System.currentTimeMillis()
+    }
+
+    private fun startTogether(peer: PcLink.Peer) {
+        togetherJob?.cancel()
+        togetherPeer = peer
+        togetherWith = peer.name
+        togetherJob = scope.launch {
+            delay(3_000)
+            togetherBaseline()
+            while (togetherPeer === peer) {
+                delay(700)
+                if (watching == null && playingChannel == null) {
+                    stopTogether()
+                    break
+                }
+                val paused = player.isPaused
+                val pos = player.positionMs
+                val t = System.currentTimeMillis()
+                val expected = if (tPaused) tPos else tPos + (t - tAt)
+                when {
+                    paused != tPaused -> sendTogether(peer, if (paused) "pause" else "play", pos)
+                    watching != null && kotlin.math.abs(pos - expected) > 6_000 -> sendTogether(peer, "seek", pos, paused)
+                }
+                tPaused = paused
+                tPos = pos
+                tAt = t
+            }
+        }
+    }
+
+    fun stopTogether(tell: Boolean = true) {
+        val p = togetherPeer
+        togetherJob?.cancel()
+        togetherPeer = null
+        togetherWith = null
+        if (tell && p != null) sendTogether(p, "leave")
+    }
+
+    private fun sendTogether(peer: PcLink.Peer, act: String, pos: Long = 0L, paused: Boolean = false) {
+        val what = JSONObject().put("kind", "together").put("act", act).put("pos", pos).put("paused", paused)
+        scope.launch {
+            val ok = withContext(Dispatchers.IO) { link.send(peer, what, sync.deviceLabel()) }
+            if (!ok && act != "leave" && togetherPeer === peer) {
+                togetherJob?.cancel()
+                togetherPeer = null
+                togetherWith = null
+                say("Lost ${peer.name} – stopped watching together")
+            }
+        }
+    }
+
+    /** The other device paused, played, skipped or left (or started watching together with us). */
+    private fun handleTogether(from: String, j: JSONObject) {
+        when (j.optString("act")) {
+            "pause" -> {
+                player.pause()
+                if (watching != null) player.seekTo(j.optLong("pos"))
+                say("⏸ Paused on $from")
+            }
+            "play" -> {
+                if (watching != null) player.seekTo(j.optLong("pos"))
+                player.resume()
+            }
+            "seek" -> {
+                player.seekTo(j.optLong("pos"))
+                if (j.optBoolean("paused")) player.pause() else player.resume()
+            }
+            "leave" -> {
+                togetherJob?.cancel()
+                togetherPeer = null
+                togetherWith = null
+                say("$from stopped watching together")
+                return
+            }
+        }
+        scope.launch {
+            delay(400)
+            togetherBaseline()
+        }
+    }
+
+    /** Something sent with "together": follow that device. */
+    private fun joinTogether(from: String) {
+        scope.launch {
+            val peers = withContext(Dispatchers.IO) { runCatching { link.findPeers() }.getOrDefault(emptyList()) }
+            val p = peers.firstOrNull { it.name == from } ?: return@launch
+            startTogether(p)
+            say("👫 Watching together with ${p.name}")
+        }
+    }
+
+    // ---------------- Subtitles online (OpenSubtitles) ----------------
+
+    var subtitleHits by mutableStateOf<List<com.titanejstudios.tuner.integrations.OpenSubtitles.Hit>?>(null)
+
+    fun findSubtitles() {
+        val key = config.openSubtitlesKey ?: return say("Add your free OpenSubtitles key in Settings › This PC first")
+        val w = watching ?: return say("Subtitles online are for films and episodes")
+        val lang = config.languagesOf(profileId).second ?: "en"
+        val se = com.titanejstudios.tuner.integrations.OpenSubtitles.seasonEpisode(w.subtitle)
+        val (title, year) = com.titanejstudios.tuner.data.FilmName.parse(w.title)
+        say("Looking for subtitles…")
+        scope.launch {
+            val hits = withContext(Dispatchers.IO) {
+                runCatching { com.titanejstudios.tuner.integrations.OpenSubtitles.search(key, title, lang, year?.toIntOrNull(), se?.first, se?.second) }
+                    .onFailure { com.titanejstudios.tuner.data.AppLog.warn("OpenSubtitles search failed", it) }.getOrNull()
+            }
+            if (hits.isNullOrEmpty()) say("No subtitles found") else subtitleHits = hits.take(15)
+        }
+    }
+
+    fun useSubtitle(hit: com.titanejstudios.tuner.integrations.OpenSubtitles.Hit) {
+        val key = config.openSubtitlesKey ?: return
+        subtitleHits = null
+        scope.launch {
+            val file = withContext(Dispatchers.IO) {
+                runCatching {
+                    com.titanejstudios.tuner.integrations.OpenSubtitles.download(key, hit, java.io.File(System.getProperty("java.io.tmpdir"), "flicker-subs").apply { mkdirs() })
+                }.onFailure { com.titanejstudios.tuner.data.AppLog.warn("Subtitle download failed", it) }.getOrNull()
+            }
+            say(if (file != null && player.addSubtitleFile(file)) "Subtitles on ✓" else "Couldn't add those subtitles")
+        }
+    }
+
+    fun setOpenSubtitlesKey(key: String?) {
+        config.openSubtitlesKey = key?.trim()?.ifBlank { null }
+        changed(sync = false)
+        say(if (config.openSubtitlesKey != null) "OpenSubtitles key saved" else "OpenSubtitles key removed")
+    }
+
+    // ---------------- Series links, tidying recordings, the folder ----------------
+
+    fun seriesLinkFor(c: Channel, p: Programme): Boolean = "${c.id}\t${p.title}" in config.seriesLinks
+
+    fun toggleSeriesLink(c: Channel, p: Programme) {
+        val key = "${c.id}\t${p.title}"
+        if (key in config.seriesLinks) {
+            config.seriesLinks = config.seriesLinks - key
+            // Scheduled ones it made go too (not ones already recording or done).
+            recordings = recordings.filterNot { it.channelId == c.id && it.title == p.title && it.state == "scheduled" && it.start > System.currentTimeMillis() }
+            saveRecordings()
+            changed(sync = false)
+            say("Series link cancelled")
+        } else {
+            config.seriesLinks = config.seriesLinks + key
+            changed(sync = false)
+            scheduleSeriesLinks()
+            say("🔁 Every ${p.title} on ${c.name} will record (keep Flicker open – it can be in the tray)")
+        }
+    }
+
+    /** Puts the next showings of your series links in the recordings list (the next day's worth). */
+    fun scheduleSeriesLinks() {
+        val links = config.seriesLinks
+        if (links.isEmpty()) return
+        val t = System.currentTimeMillis()
+        val add = ArrayList<PcRecording>()
+        for (l in links) {
+            val cid = l.substringBefore('\t')
+            val title = l.substringAfter('\t')
+            val c = channels.firstOrNull { it.id == cid } ?: continue
+            for (p in guide[cid].orEmpty()) {
+                if (p.title != title || p.stop <= t || p.start > t + 24 * 3_600_000L) continue
+                if (recordings.any { it.channelId == cid && it.start == p.start } || add.any { it.channelId == cid && it.start == p.start }) continue
+                val safe = p.title.replace(Regex("[\\\\/:*?\"<>|]"), "").take(60).trim().ifEmpty { "Recording" }
+                val stamp = java.text.SimpleDateFormat("yyyy-MM-dd HHmm", java.util.Locale.UK).format(java.util.Date(p.start))
+                val file = java.io.File(recorder.folder, "$safe – ${c.name.replace(Regex("[\\\\/:*?\"<>|]"), "")} – $stamp.ts").absolutePath
+                add += PcRecording(java.util.UUID.randomUUID().toString(), c.id, c.name, p.title, p.start, p.stop, file, "scheduled")
+            }
+        }
+        if (add.isNotEmpty()) {
+            recordings = recordings + add
+            saveRecordings()
+        }
+    }
+
+    private var tidiedAt = 0L
+
+    /** Hourly: series links' next showings, and deleting finished recordings older than you keep them. */
+    fun tidyRecordings() {
+        val t = System.currentTimeMillis()
+        if (t - tidiedAt < 3_600_000L) return
+        tidiedAt = t
+        scheduleSeriesLinks()
+        val days = config.keepRecordingsDays
+        if (days <= 0) return
+        val old = recordings.filter { it.state == "done" && t - it.stop > days * 86_400_000L }
+        if (old.isEmpty()) return
+        old.forEach { runCatching { java.io.File(it.file).delete() } }
+        recordings = recordings - old.toSet()
+        saveRecordings()
+        com.titanejstudios.tuner.data.AppLog.info("Deleted ${old.size} recordings older than $days days")
+    }
+
+    fun setKeepRecordings(days: Int) {
+        config.keepRecordingsDays = days
+        changed(sync = false)
+        tidiedAt = 0L
+        tidyRecordings()
+    }
+
+    /** Picks where recordings go (any folder, a network drive too). */
+    fun chooseRecordFolder() {
+        val chooser = javax.swing.JFileChooser(recorder.folder).apply {
+            fileSelectionMode = javax.swing.JFileChooser.DIRECTORIES_ONLY
+            dialogTitle = "Where should recordings go?"
+        }
+        if (chooser.showOpenDialog(null) == javax.swing.JFileChooser.APPROVE_OPTION) {
+            val dir = chooser.selectedFile
+            if (!dir.exists() && !dir.mkdirs() || !dir.canWrite()) return say("Flicker can't save to that folder")
+            config.recordFolder = dir.absolutePath
+            recorder.folder = dir
+            changed(sync = false)
+            say("Recordings will go to ${dir.absolutePath}")
+        }
+    }
+
+    fun resetRecordFolder() {
+        config.recordFolder = ""
+        recorder.folder = java.io.File(System.getProperty("user.home"), "Videos" + java.io.File.separator + "Flicker").apply { mkdirs() }
+        changed(sync = false)
     }
 
     // ---------------- Updates ----------------
@@ -1365,6 +1756,10 @@ class AppState(val config: Config, val player: Player, private val scope: Corout
                 receiveKids(from, j)
                 return true
             }
+            "together" -> {
+                handleTogether(who, j)
+                return true
+            }
             "live" -> {
                 val c = channels.firstOrNull { it.id == j.optString("channel") } ?: return false
                 playChannel(c)
@@ -1393,6 +1788,7 @@ class AppState(val config: Config, val player: Player, private val scope: Corout
             else -> return false
         }
         say("▶ Sent from $who")
+        if (j.optBoolean("together")) joinTogether(from)
         return true
     }
 

@@ -16,7 +16,7 @@ val sharedFiles = listOf(
     "data/Models.kt", "data/M3uParser.kt", "data/XtreamClient.kt", "data/Http.kt", "data/XmltvParser.kt",
     "data/Catchup.kt", "data/ChannelMerge.kt", "data/Sports.kt", "data/WhatsOn.kt", "data/HomeFeed.kt",
     "data/Languages.kt", "data/FilmName.kt", "data/Taste.kt", "data/Recommend.kt", "data/SportFollow.kt",
-    "data/Watchlist.kt", "integrations/Plex.kt", "integrations/Tmdb.kt", "integrations/YouTube.kt", "integrations/GoogleDrive.kt", "integrations/Espn.kt",
+    "data/Watchlist.kt", "integrations/Plex.kt", "integrations/Tmdb.kt", "integrations/YouTube.kt", "integrations/GoogleDrive.kt", "integrations/Espn.kt", "integrations/OpenSubtitles.kt",
 )
 
 // Keys built in from GitHub's secrets (the same ones as the TV app): Google sign-in for sync,

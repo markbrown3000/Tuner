@@ -117,10 +117,75 @@ class Player {
         }
         val opts = mutableListOf(":network-caching=1500", ":http-reconnect")
         if (deinterlace) opts += listOf(":deinterlace=1", ":deinterlace-mode=yadif")
-        if (normalise) opts += listOf(":audio-filter=normvol", ":norm-max-level=1.5")
+        // Sound filters: even out loud and quiet channels, and night mode (quiet bangs, louder voices).
+        val filters = listOfNotNull(if (normalise) "normvol" else null, if (nightMode) "compressor" else null)
+        if (filters.isNotEmpty()) opts += ":audio-filter=" + filters.joinToString(":")
+        if (normalise) opts += ":norm-max-level=1.5"
+        if (nightMode) opts += listOf(":compressor-ratio=8", ":compressor-threshold=-24", ":compressor-makeup-gain=10")
+        if (subtitleScale != 100) opts += ":sub-text-scale=$subtitleScale"
         if (startMs > 0) opts += ":start-time=${startMs / 1000}"
         player()?.media()?.play(url, *opts.toTypedArray())
+        applySoundTweaks()
     }
+
+    /** Night mode: quiet explosions and louder voices (a compressor). Takes effect on the next start. */
+    var nightMode = false
+    /** Clearer speech: lifts the voice frequencies and turns the rumble down (an equaliser). */
+    var clearSpeech = false
+    /** Subtitle size, percent of normal. */
+    var subtitleScale = 100
+    /** Sound timing (lip sync): + plays the sound later, − earlier. */
+    var audioDelayMs = 0L
+
+    /** Clearer speech and lip sync, applied to whatever's playing now. */
+    fun applySoundTweaks() {
+        val p = player() ?: return
+        runCatching { p.audio().setDelay(audioDelayMs * 1000L) }
+        runCatching {
+            val f = factory
+            if (!clearSpeech || f == null) p.audio().setEqualizer(null)
+            else {
+                val eq = f.equalizer().newEqualizer()
+                val bands = f.equalizer().bands()
+                bands.forEachIndexed { i, hz ->
+                    val gain = when {
+                        hz < 150f -> -6f
+                        hz < 400f -> -2f
+                        hz in 900f..4500f -> 6f
+                        hz > 9000f -> -1f
+                        else -> 1f
+                    }
+                    eq.setAmp(i, gain)
+                }
+                p.audio().setEqualizer(eq)
+            }
+        }
+    }
+
+    /** Adds a downloaded subtitle file to what's playing and shows it. */
+    fun addSubtitleFile(file: java.io.File): Boolean = runCatching { player()?.subpictures()?.setSubTitleFile(file) == true }.getOrDefault(false)
+
+    val isPaused: Boolean get() = player()?.status()?.isPlaying == false && lastUrl != null
+
+    fun pause() {
+        player()?.controls()?.setPause(true)
+    }
+
+    fun resume() {
+        player()?.controls()?.setPause(false)
+    }
+
+    /** "Stream info": picture size, codecs and sound. */
+    fun streamInfo(): List<String> = runCatching {
+        val p = player() ?: return@runCatching emptyList<String>()
+        val out = ArrayList<String>()
+        p.video().videoDimension()?.let { out += "Picture: ${it.width} × ${it.height}" }
+        val info = p.media().info()
+        info?.videoTracks()?.firstOrNull()?.let { t -> out += "Video: ${t.codecName() ?: t.codecDescription() ?: "?"}" }
+        info?.audioTracks()?.firstOrNull()?.let { t -> out += "Sound: ${t.codecName() ?: t.codecDescription() ?: "?"}, ${t.channels()} channels, ${t.rate()} Hz" }
+        lastUrl?.let { out += "From: " + it.substringBefore('?').let { u -> if (u.length > 70) "…" + u.takeLast(68) else u } }
+        out
+    }.getOrDefault(emptyList())
 
     fun stop() {
         lastUrl = null

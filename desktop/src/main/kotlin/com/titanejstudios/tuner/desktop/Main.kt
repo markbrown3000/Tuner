@@ -86,6 +86,10 @@ private fun runApp() = application {
         Player().also {
             it.deinterlace = config.deinterlace
             it.normalise = config.normalise
+            it.nightMode = config.nightMode
+            it.clearSpeech = config.clearSpeech
+            it.subtitleScale = config.subtitleScale
+            it.audioDelayMs = config.lipSyncMs
             it.warmUp()
         }
     }
@@ -157,6 +161,8 @@ private fun runApp() = application {
             app.checkReminders()
             app.checkRecordings()
             app.tickKids()
+            app.tickSleep()
+            app.tidyRecordings()
             if (app.watching != null) app.saveProgress()
             if (ticks % 18 == 0) app.syncSoon(0)
             if (ticks % 1080 == 0) app.checkForUpdate()
@@ -308,6 +314,7 @@ private fun Shell(app: AppState, fullScreen: Boolean, toggleFullScreen: () -> Un
                         Page.Home -> HomePage(app)
                         Page.Live -> LivePage(app, fullScreen, toggleFullScreen)
                         Page.Guide -> GuidePage(app)
+                        Page.Catchup -> CatchupPage(app)
                         Page.Multi -> MultiPage(app)
                         Page.WhatsOn -> WhatsOnPage(app)
                         Page.Search -> SearchPage(app)
@@ -348,6 +355,8 @@ private fun Shell(app: AppState, fullScreen: Boolean, toggleFullScreen: () -> Un
             }
         }
         if (app.showKeys) KeysHelp(app)
+        if (app.showStreamInfo && (app.watching != null || app.playingChannel != null)) StreamInfo(app, Modifier.align(Alignment.TopEnd))
+        app.subtitleHits?.let { hits -> SubtitlePicker(app, hits) }
         app.pinPrompt?.let { (why, _) -> PinPrompt(app, why) }
         if (app.askWhoIsWatching && app.config.profiles.size > 1) WhoIsWatching(app)
     }
@@ -575,6 +584,44 @@ private fun KeysHelp(app: AppState) {
                 Text(what, color = Color.White, fontSize = 15.sp)
             }
             Text("Click anywhere or press Esc to close", color = Soft, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
+        }
+    }
+}
+
+
+/** ℹ Stream info: picture size, codecs and sound, updated every couple of seconds. */
+@Composable
+private fun StreamInfo(app: AppState, modifier: Modifier) {
+    var lines by remember { mutableStateOf<List<String>>(emptyList()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            lines = app.player.streamInfo()
+            delay(2_000)
+        }
+    }
+    Column(
+        modifier.padding(24.dp).width(420.dp).clip(RoundedCornerShape(12.dp)).background(Ink.copy(alpha = 0.9f))
+            .clickable { app.showStreamInfo = false }.padding(14.dp),
+    ) {
+        Text("ℹ Stream info", color = Gold, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+        if (lines.isEmpty()) Text("Waiting for the stream…", color = Soft, fontSize = 13.sp)
+        for (l in lines) Text(l, color = Color.White, fontSize = 13.sp, maxLines = 2)
+    }
+}
+
+/** Subtitles found online: pick one. */
+@Composable
+private fun SubtitlePicker(app: AppState, hits: List<com.titanejstudios.tuner.integrations.OpenSubtitles.Hit>) {
+    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.6f)).clickable { app.subtitleHits = null }, contentAlignment = Alignment.Center) {
+        Column(Modifier.width(620.dp).clip(RoundedCornerShape(16.dp)).background(Panel).padding(22.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("Subtitles found", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            for (h in hits) Column(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(PanelLight).clickable { app.useSubtitle(h) }.padding(horizontal = 12.dp, vertical = 7.dp),
+            ) {
+                Text(h.release, color = Color.White, fontSize = 14.sp, maxLines = 1)
+                Text("${h.language} · ${h.downloads} downloads", color = Soft, fontSize = 11.sp)
+            }
+            Pill("Cancel") { app.subtitleHits = null }
         }
     }
 }

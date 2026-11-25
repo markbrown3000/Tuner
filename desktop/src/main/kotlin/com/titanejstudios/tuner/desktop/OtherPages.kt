@@ -520,6 +520,18 @@ fun SettingsPage(app: AppState) {
                 )
             }
         }
+        item { SectionTitle("Subtitles online") }
+        item {
+            Card {
+                var key by remember { mutableStateOf(app.config.openSubtitlesKey ?: "") }
+                Text("A free key from opensubtitles.com (your profile › API consumers) lets ⋯ More › Find subtitles online fetch them for films and episodes.", color = Soft, fontSize = 13.sp)
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 6.dp)) {
+                    OutlinedTextField(key, { key = it.trim() }, singleLine = true, placeholder = { Text("OpenSubtitles API key") }, modifier = Modifier.width(380.dp))
+                    Pill("Save", selected = true) { app.setOpenSubtitlesKey(key) }
+                    if (app.config.openSubtitlesKey != null) Pill("Remove") { key = ""; app.setOpenSubtitlesKey(null) }
+                }
+            }
+        }
     }
     editing?.let { p -> ProfileEditor(app, p) { editing = null } }
     if (managing) ManageChannels(app) { managing = false }
