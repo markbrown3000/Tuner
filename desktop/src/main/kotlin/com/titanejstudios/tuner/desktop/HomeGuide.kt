@@ -235,7 +235,13 @@ private fun GuideRow(app: AppState, c: Channel, origin: Long, end: Long, now: Lo
             Column(
                 Modifier.offset(x = x.dp).width(w.dp - 2.dp).fillMaxHeight().clip(RoundedCornerShape(6.dp))
                     .background(if (on) Sky.copy(alpha = 0.35f) else if (past) Panel.copy(alpha = 0.5f) else Panel)
-                    .then(if (app.hasReminder(c, p)) Modifier.border(1.dp, Gold, RoundedCornerShape(6.dp)) else Modifier)
+                    .then(
+                        when {
+                            app.recordingFor(c, p) != null -> Modifier.border(1.dp, LiveRed, RoundedCornerShape(6.dp))
+                            app.hasReminder(c, p) -> Modifier.border(1.dp, Gold, RoundedCornerShape(6.dp))
+                            else -> Modifier
+                        }
+                    )
                     .clickable { onClick(p) }.padding(horizontal = 8.dp, vertical = 5.dp),
             ) {
                 Text(p.title, color = if (past) Soft else Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -270,6 +276,7 @@ private fun ProgrammeMenu(app: AppState, c: Channel, p: Programme, onDismiss: ()
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 if (p.stop <= now && Catchup.isAvailable(c, p, now)) Pill("↺ Watch (catch-up)", selected = true) { onDismiss(); app.playCatchup(c, p) }
                 if (p.start > now) Pill(if (app.hasReminder(c, p)) "Cancel the reminder" else "⏰ Remind me", selected = true) { app.toggleReminder(c, p); onDismiss() }
+                if (p.stop > now && !app.kids) Pill(if (app.recordingFor(c, p) != null) "Cancel the recording" else "● Record") { app.toggleRecording(c, p); onDismiss() }
                 Pill("▶ ${c.name} now") { onDismiss(); app.playChannel(c) }
                 Pill("Close", onClick = onDismiss)
             }

@@ -139,6 +139,9 @@ jobs:
           cp -r vlc-unzipped/vlc-$VLC/plugins desktop/resources/windows/vlc/
           # Not needed for playing streams: VLC's own windows, skins and the like.
           rm -rf desktop/resources/windows/vlc/plugins/gui desktop/resources/windows/vlc/plugins/visualization
+          # VLC's plugin index, made now, so the first start doesn't spend half a minute looking through them.
+          ./vlc-unzipped/vlc-$VLC/vlc-cache-gen.exe "$(cygpath -w "$PWD/desktop/resources/windows/vlc/plugins")" || echo "No plugin index (VLC will make one on first start)"
+          ls -la desktop/resources/windows/vlc/plugins/plugins.dat || true
           du -sh desktop/resources/windows/vlc
 
       - name: Build the Windows installer

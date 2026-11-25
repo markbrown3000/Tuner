@@ -7,7 +7,23 @@ import java.io.File
 import java.util.UUID
 
 /** A profile from the TV (who's watching). Kids' profiles see only their channel groups. */
-class PcProfile(val id: String, val name: String, val kids: Boolean, val groups: Set<String>)
+class PcProfile(
+    val id: String, val name: String, val kids: Boolean, val groups: Set<String>,
+    /** Kids: minutes a day (0 = no limit), and no TV after this (minutes after midnight, -1 = none) until 6am. */
+    val limitMinutes: Int = 0, val bedtime: Int = -1,
+)
+
+/** A film or episode saved to the PC to watch without the internet. */
+class PcDownload(val id: String, val title: String, val sub: String?, val poster: String?, val url: String, var file: String, var state: String) {
+    fun toJson(): JSONObject = JSONObject().put("id", id).put("t", title).put("sub", sub).put("p", poster).put("u", url).put("f", file).put("st", state)
+
+    companion object {
+        fun fromJson(o: JSONObject) = PcDownload(
+            o.optString("id"), o.optString("t"), o.optString("sub").ifBlank { null }?.takeIf { it != "null" },
+            o.optString("p").ifBlank { null }?.takeIf { it != "null" }, o.optString("u"), o.optString("f"), o.optString("st", "done"),
+        )
+    }
+}
 
 /** A film or episode part watched (the TV's format, so Continue watching carries across). */
 class Resume(
@@ -66,6 +82,30 @@ class Config {
     var plexClientId: String = UUID.randomUUID().toString()
     var plexToken: String? = null
     var reminders: List<Reminder> = emptyList()
+    /** The house's linked-devices key (from the TV, through the sync). */
+    var linkKey: String? = null
+    var recordings: List<PcRecording> = emptyList()
+    var lastUpdateCheck = 0L
+    /** The TV's parental PIN (through the sync), for kids' limits. */
+    var pin: String? = null
+    /** Kids' TV time today: profile id → "yyyy-MM-dd:seconds". */
+    var usage: Map<String, String> = emptyMap()
+    /** Your football teams (from the TV) and their ESPN teams (JSON, by name). */
+    var teams: List<String> = emptyList()
+    var espnTeams: String = "{}"
+    var downloads: List<PcDownload> = emptyList()
+    // The window, as you left it.
+    var windowX = -1
+    var windowY = -1
+    var windowW = 1400
+    var windowH = 860
+    var windowMaximised = false
+    /** Closing the window leaves Flicker in the system tray (recordings and reminders carry on). */
+    var keepRunning = true
+    var startWithWindows = false
+    var showNumbers = true
+    /** Picture: deinterlace old channels. */
+    var deinterlace = true
 
     init {
         load()
@@ -122,6 +162,25 @@ class Config {
             lastSync = o.optLong("lastSync")
             plexClientId = o.optString("plexClient").ifBlank { plexClientId }
             plexToken = o.optString("plexToken").ifBlank { null }
+            linkKey = o.optString("linkKey").ifBlank { null }
+            pin = o.optString("pin").ifBlank { null }
+            usage = o.optJSONObject("usage")?.let { d -> d.keys().asSequence().associateWith { d.optString(it) } } ?: emptyMap()
+            teams = o.optJSONArray("teams")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList()
+            espnTeams = o.optString("espnTeams", "{}")
+            downloads = o.optJSONArray("downloads")?.let { a -> (0 until a.length()).map { PcDownload.fromJson(a.getJSONObject(it)) } } ?: emptyList()
+            o.optJSONObject("window")?.let { w ->
+                windowX = w.optInt("x", -1)
+                windowY = w.optInt("y", -1)
+                windowW = w.optInt("w", 1400)
+                windowH = w.optInt("h", 860)
+                windowMaximised = w.optBoolean("max")
+            }
+            keepRunning = o.optBoolean("keepRunning", true)
+            startWithWindows = o.optBoolean("startWithWindows")
+            showNumbers = o.optBoolean("numbers", true)
+            deinterlace = o.optBoolean("deinterlace", true)
+            recordings = o.optJSONArray("recordings")?.let { a -> (0 until a.length()).map { PcRecording.fromJson(a.getJSONObject(it)) } } ?: emptyList()
+            lastUpdateCheck = o.optLong("updateCheck")
             reminders = o.optJSONArray("reminders")?.let { a ->
                 (0 until a.length()).map { a.getJSONObject(it) }.map { r -> Reminder(r.optString("c"), r.optString("cn"), r.optString("t"), r.optLong("s")) }
             } ?: emptyList()
@@ -132,7 +191,10 @@ class Config {
         val o = arr.optJSONObject(i) ?: return@mapNotNull null
         val id = o.optString("id").ifBlank { return@mapNotNull null }
         val groups = o.optJSONArray("groups")
-        PcProfile(id, o.optString("name"), o.optBoolean("kids"), groups?.let { g -> (0 until g.length()).map { g.getString(it) }.toSet() } ?: emptySet())
+        PcProfile(
+            id, o.optString("name"), o.optBoolean("kids"), groups?.let { g -> (0 until g.length()).map { g.getString(it) }.toSet() } ?: emptySet(),
+            o.optInt("limit"), o.optInt("bedtime", -1),
+        )
     }
 
     fun sourcesToJson(): JSONArray = JSONArray().apply {
@@ -159,7 +221,9 @@ class Config {
             .put("gRefresh", googleRefresh ?: "").put("gEmail", googleEmail ?: "").put("gFile", driveFileId ?: "")
             .put("tvPlaylists", useTvPlaylists)
             .put("profiles", JSONArray().apply {
-                profiles.forEach { p -> put(JSONObject().put("id", p.id).put("name", p.name).put("kids", p.kids).put("groups", JSONArray(p.groups.toList()))) }
+                profiles.forEach { p ->
+                    put(JSONObject().put("id", p.id).put("name", p.name).put("kids", p.kids).put("groups", JSONArray(p.groups.toList())).put("limit", p.limitMinutes).put("bedtime", p.bedtime))
+                }
             })
             .put("profile", activeProfile ?: "")
             .put("favs", favs).put("favsAt", favouritesAt)
@@ -170,6 +234,15 @@ class Config {
             .put("ytTokens", JSONObject(youtubeTokens))
             .put("lastSync", lastSync)
             .put("plexClient", plexClientId).put("plexToken", plexToken ?: "")
+            .put("linkKey", linkKey ?: "")
+            .put("pin", pin ?: "")
+            .put("usage", JSONObject(usage))
+            .put("teams", JSONArray(teams)).put("espnTeams", espnTeams)
+            .put("downloads", JSONArray().apply { downloads.forEach { put(it.toJson()) } })
+            .put("window", JSONObject().put("x", windowX).put("y", windowY).put("w", windowW).put("h", windowH).put("max", windowMaximised))
+            .put("keepRunning", keepRunning).put("startWithWindows", startWithWindows).put("numbers", showNumbers).put("deinterlace", deinterlace)
+            .put("recordings", JSONArray().apply { recordings.forEach { put(it.toJson()) } })
+            .put("updateCheck", lastUpdateCheck)
             .put("reminders", JSONArray().apply { reminders.forEach { put(JSONObject().put("c", it.channelId).put("cn", it.channelName).put("t", it.title).put("s", it.start)) } })
         val tmp = File(dir, "settings.json.tmp")
         tmp.writeText(o.toString(2))

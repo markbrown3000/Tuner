@@ -322,6 +322,40 @@ fun SettingsPage(app: AppState) {
             }
         }
 
+        item { SectionTitle("This PC") }
+        item {
+            Card {
+                val v = app.listsVersion
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Pill(if (app.config.keepRunning) "✓ Keep running in the tray" else "Keep running in the tray") {
+                        app.config.keepRunning = !app.config.keepRunning
+                        app.config.save()
+                        app.listsVersion = v + 1
+                    }
+                    Pill(if (app.config.startWithWindows) "✓ Start with Windows" else "Start with Windows") { app.setStartWithWindows(!app.config.startWithWindows) }
+                }
+                Text(
+                    "In the tray, closing the window leaves Flicker running, so recordings and reminders carry on (right-click its icon › Quit to close it).",
+                    color = Soft, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp),
+                )
+                Spacer(Modifier.height(10.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Pill(if (app.config.showNumbers) "✓ Channel numbers" else "Channel numbers") {
+                        app.config.showNumbers = !app.config.showNumbers
+                        app.config.save()
+                        app.listsVersion = v + 1
+                    }
+                    Pill(if (app.config.deinterlace) "✓ Smooth out old channels (deinterlace)" else "Smooth out old channels (deinterlace)") {
+                        app.config.deinterlace = !app.config.deinterlace
+                        app.player.deinterlace = app.config.deinterlace
+                        app.config.save()
+                        app.listsVersion = v + 1
+                    }
+                }
+                Text("Type a channel's number (on Live TV, Home or the guide) to go straight to it.", color = Soft, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
+            }
+        }
+
         item { SectionTitle("Plex") }
         item {
             Card {
@@ -343,6 +377,33 @@ fun SettingsPage(app: AppState) {
                         for (p in app.config.profiles) Pill(p.name + if (p.kids) " (kids)" else "", selected = p.id == app.profileId) { app.chooseProfile(p) }
                     }
                 }
+            }
+        }
+
+        item { SectionTitle("Phone remote and Watch on…") }
+        item {
+            Card {
+                Text(
+                    if (app.config.linkKey != null) "This PC is one of your linked devices: the phone's remote and \"Watch on…\" can use it, " +
+                        "and 📺 Watch on… (on Live TV and the player) sends what's on here to the TV. Windows may ask once to let Flicker use the network – say yes (private networks)."
+                    else "Comes with the sync: once you've signed in above (and the TV has updated), the phone's remote can find this PC.",
+                    color = Soft, fontSize = 13.sp,
+                )
+                if (app.config.linkKey != null) {
+                    Spacer(Modifier.height(8.dp))
+                    Pill(if (app.findingPeers) "Looking…" else "Find my TVs") { app.findPeers() }
+                    if (app.peers.isNotEmpty()) Text("Found: " + app.peers.joinToString(", ") { it.name }, color = Color.White, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))
+                }
+            }
+        }
+
+        item { SectionTitle("Updates") }
+        item {
+            Card {
+                Text("Flicker for Windows ${Keys.VERSION}", color = Color.White, fontSize = 15.sp)
+                Text("Checks GitHub for a new version once a day and offers to install it.", color = Soft, fontSize = 13.sp)
+                Spacer(Modifier.height(8.dp))
+                Pill("Check now") { app.checkForUpdate(manual = true) }
             }
         }
 

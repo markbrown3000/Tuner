@@ -103,7 +103,8 @@ fun LivePage(app: AppState, fullScreen: Boolean, toggleFullScreen: () -> Unit) {
                         )
                     }
                 }
-                items(shown, key = { it.id }) { c ->
+                items(shown.size, key = { shown[it].id }) { index ->
+                    val c = shown[index]
                     val cur = guide[c.id]?.firstOrNull { it.start <= now && it.stop > now }
                     val sel = c.id == app.playingChannel?.id
                     Row(
@@ -112,6 +113,9 @@ fun LivePage(app: AppState, fullScreen: Boolean, toggleFullScreen: () -> Unit) {
                             .clickable { app.playChannel(c) }.padding(horizontal = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
+                        if (app.config.showNumbers) Text(
+                            app.numberOf(c, channels.indexOf(c)).toString(), color = Soft, fontSize = 12.sp, modifier = Modifier.width(34.dp),
+                        )
                         Box(Modifier.size(width = 58.dp, height = 34.dp), contentAlignment = Alignment.Center) { NetImage(c.logo, Modifier.fillMaxSize()) }
                         Spacer(Modifier.width(10.dp))
                         Column(Modifier.weight(1f)) {
@@ -131,7 +135,7 @@ fun LivePage(app: AppState, fullScreen: Boolean, toggleFullScreen: () -> Unit) {
         }
         Column(Modifier.weight(1f).fillMaxHeight().padding(end = if (fullScreen) 0.dp else 16.dp)) {
             VideoBox(
-                app.player,
+                app,
                 (if (fullScreen) Modifier.fillMaxSize() else Modifier.fillMaxWidth().aspectRatio(16f / 9f))
                     .clip(RoundedCornerShape(if (fullScreen) 0.dp else 12.dp)),
             )
@@ -154,8 +158,24 @@ fun LivePage(app: AppState, fullScreen: Boolean, toggleFullScreen: () -> Unit) {
                                 color = Soft, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                         if (app.catchupOf != null) Pill("● Back to live") { app.playChannel(c) }
+                        if (app.timeshift != null) Pill("● Back to live", selected = true) { app.goLive() }
+                        else if (app.catchupOf == null) Pill("⏸ Pause") { app.togglePauseLive() }
+                        Spacer(Modifier.width(8.dp))
+                        PictureMenu(app)
+                        Spacer(Modifier.width(8.dp))
+                        Pill("▣ Mini", selected = app.mini) { app.toggleMini() }
+                        Spacer(Modifier.width(8.dp))
+                        SendToTv(app)
                         Spacer(Modifier.width(8.dp))
                         Pill("⛶ Full screen", onClick = toggleFullScreen)
+                    }
+                    if (app.timeshift != null) {
+                        val behind = app.behindLiveMs()
+                        Text(
+                            (if (app.timeshiftPlaying) "⏱ ${clock(behind)} behind live" else "⏸ Paused · ${clock(behind)}") +
+                                " – Space to ${if (app.timeshiftPlaying) "pause" else "carry on"}, or Back to live",
+                            color = Gold, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp),
+                        )
                     }
                     cur?.desc?.let { Text(it, color = Soft, fontSize = 13.sp, maxLines = 3, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp)) }
                     if (c.hasCatchup) {
@@ -197,7 +217,7 @@ fun PlayerPage(app: AppState, fullScreen: Boolean, toggleFullScreen: () -> Unit)
         }
     }
     Column(Modifier.fillMaxSize()) {
-        VideoBox(app.player, Modifier.fillMaxWidth().weight(1f))
+        VideoBox(app, Modifier.fillMaxWidth().weight(1f))
         if (!fullScreen) {
             Column(Modifier.fillMaxWidth().background(InkBottom).padding(horizontal = 20.dp, vertical = 10.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -226,10 +246,89 @@ fun PlayerPage(app: AppState, fullScreen: Boolean, toggleFullScreen: () -> Unit)
                     Pill("30s »") { app.player.skip(30_000L) }
                     w.next?.let { n -> Pill("Next episode ›") { app.saveProgress(); n() } }
                     Pill("⛶ Full screen", onClick = toggleFullScreen)
+                    Pill(if (app.mini) "▣ Back from mini player" else "▣ Mini player") { app.toggleMini() }
+                    PictureMenu(app, films = true)
+                    SendToTv(app)
                     Spacer(Modifier.weight(1f))
                     Pill("✕ Close") { app.stopWatching(save = true) }
                 }
                 Text("Space pause · ← → skip · F11 or double-click full screen · Esc close", color = Soft.copy(alpha = 0.7f), fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
+            }
+        }
+    }
+}
+
+
+/** "📺 Watch on…": the TVs on the Wi-Fi (found when opened). */
+@Composable
+fun SendToTv(app: AppState) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        Pill("📺 Watch on…") {
+            open = true
+            app.findPeers()
+        }
+        androidx.compose.material3.DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            if (app.findingPeers) androidx.compose.material3.DropdownMenuItem(text = { Text("Looking for your TVs…") }, onClick = {})
+            else if (app.peers.isEmpty()) androidx.compose.material3.DropdownMenuItem(text = { Text("No TVs found") }, onClick = { open = false })
+            for (p in app.peers) androidx.compose.material3.DropdownMenuItem(
+                text = { Text((if (p.phone) "📱 " else "📺 ") + p.name) },
+                onClick = {
+                    open = false
+                    app.sendTo(p)
+                },
+            )
+        }
+    }
+}
+
+
+/** One line of the Picture & sound menu: a heading (no action) or a choice. */
+private class MenuLine(val text: String, val heading: Boolean = false, val selected: Boolean = false, val action: (() -> Unit)? = null)
+
+/** "⚙ Picture & sound": sound track, subtitles, picture shape and (films) speed. */
+@Composable
+fun PictureMenu(app: AppState, films: Boolean = false) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        Pill("⚙ Picture & sound") { open = true }
+        androidx.compose.material3.DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            val p = app.player
+            val lines = buildList {
+                val audio = p.audioTracks().filter { it.first >= 0 }
+                if (audio.size > 1) {
+                    add(MenuLine("Sound", heading = true))
+                    val cur = p.audioTrack
+                    for ((id, name) in audio) add(MenuLine(name, selected = id == cur) { p.setAudioTrack(id) })
+                }
+                add(MenuLine("Subtitles", heading = true))
+                val subs = p.subtitleTracks().filter { it.first >= 0 }
+                if (subs.isEmpty()) add(MenuLine("None on this"))
+                else {
+                    val cur = p.subtitleTrack
+                    add(MenuLine("Off", selected = cur < 0) { p.setSubtitleTrack(-1) })
+                    for ((id, name) in subs) add(MenuLine(name, selected = id == cur) { p.setSubtitleTrack(id) })
+                }
+                add(MenuLine("Picture", heading = true))
+                add(MenuLine("Fit") { p.setShape(null) })
+                add(MenuLine("Fill the window") { p.setShape("Fill") })
+                add(MenuLine("16:9") { p.setShape("16:9") })
+                add(MenuLine("4:3") { p.setShape("4:3") })
+                if (films) {
+                    add(MenuLine("Speed", heading = true))
+                    for (r in listOf(0.75f, 1f, 1.25f, 1.5f, 2f)) add(MenuLine(if (r == 1f) "Normal" else "$r×") { p.setSpeed(r) })
+                }
+            }
+            for (l in lines) {
+                if (l.heading) Text(l.text, color = Gold, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 14.dp, top = 8.dp, bottom = 2.dp))
+                else androidx.compose.material3.DropdownMenuItem(
+                    text = { Text((if (l.selected) "✓ " else "    ") + l.text) },
+                    enabled = l.action != null,
+                    onClick = {
+                        open = false
+                        l.action?.invoke()
+                    },
+                )
             }
         }
     }

@@ -16,7 +16,7 @@ val sharedFiles = listOf(
     "data/Models.kt", "data/M3uParser.kt", "data/XtreamClient.kt", "data/Http.kt", "data/XmltvParser.kt",
     "data/Catchup.kt", "data/ChannelMerge.kt", "data/Sports.kt", "data/WhatsOn.kt", "data/HomeFeed.kt",
     "data/Languages.kt", "data/FilmName.kt", "data/Taste.kt", "data/Recommend.kt", "data/SportFollow.kt",
-    "data/Watchlist.kt", "integrations/Plex.kt", "integrations/Tmdb.kt", "integrations/YouTube.kt", "integrations/GoogleDrive.kt",
+    "data/Watchlist.kt", "integrations/Plex.kt", "integrations/Tmdb.kt", "integrations/YouTube.kt", "integrations/GoogleDrive.kt", "integrations/Espn.kt",
 )
 
 // Keys built in from GitHub's secrets (the same ones as the TV app): Google sign-in for sync,
@@ -26,6 +26,7 @@ val generateKeys by tasks.registering {
     val values = listOf("TUNER_GOOGLE_CLIENT_ID", "TUNER_GOOGLE_CLIENT_SECRET", "TUNER_TMDB_KEY", "TUNER_YOUTUBE_KEY")
         .associateWith { (System.getenv(it) ?: "").trim() }
     inputs.property("keys", values.mapValues { it.value.hashCode() })
+    inputs.property("version", tunerVersion)
     outputs.file(out)
     doLast {
         fun q(v: String) = "\"" + v.replace("\\", "\\\\").replace("\"", "\\\"").replace("$", "\\$") + "\""
@@ -39,6 +40,7 @@ val generateKeys by tasks.registering {
                     "    const val GOOGLE_CLIENT_SECRET = ${q(values.getValue("TUNER_GOOGLE_CLIENT_SECRET"))}\n" +
                     "    const val TMDB_KEY = ${q(values.getValue("TUNER_TMDB_KEY"))}\n" +
                     "    const val YOUTUBE_KEY = ${q(values.getValue("TUNER_YOUTUBE_KEY"))}\n" +
+                    "    const val VERSION = ${q(tunerVersion)}\n" +
                     "}\n"
             )
         }
@@ -75,6 +77,8 @@ dependencies {
     // Video: VLC's engine (plays almost anything). Needs VLC installed on the PC.
     implementation("uk.co.caprica:vlcj:4.8.3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-swing:1.9.0")
+    // Finding the TV and phone on the Wi-Fi (the same "linked devices" as the TV app).
+    implementation("org.jmdns:jmdns:3.5.9")
 }
 
 compose.desktop {
@@ -91,6 +95,8 @@ compose.desktop {
             // so nothing else needs installing. Without it, an installed VLC is used.
             appResourcesRootDir.set(project.layout.projectDirectory.dir("resources"))
             windows {
+                iconFile.set(project.file("icons/flicker.ico"))
+                menuGroup = "Flicker"
                 menu = true
                 shortcut = true
                 dirChooser = true

@@ -266,7 +266,11 @@ class CloudSyncFeature(
             JSONObject().put("name", deviceName()).put("house", house).put("phone", isPhone()).put("at", now)
                 .put("snapshot", LinkSync.snapshot(store))
                 // Your playlists, so Flicker on a PC signs in once and has the same channels (same ids).
-                .put("sources", runCatching { org.json.JSONArray(store.sourcesJson) }.getOrDefault(org.json.JSONArray())),
+                .put("sources", runCatching { org.json.JSONArray(store.sourcesJson) }.getOrDefault(org.json.JSONArray()))
+                // The linked-devices key, so Flicker on a PC joins the house (phone remote, Watch on…).
+                .put("link_key", store.linkKey ?: "")
+                // The parental PIN, so kids' limits work the same on a PC.
+                .put("pin", store.pin ?: ""),
         )
         root.put("app", "Flicker").put("v", 1).put("devices", all)
         val id = drive.write(accessToken(), fileId ?: store.gdriveFileId, root.toString())

@@ -152,6 +152,7 @@ private fun FilmDetail(app: AppState, m: VodItem, onClose: () -> Unit) {
                     } else Pill("▶ Play", selected = true) { onClose(); app.playFilm(m) }
                     Pill(if (inList) "✓ In My list" else "+ My list") { app.toggleWatchlist(WatchItem.of(m, System.currentTimeMillis())) }
                     info?.trailerKey?.let { k -> Pill("Trailer ↗") { openInBrowser("https://www.youtube.com/watch?v=$k") } }
+                    DownloadPill(app, m.id, tidy(m.name), m.category, m.poster, m.url)
                 }
             }
         }
@@ -277,8 +278,23 @@ private fun SeriesDetail(app: AppState, s: SeriesItem, onBack: () -> Unit) {
                         e.plot?.let { Text(it, color = Soft, fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis) }
                         if (e.durationSecs > 0) Text("${e.durationSecs / 60} min", color = Soft, fontSize = 12.sp)
                     }
+                    DownloadPill(app, e.id, tidy(s.name), "S${e.season} E${e.number}  ${e.title}", e.image ?: s.cover, e.url, short = true)
                 }
             }
         }
+    }
+}
+
+
+/** "⤓ Download" (to watch without the internet), its progress, or "✓ Downloaded". */
+@Composable
+fun DownloadPill(app: AppState, id: String, title: String, sub: String?, poster: String?, url: String, short: Boolean = false) {
+    val d = app.downloads.firstOrNull { it.id == id }
+    val progress = app.downloadProgress[id]
+    when {
+        d == null -> Pill(if (short) "⤓" else "⤓ Download") { app.download(id, title, sub, poster, url) }
+        d.state == "downloading" -> Pill(progress?.let { "⤓ ${(it * 100).toInt()}%" } ?: "⤓ …") { }
+        d.state == "failed" -> Pill(if (short) "⚠" else "⚠ Download failed – remove") { app.deleteDownload(d) }
+        else -> Pill(if (short) "✓" else "✓ Downloaded") { }
     }
 }

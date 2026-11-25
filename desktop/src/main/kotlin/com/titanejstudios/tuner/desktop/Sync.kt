@@ -31,10 +31,25 @@ class Sync(private val config: Config) {
     }
 
     /** What changed, so the screens can reload. */
-    class Result(val playlistsChanged: Boolean, val listsChanged: Boolean, val devices: List<String>)
+    class Result(val playlistsChanged: Boolean, val listsChanged: Boolean, val devices: List<String>, val linkKeyChanged: Boolean = false)
 
     private fun deviceName(): String =
         "PC – " + (runCatching { InetAddress.getLocalHost().hostName }.getOrNull() ?: System.getenv("COMPUTERNAME") ?: "Windows")
+
+    /** Ours, for the TV and phone to pull (no playlists or profiles: those come from the TV). */
+    fun snapshot(): JSONObject {
+        val favs = JSONObject()
+        for ((k, v) in config.favourites) favs.put(k, JSONArray(v))
+        val sections = JSONObject()
+            .put("favourites", JSONObject().put("at", config.favouritesAt).put("data", favs))
+            .put("watchlist", JSONObject().put("at", config.watchlistAt).put("data", config.watchlistJson))
+            .put("followed", JSONObject().put("at", config.followedAt).put("data", config.followedJson))
+            .put("resume", JSONObject().put("data", JSONArray().apply { config.resume.values.forEach { put(it.toJson()) } }))
+            .put("done", JSONObject().apply { config.done.entries.sortedByDescending { it.value }.take(200).forEach { (k, v) -> put(k, v.toString()) } })
+        return JSONObject().put("app", "Flicker").put("v", 1).put("sections", sections)
+    }
+
+    fun deviceLabel(): String = deviceName()
 
     /** Read the file, take what's newer from the TV and phone, write ours back. Blocking. */
     fun syncNow(): Result {
@@ -45,6 +60,8 @@ class Sync(private val config: Config) {
         val me = "pc-" + config.deviceId
         var playlistsChanged = false
         var listsChanged = false
+        var linkKeyChanged = false
+        var teamsAt = -1L
         val names = ArrayList<String>()
 
         // The TV whose playlists we use: the most recently seen one that has some.
@@ -58,6 +75,14 @@ class Sync(private val config: Config) {
             val d = all.optJSONObject(id) ?: continue
             val at = d.optLong("at")
             names += d.optString("name")
+            d.optString("pin").takeIf { it.isNotBlank() && it != "null" }?.let { config.pin = it }
+            // The house's linked-devices key (phone remote and "Watch on…").
+            d.optString("link_key").takeIf { it.isNotBlank() && it != "null" }?.let { k ->
+                if (k != config.linkKey) {
+                    config.linkKey = k
+                    linkKeyChanged = true
+                }
+            }
             d.optJSONArray("sources")?.let { s ->
                 if (s.length() > 0 && !d.optBoolean("phone") && at > bestSourcesAt) {
                     bestSources = s
@@ -126,6 +151,18 @@ class Sync(private val config: Config) {
                     listsChanged = true
                 }
             }
+            // Your football teams: the newest choice wins.
+            sections.optJSONObject("teams")?.let { r ->
+                val stamp = r.optLong("at")
+                if (stamp >= teamsAt) {
+                    teamsAt = stamp
+                    val names = r.optJSONArray("names")?.let { a -> (0 until a.length()).map { a.getString(it) } }.orEmpty()
+                    if (names.isNotEmpty()) {
+                        config.teams = names
+                        r.optJSONObject("espn")?.let { config.espnTeams = it.toString() }
+                    }
+                }
+            }
             // Each profile's YouTube sign-in (read-only), by profile name.
             sections.optJSONObject("youtube")?.let { y ->
                 val tokens = HashMap(config.youtubeTokens)
@@ -154,24 +191,15 @@ class Sync(private val config: Config) {
             }
         }
 
-        // Ours, for the TV and phone to pull (no playlists or profiles: those come from the TV).
-        val favs = JSONObject()
-        for ((k, v) in config.favourites) favs.put(k, JSONArray(v))
-        val sections = JSONObject()
-            .put("favourites", JSONObject().put("at", config.favouritesAt).put("data", favs))
-            .put("watchlist", JSONObject().put("at", config.watchlistAt).put("data", config.watchlistJson))
-            .put("followed", JSONObject().put("at", config.followedAt).put("data", config.followedJson))
-            .put("resume", JSONObject().put("data", JSONArray().apply { config.resume.values.forEach { put(it.toJson()) } }))
-            .put("done", JSONObject().apply { config.done.entries.sortedByDescending { it.value }.take(200).forEach { (k, v) -> put(k, v.toString()) } })
         all.put(
             me,
             JSONObject().put("name", deviceName()).put("house", "Home").put("phone", false).put("pc", true)
-                .put("at", System.currentTimeMillis()).put("snapshot", JSONObject().put("sections", sections)),
+                .put("at", System.currentTimeMillis()).put("snapshot", snapshot()),
         )
         root.put("app", "Flicker").put("v", 1).put("devices", all)
         config.driveFileId = drive.write(token, found?.first ?: config.driveFileId, root.toString())
         config.lastSync = System.currentTimeMillis()
         config.save()
-        return Result(playlistsChanged, listsChanged, names)
+        return Result(playlistsChanged, listsChanged, names, linkKeyChanged)
     }
 }

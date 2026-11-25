@@ -63,6 +63,20 @@ A TiviMate-style live TV app for Google TV / Android TV. Built with Kotlin, Jetp
   - **Live TV**: categories, search, favourites (☆), now/next and catch-up. **TV Guide**: the next day and a half, with your favourites or every channel. Click to watch, set a reminder (it pops up while Flicker's open) or watch on catch-up.
   - **Films and Series**: your provider's catalogue with categories and search, posters, film details from TMDB, My list, and Carry on / From the start. Series open on the season you're part way through, and the next episode plays by itself.
   - **Plex**: link with a code at plex.tv/link, then Continue watching and your libraries. **YouTube**: your profile's subscriptions and search, using the YouTube sign-in from your TV. Videos open in your browser, because YouTube doesn't allow playing inside other apps on a PC.
+  - **Mini player** (▣): the video in a small window that stays on top of everything, so you can watch while doing other things.
+  - **Multi-view**: two or four channels at once. Click a picture to hear it, or ⤢ to watch it full size.
+  - **Recordings**: in the TV Guide, click a programme › ● Record. Recordings go in Videos\Flicker and run while Flicker's open (it can be minimised).
+  - **Phone remote and Watch on…**: the PC joins your linked devices through the sync, so the phone's remote and "Watch on…" find it, and 📺 Watch on… sends what's playing on the PC to the TV. Windows asks once to let Flicker use the network: allow it on private networks.
+  - **Updates**: checks GitHub once a day and offers to install a new version (Settings › Updates › Check now).
+  - **Picture & sound** (⚙ on Live TV and the player): sound track, subtitles, picture shape (fit, fill, 16:9, 4:3) and, for films, speed. Old interlaced channels are smoothed out (Settings › This PC).
+  - **Pause live TV**: Space (or ⏸ Pause) on Live TV. Flicker records the channel from that moment, Space again carries on from where you paused, and ● Back to live jumps to now.
+  - **Runs in the tray**: closing the window leaves Flicker running, so recordings and reminders carry on. Right-click the tray icon › Quit to close it. It can also start with Windows (Settings › This PC).
+  - **Kids' limits**: the TV's PIN, daily TV time and bedtime apply on the PC too. A grown-up's PIN gives 30 more minutes, and switching from a kids' profile to a grown-up one needs the PIN.
+  - **What's On**: now and coming up by kind, sport (with LIVE badges), and My teams, with your teams' fixtures from ESPN and the channel showing each one.
+  - **Search** (top of the menu): channels, the guide (on now, coming up, catch-up), films, series, Plex and YouTube in one go.
+  - **Downloads**: ⤓ on a film or episode saves it to Videos\Flicker\Downloads to watch without the internet. Downloaded ones play from the PC automatically. They're listed on the Recordings page.
+  - **Remembers the window**: same size and place (and maximised) next time.
+  - **Channel numbers**: shown in the channel list. Type a number (on Live TV, Home or the guide) to go straight to that channel.
   - **Keys**: F11 or double-click for full screen, Esc to leave full screen or close a film, Space to pause, ← → to skip back 10s / forward 30s, Page Up/Down to change channel, Ctrl+M to mute.
   - Settings are kept in %USERPROFILE%\.tuner. The code is in desktop/, and it shares the TV app's playlist, guide, Plex, YouTube, film-info and sync code.
 - **Built-in VPN** (Settings › VPN): WireGuard, e.g. Surfshark (surfshark.com › VPN › Manual setup › Desktop or mobile › WireGuard › create a key pair › Locations › download a server). Send the .conf file to the TV from your phone (Settings › Set up from your phone › VPN). Only Tuner's traffic uses it, home-network addresses (Plex) stay direct; optional kill switch; reconnects when Tuner opens; 🔒 in the top bar when connected. The VPN key is never put in backups.
