@@ -461,6 +461,7 @@ fun WatchingMenu(app: AppState) {
                     for (p in app.peers) add(MenuLine((if (p.phone) "📱 " else "📺 ") + p.name) { app.watchTogether(p) })
                 }
                 add(MenuLine("Go to", heading = true))
+                if (w != null && w.id.startsWith("plex:")) add(MenuLine("📺 Go to show (Plex)") { app.goToPlexShow() })
                 if (series != null) {
                     add(MenuLine("📺 Go to series – all the episodes") { app.goToSeries() })
                     add(MenuLine(if (app.inWatchlist(series.id)) "✓ In My list (remove)" else "＋ Add series to My list") {

@@ -99,6 +99,19 @@ fun HomePage(app: AppState) {
             .sortedByDescending { it.rating?.toDoubleOrNull() ?: 0.0 }.distinctBy { it.name.lowercase() }.take(24)
     }
 
+    // Learnt from what you watch here: picks, your shows, missed episodes, "because you watched".
+    val tv = app.tasteVersion
+    val topPicks = remember(minute / 5, app.guide, app.visibleChannels, tv, app.profileId) {
+        if (app.taste.isEmpty) emptyList() else com.titanejstudios.tuner.data.Recommend.topPicks(app.visibleChannels, app.guide, app.taste, app.config.recents, now)
+    }
+    val yourShows = remember(minute / 5, app.guide, app.visibleChannels, tv, app.profileId) {
+        com.titanejstudios.tuner.data.Recommend.yourShowsTonight(app.visibleChannels, app.guide, app.taste, now)
+    }
+    val missed = remember(minute / 10, app.guide, tv, app.profileId) { app.missed(now) }
+    val because = remember(app.movies, version) { if (app.kids) null else app.becauseFilms() }
+    LaunchedEffect(app.movies, app.series) { app.loadTrending() }
+    val trending = if (app.kids) emptyList() else app.trending
+
     // The big pick at the top: what you were watching, else the best thing on now.
     val heroResume = cont.firstOrNull()
     val heroLive = onNow.firstOrNull { !it.programme.image.isNullOrBlank() } ?: onNow.firstOrNull()
@@ -141,81 +154,140 @@ fun HomePage(app: AppState) {
                 item { Pill("🔍 Search") { app.page = Page.Search } }
             }
         }
-        if (cont.size > 1 || (cont.size == 1 && heroResume == null)) row(app, "Continue watching") {
-            items(cont.take(20), key = { it.id }) { r ->
-                WithMenu(listOf(
-                    "▶ Carry on" to { app.watch(Watching(r.id, r.title, r.sub, r.poster, r.url, r.series, resumable = true)) },
-                    "⏮ From the start" to { app.watch(Watching(r.id, r.title, r.sub, r.poster, r.url, r.series, resumable = true), fromStart = true) },
-                    "✕ Remove from Continue watching" to { app.removeFromContinue(r.id) },
-                )) {
-                WideTile(
-                    r.title, r.poster, listOfNotNull(r.sub, if (r.dur > 0) "${(r.dur - r.pos) / 60_000} min left" else null).joinToString(" · "),
-                    progress = if (r.dur > 0) r.pos.toFloat() / r.dur else null, width = 260.dp,
-                ) { app.watch(Watching(r.id, r.title, r.sub, r.poster, r.url, r.series, resumable = true)) }
+        for ((rowKey, shown) in app.homeRows) {
+            if (!shown) continue
+            when (rowKey) {
+                "continue" -> {
+                        if (cont.size > 1 || (cont.size == 1 && heroResume == null)) row(app, "Continue watching") {
+                            items(cont.take(20), key = { it.id }) { r ->
+                                WithMenu(listOf(
+                                    "▶ Carry on" to { app.watch(Watching(r.id, r.title, r.sub, r.poster, r.url, r.series, resumable = true)) },
+                                    "⏮ From the start" to { app.watch(Watching(r.id, r.title, r.sub, r.poster, r.url, r.series, resumable = true), fromStart = true) },
+                                    "✕ Remove from Continue watching" to { app.removeFromContinue(r.id) },
+                                )) {
+                                WideTile(
+                                    r.title, r.poster, listOfNotNull(r.sub, if (r.dur > 0) "${(r.dur - r.pos) / 60_000} min left" else null).joinToString(" · "),
+                                    progress = if (r.dur > 0) r.pos.toFloat() / r.dur else null, width = 260.dp,
+                                ) { app.watch(Watching(r.id, r.title, r.sub, r.poster, r.url, r.series, resumable = true)) }
+                                }
+                            }
+                        }
                 }
-            }
-        }
-        if (yourChannels.isNotEmpty()) row(app, if (favourites.isNotEmpty()) "Your channels" else "Watched lately") {
-            items(yourChannels.take(30), key = { it.id }) { c ->
-                val cur = app.guide[c.id]?.firstOrNull { it.start <= now && it.stop > now }
-                ChannelTile(c, cur, now) { app.playChannel(c) }
-            }
-        }
-        if (onNow.isNotEmpty()) row(app, "On now") { items(onNow, key = { "n" + it.channel.id + it.programme.start }) { ProgrammeTile(app, it) } }
-        if (sport.isNotEmpty()) row(app, "Sport") { items(sport, key = { "s" + it.channel.id + it.programme.start }) { ProgrammeTile(app, it) } }
-        if (filmsOnTv.isNotEmpty()) row(app, "Films on TV today") { items(filmsOnTv, key = { "f" + it.channel.id + it.programme.start }) { ProgrammeTile(app, it) } }
-        if (myList.isNotEmpty()) row(app, "My list") {
-            items(myList, key = { it.id }) { w ->
-                PosterTile(w.name, w.image, if (w.isSeries) "Series" else w.category, width = 140.dp) {
-                    if (w.isSeries) {
-                        app.openSeriesId = w.id
-                        app.page = Page.Series
-                    } else w.toVod()?.let { app.playFilm(it) }
+                "channels" -> {
+                        if (yourChannels.isNotEmpty()) row(app, if (favourites.isNotEmpty()) "Your channels" else "Watched lately") {
+                            items(yourChannels.take(30), key = { it.id }) { c ->
+                                val cur = app.guide[c.id]?.firstOrNull { it.start <= now && it.stop > now }
+                                ChannelTile(c, cur, now) { app.playChannel(c) }
+                            }
+                        }
                 }
-            }
-        }
-        val picks = app.familyPicksForMe
-        if (picks.isNotEmpty()) row(app, "👪 Family picks") {
-            items(picks, key = { "fp" + it.item.id }) { p ->
-                val w = p.item
-                WithMenu(listOf("✕ Remove from Family picks" to { app.removeFamilyPick(w.id) })) {
-                    PosterTile(w.name, w.image, "From ${p.from}", width = 140.dp) {
-                        if (w.isSeries) {
-                            app.openSeriesId = w.id
-                            app.page = Page.Series
-                        } else w.toVod()?.let { app.playFilm(it) }
+                "onnow" -> {
+                        if (onNow.isNotEmpty()) row(app, "On now") { items(onNow, key = { "n" + it.channel.id + it.programme.start }) { ProgrammeTile(app, it) } }
+                }
+                "sport" -> {
+                        if (sport.isNotEmpty()) row(app, "Sport") { items(sport, key = { "s" + it.channel.id + it.programme.start }) { ProgrammeTile(app, it) } }
+                }
+                "filmstv" -> {
+                        if (filmsOnTv.isNotEmpty()) row(app, "Films on TV today") { items(filmsOnTv, key = { "f" + it.channel.id + it.programme.start }) { ProgrammeTile(app, it) } }
+                }
+                "mylist" -> {
+                        if (myList.isNotEmpty()) row(app, "My list") {
+                            items(myList, key = { it.id }) { w ->
+                                PosterTile(w.name, w.image, if (w.isSeries) "Series" else w.category, width = 140.dp) {
+                                    if (w.isSeries) {
+                                        app.openSeriesId = w.id
+                                        app.page = Page.Series
+                                    } else w.toVod()?.let { app.playFilm(it) }
+                                }
+                            }
+                        }
+                }
+                "family" -> {
+                        val fpicks = app.familyPicksForMe
+                        if (fpicks.isNotEmpty()) row(app, "👪 Family picks") {
+                            items(fpicks, key = { "fp" + it.item.id }) { p ->
+                                val w = p.item
+                                WithMenu(listOf("✕ Remove from Family picks" to { app.removeFamilyPick(w.id) })) {
+                                    PosterTile(w.name, w.image, "From ${p.from}", width = 140.dp) {
+                                        if (w.isSeries) {
+                                            app.openSeriesId = w.id
+                                            app.page = Page.Series
+                                        } else w.toVod()?.let { app.playFilm(it) }
+                                    }
+                                }
+                            }
+                        }
+                }
+                "coming" -> {
+                        val coming = if (app.kids) emptyList() else app.comingSoon
+                        if (coming.isNotEmpty()) row(app, "📅 Coming soon") {
+                            items(coming.take(20), key = { "cs" + it.item.id }) { c ->
+                                val today = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.UK).format(java.util.Date())
+                                val day = if (c.date == today) "Today" else runCatching {
+                                    java.text.SimpleDateFormat("EEE d MMM", java.util.Locale.UK).format(java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.UK).parse(c.date)!!)
+                                }.getOrDefault(c.date)
+                                PosterTile(c.item.name, c.item.image, "$day · S${c.season} E${c.episode}", width = 140.dp) {
+                                    app.openSeriesId = c.item.id
+                                    app.page = Page.Series
+                                }
+                            }
+                        }
+                }
+                "plexdeck" -> {
+                        if (app.plexDeck.isNotEmpty() && !app.kids) row(app, "Continue on Plex") {
+                            items(app.plexDeck, key = { it.ratingKey }) { p ->
+                                WideTile(p.title, p.image, p.subtitle, progress = if (p.durationMs > 0) p.viewOffsetMs.toFloat() / p.durationMs else null, width = 260.dp) {
+                                    app.playPlex(p.ratingKey, p.title, p.subtitle, p.image, p.playUrl, p.server, p.viewOffsetMs)
+                                }
+                            }
+                        }
+                }
+                "tonight" -> {
+                        if (tonight.isNotEmpty()) row(app, "Tonight") { items(tonight, key = { "t" + it.channel.id + it.programme.start }) { ProgrammeTile(app, it) } }
+                }
+                "topfilms" -> {
+                        if (topFilms.isNotEmpty() && !app.kids) row(app, "Top rated films") {
+                            items(topFilms, key = { it.id }) { m -> PosterTile(m.name, m.poster, m.rating?.let { "★ $it" }, width = 140.dp) { app.playFilm(m) } }
+                        }
+                }
+                "plexnew" -> {
+                        if (app.plexRecent.isNotEmpty() && !app.kids) row(app, "New on Plex") {
+                            items(app.plexRecent, key = { "pr" + it.ratingKey }) { e ->
+                                PosterTile(e.title, e.image, e.library ?: e.year, width = 140.dp) {
+                                    if (e.isShow) app.page = Page.Plex else app.playPlex(e.ratingKey, e.title, e.year, e.image, e.playUrl, e.server, e.viewOffsetMs)
+                                }
+                            }
+                        }
+                }
+
+                "picks" -> if (topPicks.isNotEmpty()) row(app, "Top picks for you") {
+                    items(topPicks, key = { "tp" + it.channel.id + it.programme.start }) { pk -> ProgrammeTile(app, OnNow(pk.channel, pk.programme, 0), pk.reason) }
+                }
+                "yourshows" -> if (yourShows.isNotEmpty()) row(app, "Your shows tonight") {
+                    items(yourShows, key = { "ys" + it.channel.id + it.programme.start }) { pk -> ProgrammeTile(app, OnNow(pk.channel, pk.programme, 0), pk.reason) }
+                }
+                "missed" -> if (missed.isNotEmpty()) row(app, "Missed it?") {
+                    items(missed, key = { "m" + it.first.id + it.second.start }) { (c, p) ->
+                        WideTile(p.title, p.image ?: c.logo, "↺ ${c.name} · ${time(p.start)}", width = 260.dp) { app.playCatchup(c, p) }
                     }
                 }
-            }
-        }
-        val coming = if (app.kids) emptyList() else app.comingSoon
-        if (coming.isNotEmpty()) row(app, "📅 Coming soon") {
-            items(coming.take(20), key = { "cs" + it.item.id }) { c ->
-                val today = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.UK).format(java.util.Date())
-                val day = if (c.date == today) "Today" else runCatching {
-                    java.text.SimpleDateFormat("EEE d MMM", java.util.Locale.UK).format(java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.UK).parse(c.date)!!)
-                }.getOrDefault(c.date)
-                PosterTile(c.item.name, c.item.image, "$day · S${c.season} E${c.episode}", width = 140.dp) {
-                    app.openSeriesId = c.item.id
-                    app.page = Page.Series
+                "because" -> because?.let { (title, films) ->
+                    row(app, "Because you watched $title") {
+                        items(films, key = { "b" + it.id }) { m -> PosterTile(m.name, m.poster, m.rating?.let { "★ $it" }, width = 140.dp) { app.playFilm(m) } }
+                    }
                 }
-            }
-        }
-        if (app.plexDeck.isNotEmpty() && !app.kids) row(app, "Continue on Plex") {
-            items(app.plexDeck, key = { it.ratingKey }) { p ->
-                WideTile(p.title, p.image, p.subtitle, progress = if (p.durationMs > 0) p.viewOffsetMs.toFloat() / p.durationMs else null, width = 260.dp) {
-                    app.playPlex(p.ratingKey, p.title, p.subtitle, p.image, p.playUrl, p.server, p.viewOffsetMs)
-                }
-            }
-        }
-        if (tonight.isNotEmpty()) row(app, "Tonight") { items(tonight, key = { "t" + it.channel.id + it.programme.start }) { ProgrammeTile(app, it) } }
-        if (topFilms.isNotEmpty() && !app.kids) row(app, "Top rated films") {
-            items(topFilms, key = { it.id }) { m -> PosterTile(m.name, m.poster, m.rating?.let { "★ $it" }, width = 140.dp) { app.playFilm(m) } }
-        }
-        if (app.plexRecent.isNotEmpty() && !app.kids) row(app, "New on Plex") {
-            items(app.plexRecent, key = { "pr" + it.ratingKey }) { e ->
-                PosterTile(e.title, e.image, e.library ?: e.year, width = 140.dp) {
-                    if (e.isShow) app.page = Page.Plex else app.playPlex(e.ratingKey, e.title, e.year, e.image, e.playUrl, e.server, e.viewOffsetMs)
+                "trending" -> if (trending.isNotEmpty()) row(app, "Trending this week") {
+                    items(trending, key = { "tr" + it.first.rank }) { (t, hit) ->
+                        PosterTile(t.title, t.poster, "#${t.rank}" + (t.year?.let { " · $it" } ?: ""), width = 140.dp) {
+                            when (hit) {
+                                is com.titanejstudios.tuner.data.VodItem -> app.playFilm(hit)
+                                is com.titanejstudios.tuner.data.SeriesItem -> {
+                                    app.openSeriesId = hit.id
+                                    app.page = Page.Series
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -260,7 +332,7 @@ private fun Hero(image: String?, kicker: String, title: String, line: String, pr
 
 /** A programme on a channel: its picture (or the channel's logo), time and channel. */
 @Composable
-private fun ProgrammeTile(app: AppState, o: OnNow) {
+private fun ProgrammeTile(app: AppState, o: OnNow, reason: String? = null) {
     val now = app.now
     val p = o.programme
     val on = p.start <= now
@@ -281,6 +353,7 @@ private fun ProgrammeTile(app: AppState, o: OnNow) {
             o.channel.name + if (on) "  ·  until ${time(p.stop)}" else "  ·  ${time(p.start)} – ${time(p.stop)}",
             color = Soft, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 2.dp),
         )
+        reason?.let { Text(it, color = Gold, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 2.dp)) }
     }
 }
 

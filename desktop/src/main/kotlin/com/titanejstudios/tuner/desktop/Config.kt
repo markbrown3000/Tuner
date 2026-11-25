@@ -50,7 +50,7 @@ class Reminder(val channelId: String, val channelName: String, val title: String
 /** Settings for the PC version, kept in Flicker's folder in your user profile. */
 class Config {
     private val dir = File(System.getProperty("user.home"), ".tuner").apply { mkdirs() }
-    private val file = File(dir, "settings.json")
+    val file = File(dir, "settings.json")
 
     var deviceId: String = UUID.randomUUID().toString()
     var sources: List<Source> = emptyList()
@@ -169,6 +169,19 @@ class Config {
     /** Where recordings go (a network drive is fine); blank = Videos\Flicker. */
     var recordFolder: String get() = moreStr("recFolder", ""); set(v) { more.put("recFolder", v) }
 
+    /** Plex libraries kids may see ("machineId/key"), from the TV. */
+    var plexKidsSections: Set<String> get() = moreSet("plexKids"); set(v) { more.put("plexKids", JSONArray(v.toList())) }
+
+    /** Artwork screensaver after this many idle minutes with nothing playing (0 = off). */
+    var screensaverMin: Int get() = more.optInt("saver", 10); set(v) { more.put("saver", v) }
+
+    // Home and recommendations.
+    fun tasteOf(profile: String): String? = moreStr("taste_$profile", "").ifBlank { null }
+    fun saveTaste(profile: String, json: String) { more.put("taste_$profile", json) }
+    /** Home rows in your order; hidden ones start with "-". Empty = the standard order. */
+    var homeRows: List<String> get() = moreList("homeRows"); set(v) { more.put("homeRows", JSONArray(v)) }
+    var lastFilm: String get() = moreStr("lastFilm", ""); set(v) { more.put("lastFilm", v) }
+
     /** Each profile's sound language, subtitle language and audio description: "en|en|1". */
     fun languagesOf(profile: String): Triple<String?, String?, Boolean> {
         val p = moreStr("lang_$profile", "").split('|')
@@ -195,7 +208,7 @@ class Config {
         runCatching { sourceFromJson(arr.getJSONObject(i)) }.getOrNull()
     }
 
-    private fun load() {
+    fun load() {
         if (!file.exists()) {
             save()
             return

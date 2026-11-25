@@ -87,6 +87,8 @@ class AppState(val config: Config, val player: Player, private val scope: Corout
 
     // Plex.
     val plex = Plex(config.plexClientId)
+    /** The server of the Plex film or episode that's playing. */
+    var plexPlayingServer: Plex.Server? = null
     var plexLinked by mutableStateOf(config.plexToken != null)
     var plexCode by mutableStateOf<String?>(null)
     var plexServers by mutableStateOf<List<Plex.Server>>(emptyList())
@@ -465,8 +467,10 @@ class AppState(val config: Config, val player: Player, private val scope: Corout
         page = Page.Search
     }
 
-    fun playFilm(m: VodItem, fromStart: Boolean = false) =
+    fun playFilm(m: VodItem, fromStart: Boolean = false) {
+        config.lastFilm = m.id
         watch(Watching(m.id, m.name, m.category, m.poster, m.url, null, resumable = true), fromStart)
+    }
 
     fun playEpisode(s: SeriesItem, list: List<Episode>, index: Int, fromStart: Boolean = false) {
         val e = list.getOrNull(index) ?: return
@@ -520,6 +524,107 @@ class AppState(val config: Config, val player: Player, private val scope: Corout
         if (next != null) {
             say("Playing the next episode")
             next()
+        } else if (w.seriesId == null && !w.id.startsWith("plex:") && !w.id.startsWith("rec:")) offerNextInSeries(w)
+    }
+
+    // ---------------- Next in the series, actors ----------------
+
+    /** A film in a series just ended: the next one, if you have it. */
+    var nextInSeries by mutableStateOf<VodItem?>(null)
+
+    private fun offerNextInSeries(w: Watching) {
+        val key = Keys.TMDB_KEY.ifBlank { return }
+        val films = movies ?: return
+        scope.launch {
+            val next = withContext(Dispatchers.IO) {
+                runCatching {
+                    val info = com.titanejstudios.tuner.integrations.Tmdb.lookup(key, w.title, isSeries = false) ?: return@runCatching null
+                    val cid = info.collectionId ?: return@runCatching null
+                    val parts = com.titanejstudios.tuner.integrations.Tmdb.collection(key, cid)
+                    fun norm(s: String) = com.titanejstudios.tuner.data.FilmName.parse(s).first.lowercase().filter { it.isLetterOrDigit() }
+                    val i = parts.indexOfFirst { norm(it.title) == norm(info.title) }
+                    val nextPart = parts.getOrNull(i + 1) ?: return@runCatching null
+                    films.firstOrNull { norm(it.name) == norm(nextPart.title) }
+                }.getOrNull()
+            }
+            if (next != null && watching == null) nextInSeries = next
+        }
+    }
+
+    /** "What else are they in?": an actor's films, the ones you have first. */
+    var actor by mutableStateOf<Pair<String, List<Pair<com.titanejstudios.tuner.integrations.Tmdb.Part, VodItem?>>>?>(null)
+
+    fun openActor(id: Long, name: String) {
+        val key = Keys.TMDB_KEY.ifBlank { return say("Film info needs the TMDB key") }
+        val films = movies.orEmpty()
+        scope.launch {
+            val list = withContext(Dispatchers.IO) {
+                fun norm(s: String) = com.titanejstudios.tuner.data.FilmName.parse(s).first.lowercase().filter { it.isLetterOrDigit() }
+                val by = films.groupBy { norm(it.name) }
+                runCatching { com.titanejstudios.tuner.integrations.Tmdb.personFilms(key, id) }.getOrDefault(emptyList())
+                    .map { p -> p to by[norm(p.title)]?.firstOrNull() }
+                    .sortedBy { if (it.second != null) 0 else 1 }
+            }
+            actor = name to list
+        }
+    }
+
+    // ---------------- Plex extras ----------------
+
+    /** A Plex show to open on the Plex page (from the player's "Go to show"). */
+    var plexShowRequest by mutableStateOf<Plex.Entry?>(null)
+
+    /** Plex libraries this profile may see (kids: only the ones picked on the TV). */
+    val plexSectionsForMe: List<Plex.Section>
+        get() = if (kids) plexSections.filter { it.id in config.plexKidsSections } else plexSections
+
+    fun goToPlexShow() {
+        val w = watching ?: return
+        val key = w.id.removePrefix("plex:").takeIf { w.id.startsWith("plex:") } ?: return
+        val server = plexPlayingServer ?: return
+        scope.launch {
+            val e = withContext(Dispatchers.IO) { plex.entryFor(server, key) }
+            val show = e?.showEntry() ?: return@launch say("That isn't an episode of a show")
+            plexShowRequest = show
+            if (!mini) toggleMini()
+            page = Page.Plex
+        }
+    }
+
+    fun setPlexWatched(e: Plex.Entry, watched: Boolean, then: () -> Unit = {}) {
+        scope.launch {
+            val ok = withContext(Dispatchers.IO) { runCatching { plex.setWatched(e, watched) }.isSuccess }
+            say(if (!ok) "Plex didn't answer" else if (watched) "✓ Marked as watched" else "Marked as unwatched")
+            then()
+        }
+    }
+
+    /** Plex and your provider's films together: each title once, saying where it is. */
+    var everything by mutableStateOf<List<Triple<String, VodItem?, Plex.Entry?>>?>(null)
+
+    fun loadEverything() {
+        if (everything != null) return
+        val films = movies ?: return
+        scope.launch {
+            val plexFilms = withContext(Dispatchers.IO) {
+                plexSectionsForMe.filter { !it.isShows }.flatMap { s -> runCatching { plex.sectionItems(s) }.getOrDefault(emptyList()) }
+            }
+            everything = withContext(Dispatchers.Default) {
+                fun norm(n: String) = com.titanejstudios.tuner.data.FilmName.parse(n).let { (t, y) -> t.lowercase().filter { it.isLetterOrDigit() } to y }
+                val plexBy = plexFilms.groupBy { norm(it.title).first }
+                val used = HashSet<String>()
+                val seen = HashSet<String>()
+                val out = ArrayList<Triple<String, VodItem?, Plex.Entry?>>()
+                for (f in films) {
+                    val (t, y) = norm(f.name)
+                    if (t.isEmpty() || !seen.add(t + "|" + (y ?: ""))) continue
+                    val p = plexBy[t]?.firstOrNull { it.ratingKey !in used && (y == null || it.year == null || it.year == y) }
+                    if (p != null) used += p.ratingKey
+                    out += Triple(com.titanejstudios.tuner.data.FilmName.parse(f.name).first, f, p)
+                }
+                for (p in plexFilms) if (p.ratingKey !in used && seen.add(norm(p.title).first + "|" + (p.year ?: ""))) out += Triple(p.title, null, p)
+                out.sortedBy { it.first.lowercase() }
+            }
         }
     }
 
@@ -793,6 +898,11 @@ class AppState(val config: Config, val player: Player, private val scope: Corout
         val k = thumbKey(title)
         val v = if (like) 1 else -1
         config.thumbs = if (config.thumbs[k] == v) config.thumbs - k else config.thumbs + (k to v)
+        // Recommendations learn from it too.
+        if (config.thumbs[k] != null) {
+            if (like) taste.like(title, null) else taste.dislike(title, null)
+            saveTaste()
+        }
         changed(sync = false)
         say(if (config.thumbs[k] == null) "Rating removed" else if (like) "👍 More like \"$title\"" else "👎 Fewer like \"$title\"")
     }
@@ -1641,6 +1751,293 @@ class AppState(val config: Config, val player: Player, private val scope: Corout
         changed(sync = false)
     }
 
+    // ---------------- What you like (for Top picks, Your shows, Missed it?) ----------------
+
+    private var tasteOwner = ""
+    private var tasteCache = com.titanejstudios.tuner.data.Taste()
+    /** This profile's viewing taste, learnt here on the PC as you watch. */
+    val taste: com.titanejstudios.tuner.data.Taste
+        get() {
+            if (tasteOwner != profileId) {
+                tasteOwner = profileId
+                tasteCache = com.titanejstudios.tuner.data.Taste.fromJson(config.tasteOf(profileId))
+            }
+            return tasteCache
+        }
+    var tasteVersion by mutableStateOf(0)
+    private var learning: Triple<String, String?, Long>? = null
+
+    private fun saveTaste() {
+        config.saveTaste(profileId, taste.toJson())
+        tasteVersion++
+    }
+
+    /** Every 10 seconds of live TV counts towards what you like (saved every 5 minutes of a programme). */
+    fun learnTaste() {
+        val c = playingChannel
+        val p = c?.let { ch -> (catchupOf ?: guide[ch.id]?.firstOrNull { it.start <= now && it.stop > now }) }
+        val l = learning
+        if (p == null || c == null || player.isPaused) {
+            if (l != null && l.third >= 60) {
+                taste.record(l.first, l.second, l.third, System.currentTimeMillis())
+                saveTaste()
+            }
+            learning = null
+            return
+        }
+        val genre = com.titanejstudios.tuner.data.Genres.of(p.category, p.title, c.group)
+        learning = if (l == null || l.first != p.title) {
+            if (l != null && l.third >= 60) {
+                taste.record(l.first, l.second, l.third, System.currentTimeMillis())
+                saveTaste()
+            }
+            Triple(p.title, genre, 10L)
+        } else Triple(l.first, l.second, l.third + 10)
+        val now2 = learning!!
+        if (now2.third >= 300) {
+            taste.record(now2.first, now2.second, now2.third, System.currentTimeMillis())
+            saveTaste()
+            changed(sync = false)
+            learning = Triple(now2.first, now2.second, 0L)
+        }
+    }
+
+    fun forgetTaste() {
+        tasteCache = com.titanejstudios.tuner.data.Taste()
+        saveTaste()
+        changed(sync = false)
+        say("Recommendations reset – Flicker will learn again from what you watch")
+    }
+
+    /** Programmes of shows you watch that ended in the last two days and can still be caught up. */
+    fun missed(now: Long): List<Pair<Channel, Programme>> {
+        val t = taste
+        if (t.isEmpty) return emptyList()
+        val out = ArrayList<Pair<Channel, Programme>>()
+        val seen = HashSet<String>()
+        for (c in visibleChannels) {
+            if (!c.hasCatchup) continue
+            for (p in guide[c.id].orEmpty()) {
+                if (p.stop > now || now - p.stop > 2 * 86_400_000L) continue
+                if (!t.isYourShow(p.title) || !seen.add(p.title.lowercase())) continue
+                if (com.titanejstudios.tuner.data.Catchup.isAvailable(c, p, now)) out += c to p
+            }
+        }
+        return out.sortedByDescending { it.second.start }.take(20)
+    }
+
+    /** Films in the same category as the last film you watched. */
+    fun becauseFilms(): Pair<String, List<VodItem>>? {
+        val all = movies ?: return null
+        val last = all.firstOrNull { it.id == config.lastFilm } ?: return null
+        val list = all.filter { it.category == last.category && it.id != last.id && it.id !in config.done && it.id !in config.resume && thumbOf(it.name) >= 0 }
+            .sortedByDescending { it.rating?.toDoubleOrNull() ?: 0.0 }.take(20)
+        return if (list.isEmpty()) null else com.titanejstudios.tuner.data.FilmName.parse(last.name).first to list
+    }
+
+    /** What's trending this week (TMDB) that you've got. */
+    var trending by mutableStateOf<List<Pair<com.titanejstudios.tuner.integrations.Tmdb.Trend, Any>>>(emptyList())
+    private var trendingAt = 0L
+
+    fun loadTrending() {
+        val key = Keys.TMDB_KEY
+        if (key.isBlank() || kids || System.currentTimeMillis() - trendingAt < 6 * 3_600_000L) return
+        val films = movies ?: return
+        val shows = series ?: return
+        trendingAt = System.currentTimeMillis()
+        scope.launch {
+            val list = withContext(Dispatchers.IO) {
+                val trends = runCatching { com.titanejstudios.tuner.integrations.Tmdb.trending(key) }.getOrDefault(emptyList())
+                fun norm(s: String) = com.titanejstudios.tuner.data.FilmName.parse(s).first.lowercase().filter { it.isLetterOrDigit() }
+                val filmBy = films.groupBy { norm(it.name) }
+                val showBy = shows.groupBy { norm(it.name) }
+                trends.mapNotNull { t ->
+                    val k = norm(t.title)
+                    val hit: Any? = if (t.isTv) showBy[k]?.firstOrNull() else filmBy[k]?.firstOrNull { f ->
+                        val y = com.titanejstudios.tuner.data.FilmName.parse(f.name).second
+                        y == null || t.year == null || y == t.year
+                    }
+                    hit?.let { t to it }
+                }
+            }
+            trending = list
+        }
+    }
+
+    // ---------------- Home rows ----------------
+
+    val homeRowNames = linkedMapOf(
+        "continue" to "Continue watching", "channels" to "Your channels", "picks" to "Top picks for you", "yourshows" to "Your shows tonight",
+        "onnow" to "On now", "missed" to "Missed it?", "sport" to "Sport", "filmstv" to "Films on TV today", "mylist" to "My list",
+        "family" to "Family picks", "coming" to "Coming soon", "plexdeck" to "Continue on Plex", "because" to "Because you watched",
+        "trending" to "Trending this week", "tonight" to "Tonight", "topfilms" to "Top rated films", "plexnew" to "New on Plex",
+    )
+
+    /** Home rows in your order, with whether each is shown. */
+    val homeRows: List<Pair<String, Boolean>>
+        get() {
+            val saved = config.homeRows
+            val order = saved.map { it.removePrefix("-") }.filter { it in homeRowNames } + homeRowNames.keys.filter { k -> saved.none { it.removePrefix("-") == k } }
+            return order.map { k -> k to ("-$k" !in saved) }
+        }
+
+    private fun saveRows(list: List<Pair<String, Boolean>>) {
+        config.homeRows = list.map { (k, on) -> if (on) k else "-$k" }
+        changed(sync = false)
+    }
+
+    fun toggleHomeRow(key: String) = saveRows(homeRows.map { (k, on) -> k to if (k == key) !on else on })
+
+    fun moveHomeRow(key: String, by: Int) {
+        val list = homeRows.toMutableList()
+        val i = list.indexOfFirst { it.first == key }
+        val j = (i + by).coerceIn(0, list.size - 1)
+        if (i < 0 || i == j) return
+        val item = list.removeAt(i)
+        list.add(j, item)
+        saveRows(list)
+    }
+
+    fun resetHomeRows() {
+        config.homeRows = emptyList()
+        changed(sync = false)
+    }
+
+    // ---------------- Profiles: add, delete, kids' channels and age rating ----------------
+
+    private fun saveProfilesRaw(arr: JSONArray, message: String) {
+        config.profilesRaw = arr.toString()
+        config.profiles = config.profilesFromJson(arr)
+        config.profilesAt = System.currentTimeMillis()
+        changed()
+        say(message)
+    }
+
+    fun addProfile(name: String, kids: Boolean) {
+        val n = name.trim().ifEmpty { return say("Give the profile a name") }
+        val arr = runCatching { JSONArray(config.profilesRaw) }.getOrDefault(JSONArray())
+        if (arr.length() == 0) config.profiles.forEach { p ->
+            arr.put(JSONObject().put("id", p.id).put("name", p.name).put("kids", p.kids).put("groups", JSONArray(p.groups.toList()))
+                .put("limit", p.limitMinutes).put("bedtime", p.bedtime).put("colour", p.colour).put("icon", p.icon))
+        }
+        val id = java.util.UUID.randomUUID().toString()
+        arr.put(JSONObject().put("id", id).put("name", n).put("kids", kids).put("groups", JSONArray()).put("limit", 0).put("bedtime", -1).put("colour", -1).put("icon", ""))
+        saveProfilesRaw(arr, "Added $n – the TV gets it at the next sync")
+    }
+
+    fun deleteProfile(id: String) {
+        val arr = runCatching { JSONArray(config.profilesRaw) }.getOrDefault(JSONArray())
+        val keep = JSONArray()
+        var grownUps = 0
+        for (i in 0 until arr.length()) {
+            val o = arr.optJSONObject(i) ?: continue
+            if (o.optString("id") == id) continue
+            if (!o.optBoolean("kids")) grownUps++
+            keep.put(o)
+        }
+        if (grownUps == 0) return say("Keep at least one grown-up's profile")
+        if (profileId == id) config.profiles.firstOrNull { it.id != id && !it.kids }?.let { chooseProfile(it) }
+        saveProfilesRaw(keep, "Profile deleted – on the TV too at the next sync")
+    }
+
+    /** Kids: which groups they can see, and the oldest age rating ("U", "PG", "12", "15"; "" = any). */
+    fun setKidsChannels(id: String, groups: Set<String>, cert: String) {
+        val arr = runCatching { JSONArray(config.profilesRaw) }.getOrDefault(JSONArray())
+        var found = false
+        for (i in 0 until arr.length()) {
+            val o = arr.optJSONObject(i) ?: continue
+            if (o.optString("id") != id) continue
+            o.put("groups", JSONArray(groups.toList())).put("cert", cert)
+            found = true
+        }
+        if (!found) return say("That profile hasn't come from the TV yet – sync first")
+        manageVersion++
+        saveProfilesRaw(arr, "Saved – the TV gets it at the next sync")
+    }
+
+    fun certOf(id: String): String = runCatching {
+        val arr = JSONArray(config.profilesRaw)
+        (0 until arr.length()).map { arr.getJSONObject(it) }.firstOrNull { it.optString("id") == id }?.optString("cert").orEmpty()
+    }.getOrDefault("")
+
+    /** Minutes of TV a profile has watched today (kids' profiles count it). */
+    fun minutesToday(p: PcProfile): Int = (usedSeconds(p) / 60).toInt()
+
+    // ---------------- Backup ----------------
+
+    /** Saves all Flicker's settings to a file you pick (playlists, profiles, lists, recordings list…). */
+    fun backUp() {
+        val chooser = javax.swing.JFileChooser().apply {
+            dialogTitle = "Save Flicker's settings"
+            selectedFile = java.io.File("Flicker backup ${java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.UK).format(java.util.Date())}.json")
+        }
+        if (chooser.showSaveDialog(null) != javax.swing.JFileChooser.APPROVE_OPTION) return
+        config.save()
+        runCatching { config.file.copyTo(chooser.selectedFile, overwrite = true) }
+            .onSuccess { say("Saved to ${chooser.selectedFile.name} – it includes your playlists' passwords, so keep it private") }
+            .onFailure { say("Couldn't save the backup: ${it.message}") }
+    }
+
+    /** Puts back settings from a backup file (Flicker restarts its lists from it). */
+    fun restore() {
+        val chooser = javax.swing.JFileChooser().apply { dialogTitle = "Pick a Flicker backup" }
+        if (chooser.showOpenDialog(null) != javax.swing.JFileChooser.APPROVE_OPTION) return
+        val f = chooser.selectedFile
+        val ok = runCatching { org.json.JSONObject(f.readText()).has("sources") }.getOrDefault(false)
+        if (!ok) return say("That isn't a Flicker backup")
+        runCatching {
+            config.file.copyTo(java.io.File(config.file.parentFile, "settings-before-restore.json"), overwrite = true)
+            f.copyTo(config.file, overwrite = true)
+            config.load()
+        }.onFailure { return say("Couldn't restore: ${it.message}") }
+        manageVersion++
+        listsVersion++
+        reload()
+        say("Restored ✓ – your old settings are kept as settings-before-restore.json")
+    }
+
+    // ---------------- Artwork screensaver ----------------
+
+    /** Last time you moved the mouse or pressed a key. */
+    var lastActivity = System.currentTimeMillis()
+    var saverOn by mutableStateOf(false)
+
+    fun activity() {
+        lastActivity = System.currentTimeMillis()
+        if (saverOn) saverOn = false
+    }
+
+    /** Every 10 seconds: idle long enough with nothing playing? */
+    fun tickSaver() {
+        val m = config.screensaverMin
+        if (m <= 0 || saverOn || watching != null || playingChannel != null || mini) return
+        if (System.currentTimeMillis() - lastActivity >= m * 60_000L) saverOn = true
+    }
+
+    /** Pictures for the screensaver: what's on now, films and Plex. */
+    fun saverPictures(): List<Pair<String, String>> {
+        val t = System.currentTimeMillis()
+        val out = ArrayList<Pair<String, String>>()
+        for (c in visibleChannels.take(400)) {
+            val p = guide[c.id]?.firstOrNull { it.start <= t && it.stop > t } ?: continue
+            if (!p.image.isNullOrBlank()) out += p.image!! to "${p.title} · on ${c.name} now"
+        }
+        plexRecent.forEach { e -> (e.art ?: e.image)?.let { out += it to e.title } }
+        if (!kids) movies.orEmpty().filter { !it.poster.isNullOrBlank() && (it.rating?.toDoubleOrNull() ?: 0.0) >= 7.5 }.shuffled().take(40)
+            .forEach { out += it.poster!! to it.name }
+        return out.shuffled()
+    }
+
+    fun setScreensaver(minutes: Int) {
+        config.screensaverMin = minutes
+        changed(sync = false)
+    }
+
+    fun cancelReminder(r: Reminder) {
+        config.reminders = config.reminders - r
+        changed(sync = false)
+    }
+
     // ---------------- Updates ----------------
 
     var update by mutableStateOf<Updater.Release?>(null)
@@ -2001,6 +2398,7 @@ class AppState(val config: Config, val player: Player, private val scope: Corout
             stopWatching(save = true)
             playingChannel = null
             watching = Watching("plex:$ratingKey", title, subtitle, image, url, null, resumable = false)
+            plexPlayingServer = server
             player.play(url, if (fromStart) 0L else offsetMs)
             player.setVolume(config.volume)
         }
