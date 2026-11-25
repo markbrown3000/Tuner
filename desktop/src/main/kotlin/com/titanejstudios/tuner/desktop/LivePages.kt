@@ -46,6 +46,7 @@ import kotlinx.coroutines.delay
 
 private const val FAVOURITES = "★ Favourites"
 private const val ALL = "All channels"
+private const val RECENT = "Recently watched"
 
 /** Live TV: categories, channels with what's on, and the video with now/next and catch-up. */
 @Composable
@@ -60,6 +61,7 @@ fun LivePage(app: AppState, fullScreen: Boolean, toggleFullScreen: () -> Unit) {
     val groups = remember(channels, favourites) {
         buildList {
             if (favourites.isNotEmpty()) add(FAVOURITES)
+            if (app.config.recents.isNotEmpty()) add(RECENT)
             add(ALL)
             addAll(channels.map { it.group }.distinct())
         }
@@ -68,6 +70,7 @@ fun LivePage(app: AppState, fullScreen: Boolean, toggleFullScreen: () -> Unit) {
         val base = when (group) {
             ALL -> channels
             FAVOURITES -> channels.filter { it.id in favourites }
+            RECENT -> app.recentChannels
             else -> channels.filter { it.group == group }
         }
         val q = search.trim().lowercase()
@@ -91,6 +94,12 @@ fun LivePage(app: AppState, fullScreen: Boolean, toggleFullScreen: () -> Unit) {
                             g, color = if (sel) Color.White else Soft, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(if (sel) Sky.copy(alpha = 0.35f) else Color.Transparent)
                                 .clickable { group = g; search = "" }.padding(horizontal = 12.dp, vertical = 9.dp),
+                        )
+                    }
+                    if (app.config.lockedGroups.isNotEmpty() && app.unlockedGroups.isEmpty()) item {
+                        Text(
+                            "🔒 Locked groups…", color = Soft, fontSize = 13.sp,
+                            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable { app.unlockGroups() }.padding(horizontal = 12.dp, vertical = 9.dp),
                         )
                     }
                 }

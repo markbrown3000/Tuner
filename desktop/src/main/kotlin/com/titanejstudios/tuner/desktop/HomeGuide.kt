@@ -304,38 +304,115 @@ private const val NAME_W = 200
 fun GuidePage(app: AppState) {
     val now = app.now
     val favourites = remember(app.listsVersion, app.profileId) { app.favourites }
-    var onlyFavourites by remember { mutableStateOf(favourites.isNotEmpty()) }
+    var group by remember { mutableStateOf(if (favourites.isNotEmpty()) GUIDE_FAVOURITES else GUIDE_ALL) }
+    var groupsOpen by remember { mutableStateOf(false) }
+    var search by remember { mutableStateOf("") }
     var menu by remember { mutableStateOf<Pair<Channel, Programme>?>(null) }
-    val channels = remember(app.visibleChannels, onlyFavourites, favourites, app.guide) {
-        val base = if (onlyFavourites) app.visibleChannels.filter { it.id in favourites } else app.visibleChannels
-        base.filter { app.guide[it.id]?.isNotEmpty() == true }
+    val all = app.visibleChannels
+    val groups = remember(all, favourites) {
+        buildList {
+            if (favourites.isNotEmpty()) add(GUIDE_FAVOURITES)
+            if (app.config.recents.isNotEmpty()) add(GUIDE_RECENT)
+            add(GUIDE_ALL)
+            addAll(all.map { it.group }.distinct())
+        }
     }
-    // The timeline starts on the half hour before now.
-    val origin = remember(now / 1_800_000L) { now / 1_800_000L * 1_800_000L - 1_800_000L }
-    val end = origin + 36 * 3_600_000L
+    // The timeline: from the half hour before now, or wherever you've moved it (Earlier / Later / a day).
+    val nowSlot = now / 1_800_000L * 1_800_000L - 1_800_000L
+    var start by remember { mutableStateOf<Long?>(null) }
+    val origin = start ?: nowSlot
+    val end = origin + 24 * 3_600_000L
+    val guide = app.guide
+    // How far back and forward the guide goes (at most a week each way).
+    val range = remember(guide) {
+        var lo = Long.MAX_VALUE
+        var hi = 0L
+        for (list in guide.values) {
+            list.firstOrNull()?.let { if (it.start < lo) lo = it.start }
+            list.lastOrNull()?.let { if (it.stop > hi) hi = it.stop }
+        }
+        val week = 7 * 86_400_000L
+        maxOf(lo, now - week) to minOf(hi, now + week)
+    }
+    val channels = remember(all, group, favourites, guide, search, origin) {
+        val base = when (group) {
+            GUIDE_FAVOURITES -> all.filter { it.id in favourites }
+            GUIDE_RECENT -> app.recentChannels
+            GUIDE_ALL -> all
+            else -> all.filter { it.group == group }
+        }
+        val q = search.trim().lowercase()
+        if (q.isEmpty()) base.filter { guide[it.id]?.isNotEmpty() == true }
+        else all.filter { c ->
+            c.name.lowercase().contains(q) || guide[c.id]?.any { it.stop > origin && it.start < end && it.title.lowercase().contains(q) } == true
+        }
+    }
     val totalW = ((end - origin) / 60_000L * MIN_DP).dp + NAME_W.dp
     val h = rememberScrollState()
-    LaunchedEffect(Unit) { h.scrollTo(0) }
+    LaunchedEffect(origin) { h.scrollTo(0) }
+    val dayFmt = remember { java.text.SimpleDateFormat("EEE d", java.util.Locale.UK) }
 
     Column(Modifier.fillMaxSize().padding(top = 14.dp)) {
         Row(Modifier.padding(horizontal = 20.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("TV Guide", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.ExtraBold)
-            Spacer(Modifier.width(12.dp))
-            if (favourites.isNotEmpty()) {
-                Pill("★ Favourites", selected = onlyFavourites) { onlyFavourites = true }
-                Pill("All channels", selected = !onlyFavourites) { onlyFavourites = false }
+            Spacer(Modifier.width(8.dp))
+            // Which channels: favourites, recently watched, everything, or a group.
+            Box {
+                Pill("$group  ▾", selected = true) { groupsOpen = true }
+                androidx.compose.material3.DropdownMenu(expanded = groupsOpen, onDismissRequest = { groupsOpen = false }) {
+                    for (g in groups) androidx.compose.material3.DropdownMenuItem(
+                        text = { Text((if (g == group) "✓ " else "    ") + g) },
+                        onClick = { group = g; search = ""; groupsOpen = false },
+                    )
+                    if (app.config.lockedGroups.isNotEmpty() && app.unlockedGroups.isEmpty()) androidx.compose.material3.DropdownMenuItem(
+                        text = { Text("🔒 Show locked groups…") },
+                        onClick = { groupsOpen = false; app.unlockGroups() },
+                    )
+                }
+            }
+            androidx.compose.material3.OutlinedTextField(
+                search, { search = it }, singleLine = true, placeholder = { Text("Search the guide") },
+                modifier = Modifier.width(220.dp),
+            )
+            Spacer(Modifier.weight(1f))
+            Pill("◀ Earlier") { start = maxOf(origin - 3 * 3_600_000L, range.first / 1_800_000L * 1_800_000L) }
+            Pill("Now", selected = start == null) { start = null }
+            Pill("Later ▶") { start = minOf(origin + 3 * 3_600_000L, maxOf(range.second - 3 * 3_600_000L, nowSlot)) }
+        }
+        // Days: jump to the evening of any day the guide has.
+        Row(Modifier.padding(horizontal = 20.dp).padding(bottom = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            val cal = java.util.Calendar.getInstance().apply {
+                timeInMillis = range.first
+                set(java.util.Calendar.HOUR_OF_DAY, 0); set(java.util.Calendar.MINUTE, 0); set(java.util.Calendar.SECOND, 0); set(java.util.Calendar.MILLISECOND, 0)
+            }
+            val today = java.util.Calendar.getInstance().apply {
+                set(java.util.Calendar.HOUR_OF_DAY, 0); set(java.util.Calendar.MINUTE, 0); set(java.util.Calendar.SECOND, 0); set(java.util.Calendar.MILLISECOND, 0)
+            }.timeInMillis
+            var guard = 0
+            while (cal.timeInMillis < range.second && guard++ < 15) {
+                val day = cal.timeInMillis
+                val label = when (day) {
+                    today -> "Today"
+                    today - 86_400_000L -> "Yesterday"
+                    today + 86_400_000L -> "Tomorrow"
+                    else -> dayFmt.format(java.util.Date(day))
+                }
+                val shown = origin >= day && origin < day + 86_400_000L
+                Pill(label, selected = shown) { start = if (day == today) null else day + 18 * 3_600_000L }
+                cal.add(java.util.Calendar.DAY_OF_MONTH, 1)
             }
             Spacer(Modifier.weight(1f))
-            Text("Click: watch now · remind me · catch-up", color = Soft, fontSize = 12.sp)
+            Text("Click: watch · catch-up · remind · record", color = Soft, fontSize = 12.sp)
         }
         Box(Modifier.fillMaxSize().horizontalScroll(h)) {
             Column(Modifier.width(totalW)) {
-                // Times along the top.
+                // Times along the top (with the day at midnight).
                 Box(Modifier.fillMaxWidth().height(28.dp)) {
                     var t = origin
                     while (t < end) {
+                        val midnight = java.util.Calendar.getInstance().apply { timeInMillis = t }.let { it.get(java.util.Calendar.HOUR_OF_DAY) == 0 && it.get(java.util.Calendar.MINUTE) == 0 }
                         Text(
-                            time(t), color = Soft, fontSize = 12.sp,
+                            if (midnight) dayFmt.format(java.util.Date(t)) else time(t), color = if (midnight) Gold else Soft, fontSize = 12.sp,
                             modifier = Modifier.offset(x = (NAME_W + (t - origin) / 60_000L * MIN_DP).dp + 4.dp, y = 6.dp),
                         )
                         t += 1_800_000L
@@ -344,7 +421,7 @@ fun GuidePage(app: AppState) {
                 Box(Modifier.weight(1f)) {
                     LazyColumn(Modifier.fillMaxSize()) {
                         items(channels, key = { it.id }) { c ->
-                            GuideRow(app, c, origin, end, now, h.value) { p ->
+                            GuideRow(app, c, origin, end, now, h.value, search.trim().lowercase()) { p ->
                                 when {
                                     p.start <= now && p.stop > now -> app.playChannel(c)
                                     else -> menu = c to p
@@ -353,13 +430,17 @@ fun GuidePage(app: AppState) {
                         }
                         if (channels.isEmpty()) item {
                             Text(
-                                if (app.channels.isEmpty()) "No channels yet." else "No guide for these channels.",
+                                when {
+                                    app.channels.isEmpty() -> "No channels yet."
+                                    search.isNotBlank() -> "Nothing matches \"$search\" at these times."
+                                    else -> "No guide for these channels."
+                                },
                                 color = Soft, fontSize = 15.sp, modifier = Modifier.offset { IntOffset(h.value, 0) }.padding(20.dp),
                             )
                         }
                     }
                     // The "now" line.
-                    Box(
+                    if (now in origin until end) Box(
                         Modifier.offset(x = (NAME_W + (now - origin) / 60_000L * MIN_DP).dp).width(2.dp).fillMaxHeight().background(LiveRed.copy(alpha = 0.8f)),
                     )
                 }
@@ -369,8 +450,12 @@ fun GuidePage(app: AppState) {
     menu?.let { (c, p) -> ProgrammeMenu(app, c, p) { menu = null } }
 }
 
+private const val GUIDE_FAVOURITES = "★ Favourites"
+private const val GUIDE_RECENT = "Recently watched"
+private const val GUIDE_ALL = "All channels"
+
 @Composable
-private fun GuideRow(app: AppState, c: Channel, origin: Long, end: Long, now: Long, scrollX: Int, onClick: (Programme) -> Unit) {
+private fun GuideRow(app: AppState, c: Channel, origin: Long, end: Long, now: Long, scrollX: Int, highlight: String = "", onClick: (Programme) -> Unit) {
     val progs = app.guide[c.id].orEmpty().filter { it.stop > origin && it.start < end }
     Box(Modifier.fillMaxWidth().height(54.dp).padding(vertical = 2.dp)) {
         for (p in progs) {
@@ -381,7 +466,10 @@ private fun GuideRow(app: AppState, c: Channel, origin: Long, end: Long, now: Lo
             val past = p.stop <= now
             Column(
                 Modifier.offset(x = x.dp).width(w.dp - 2.dp).fillMaxHeight().clip(RoundedCornerShape(6.dp))
-                    .background(if (on) Sky.copy(alpha = 0.35f) else if (past) Panel.copy(alpha = 0.5f) else Panel)
+                    .background(
+                        if (highlight.isNotEmpty() && p.title.lowercase().contains(highlight)) Gold.copy(alpha = 0.35f)
+                        else if (on) Sky.copy(alpha = 0.35f) else if (past) Panel.copy(alpha = 0.5f) else Panel
+                    )
                     .then(
                         when {
                             app.recordingFor(c, p) != null -> Modifier.border(1.dp, LiveRed, RoundedCornerShape(6.dp))
@@ -426,6 +514,12 @@ private fun ProgrammeMenu(app: AppState, c: Channel, p: Programme, onDismiss: ()
                 if (p.stop > now && !app.kids) Pill(if (app.recordingFor(c, p) != null) "Cancel the recording" else "● Record") { app.toggleRecording(c, p); onDismiss() }
                 Pill("▶ ${c.name} now") { onDismiss(); app.playChannel(c) }
                 Pill("Close", onClick = onDismiss)
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                val t = remember(app.listsVersion) { app.thumbOf(p.title) }
+                Pill(if (t == 1) "👍 Liked" else "👍 More like this", selected = t == 1) { app.thumb(p.title, true) }
+                Pill(if (t == -1) "👎 Not for me" else "👎 Less like this", selected = t == -1) { app.thumb(p.title, false) }
+                if (app.link.key != null) Pill("📺 Watch it on the TV") { onDismiss(); app.watchOnTv(c, p.takeIf { it.stop <= now }) }
             }
         }
     }

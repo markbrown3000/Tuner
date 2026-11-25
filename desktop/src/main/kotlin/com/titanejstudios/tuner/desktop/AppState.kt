@@ -127,7 +127,176 @@ class AppState(val config: Config, val player: Player, private val scope: Corout
     val visibleChannels: List<Channel>
         get() {
             val p = profile
-            return if (p != null && p.kids) channels.filter { it.group in p.groups } else channels
+            val list = managedChannels
+            return if (p != null && p.kids) list.filter { it.group in p.groups || it.originalGroup() in p.groups } else list
+        }
+
+    // ---------------- Channels and categories (Settings › Manage channels) ----------------
+
+    /** Bumped when hiding, renaming, ordering or locking changes. */
+    var manageVersion by mutableStateOf(0)
+    /** Locked groups opened with the PIN (until Flicker closes). */
+    var unlockedGroups by mutableStateOf<Set<String>>(emptySet())
+    private var managedKey: Any? = null
+    private var managedCache: List<Channel> = emptyList()
+    /** Renamed group → its name in the playlist. */
+    private var originalNames: Map<String, String> = emptyMap()
+
+    private fun Channel.originalGroup(): String = originalNames[group] ?: group
+
+    /** Your channels: hidden ones and groups left out, groups renamed and in your order, locked groups shut. */
+    val managedChannels: List<Channel>
+        get() {
+            val key = listOf(channels, manageVersion, unlockedGroups, grownUp)
+            if (key == managedKey) return managedCache
+            val names = config.groupNames
+            val hiddenG = config.hiddenGroups
+            val hiddenC = config.hiddenChannels
+            val locked = config.lockedGroups - unlockedGroups
+            val offline = if (config.hideOffline) config.offline else emptySet()
+            val order = config.groupOrder
+            originalNames = names.entries.associate { (k, v) -> v to k }
+            val list = channels.asSequence()
+                .filter { it.group !in hiddenG && it.id !in hiddenC && it.id !in offline && (grownUp || it.group !in locked) }
+                .map { c -> names[c.group]?.let { c.copy(group = it) } ?: c }
+                .toList()
+            val rank = order.withIndex().associate { (i, g) -> g to i }
+            val firstSeen = HashMap<String, Int>()
+            list.forEachIndexed { i, c -> firstSeen.putIfAbsent(c.originalGroup(), i) }
+            managedCache = list.sortedWith(compareBy({ rank[it.originalGroup()] ?: (order.size + (firstSeen[it.originalGroup()] ?: 0)) }))
+            managedKey = key
+            return managedCache
+        }
+
+    /** Every group in the playlists (original names), in your order. */
+    val allGroups: List<String>
+        get() {
+            val order = config.groupOrder
+            val seen = channels.map { it.group }.distinct()
+            return order.filter { it in seen } + seen.filter { it !in order }
+        }
+
+    fun groupLabel(g: String) = config.groupNames[g] ?: g
+
+    private fun managed(change: () -> Unit) {
+        change()
+        manageVersion++
+        changed(sync = false)
+    }
+
+    fun toggleGroupHidden(g: String) = managed { config.hiddenGroups = if (g in config.hiddenGroups) config.hiddenGroups - g else config.hiddenGroups + g }
+    fun toggleChannelHidden(id: String) = managed { config.hiddenChannels = if (id in config.hiddenChannels) config.hiddenChannels - id else config.hiddenChannels + id }
+
+    fun renameGroup(g: String, name: String) = managed {
+        val n = name.trim()
+        config.groupNames = if (n.isEmpty() || n == g) config.groupNames - g else config.groupNames + (g to n)
+    }
+
+    fun moveGroup(g: String, by: Int) = managed {
+        val list = allGroups.toMutableList()
+        val i = list.indexOf(g)
+        val j = (i + by).coerceIn(0, list.size - 1)
+        if (i >= 0 && i != j) {
+            list.removeAt(i)
+            list.add(j, g)
+        }
+        config.groupOrder = list
+    }
+
+    fun toggleGroupLocked(g: String) {
+        val change = { managed { config.lockedGroups = if (g in config.lockedGroups) config.lockedGroups - g else config.lockedGroups + g } }
+        if (config.pin == null) say("Set a PIN first (Settings › Profiles) – locked groups need it to open") else askPin("The PIN to change which groups are locked") { change() }
+    }
+
+    fun unlockGroups() {
+        if (config.lockedGroups.isEmpty()) return
+        askPin("The PIN to show locked groups") { unlockedGroups = config.lockedGroups; say("Locked groups shown until Flicker closes") }
+    }
+
+    fun resetChannelChanges() = managed {
+        config.hiddenGroups = emptySet()
+        config.hiddenChannels = emptySet()
+        config.groupNames = emptyMap()
+        config.groupOrder = emptyList()
+    }
+
+    /** "Use the guide from…": a channel with no guide borrows another's. */
+    fun useGuideFrom(c: Channel, from: Channel?) {
+        config.epgMap = if (from == null) config.epgMap - c.id else config.epgMap + (c.id to from.id)
+        if (from == null) reload() else applyEpgMap()
+        changed(sync = false)
+        say(if (from == null) "${c.name} uses its own guide again" else "${c.name} now shows ${from.name}'s guide")
+    }
+
+    private fun applyEpgMap() {
+        val map = config.epgMap
+        if (map.isEmpty()) return
+        val g = guide.toMutableMap()
+        var any = false
+        for ((cid, from) in map) guide[from]?.let { g[cid] = it; any = true }
+        if (any) guide = g
+    }
+
+    // ---------------- Channel health ----------------
+
+    var checking by mutableStateOf<String?>(null)
+
+    /** Tries each channel (favourites first, then [group] or all) and notes the ones that don't answer. */
+    fun checkChannels(group: String? = null) {
+        if (checking != null) return
+        val favs = favourites
+        val list = (channels.filter { it.id in favs } + channels.filter { group == null || it.group == group }).distinctBy { it.id }.take(600)
+        if (list.isEmpty()) return
+        checking = "Checking 0 of ${list.size}…"
+        scope.launch {
+            val dead = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+            val done = java.util.concurrent.atomic.AtomicInteger()
+            withContext(Dispatchers.IO) {
+                list.chunked(8).forEach { batch ->
+                    batch.map { c ->
+                        launch {
+                            if (!answers(c.url)) dead += c.id
+                            val n = done.incrementAndGet()
+                            if (n % 8 == 0) scope.launch { checking = "Checking $n of ${list.size}…" }
+                        }
+                    }.forEach { it.join() }
+                }
+            }
+            val checkedIds = list.map { it.id }.toSet()
+            config.offline = (config.offline - checkedIds) + dead
+            config.offlineCheckedAt = System.currentTimeMillis()
+            manageVersion++
+            changed(sync = false)
+            checking = null
+            say(if (dead.isEmpty()) "All ${list.size} channels answered ✓" else "${dead.size} of ${list.size} channels didn't answer")
+        }
+    }
+
+    private fun answers(url: String): Boolean = runCatching {
+        val c = java.net.URL(url).openConnection() as java.net.HttpURLConnection
+        try {
+            c.connectTimeout = 6_000
+            c.readTimeout = 6_000
+            c.instanceFollowRedirects = true
+            c.setRequestProperty("User-Agent", "VLC/3.0.21 LibVLC/3.0.21")
+            c.setRequestProperty("Range", "bytes=0-1023")
+            val code = c.responseCode
+            if (code !in 200..399) return@runCatching false
+            c.inputStream.use { it.read(ByteArray(512)) } > 0
+        } finally {
+            c.disconnect()
+        }
+    }.getOrDefault(false)
+
+    fun setHideOffline(on: Boolean) = managed { config.hideOffline = on }
+
+    fun clearOffline() = managed { config.offline = emptySet() }
+
+    /** Recently watched channels, newest first. */
+    val recentChannels: List<Channel>
+        get() {
+            val byId = managedChannels.associateBy { it.id }
+            return config.recents.mapNotNull { byId[it] }
         }
 
     val kids: Boolean get() = profile?.kids == true
@@ -184,6 +353,7 @@ class AppState(val config: Config, val player: Player, private val scope: Corout
             }
             channels = loaded.channels
             guide = loaded.guide
+            applyEpgMap()
             problems = loaded.problems
             status = null
             now = System.currentTimeMillis()
@@ -1249,6 +1419,21 @@ class AppState(val config: Config, val player: Player, private val scope: Corout
             }
             c != null -> JSONObject().put("kind", "live").put("channel", c.id)
             else -> null
+        }
+    }
+
+    /** A channel (or a catch-up programme) straight to the TV, from the guide. */
+    fun watchOnTv(c: Channel, catchup: Programme?) {
+        if (link.key == null) return say("Sign in to Sync first – the TV shares its link through it")
+        val what = if (catchup != null) JSONObject().put("kind", "catchup").put("channel", c.id).put("name", c.name).put("url", c.url)
+            .put("start", catchup.start).put("stop", catchup.stop).put("title", catchup.title).put("category", catchup.category).put("pos", 0L)
+        else JSONObject().put("kind", "live").put("channel", c.id)
+        say("Finding your TV…")
+        scope.launch {
+            val tvs = withContext(Dispatchers.IO) { runCatching { link.findPeers() }.getOrDefault(emptyList()) }.filter { !it.phone }
+            val tv = tvs.firstOrNull() ?: return@launch say("No TV found – is Flicker open on it, and on the same Wi-Fi?")
+            val ok = withContext(Dispatchers.IO) { link.send(tv, what, sync.deviceLabel()) }
+            say(if (ok) "▶ Playing on ${tv.name}" else "${tv.name} didn't answer")
         }
     }
 

@@ -137,6 +137,24 @@ class Config {
     var thumbs: Map<String, Int>
         get() = more.optJSONObject("thumbs")?.let { o -> o.keys().asSequence().associateWith { o.optInt(it) } } ?: emptyMap()
         set(v) { more.put("thumbs", JSONObject(v)) }
+    // Channels and categories (Settings › Manage channels).
+    private fun moreSet(k: String): Set<String> = more.optJSONArray(k)?.let { a -> (0 until a.length()).map { a.getString(it) }.toSet() } ?: emptySet()
+    private fun moreList(k: String): List<String> = more.optJSONArray(k)?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList()
+    private fun moreMap(k: String): Map<String, String> = more.optJSONObject(k)?.let { o -> o.keys().asSequence().associateWith { o.optString(it) } } ?: emptyMap()
+    var hiddenGroups: Set<String> get() = moreSet("hiddenGroups"); set(v) { more.put("hiddenGroups", JSONArray(v.toList())) }
+    var hiddenChannels: Set<String> get() = moreSet("hiddenChannels"); set(v) { more.put("hiddenChannels", JSONArray(v.toList())) }
+    var lockedGroups: Set<String> get() = moreSet("lockedGroups"); set(v) { more.put("lockedGroups", JSONArray(v.toList())) }
+    /** Original group name → the name you gave it. */
+    var groupNames: Map<String, String> get() = moreMap("groupNames"); set(v) { more.put("groupNames", JSONObject(v)) }
+    /** Groups in the order you put them (the rest follow in the playlist's order). */
+    var groupOrder: List<String> get() = moreList("groupOrder"); set(v) { more.put("groupOrder", JSONArray(v)) }
+    /** Channel id → the channel whose guide it uses (for channels with none). */
+    var epgMap: Map<String, String> get() = moreMap("epgMap"); set(v) { more.put("epgMap", JSONObject(v)) }
+    /** Channels that didn't answer the last check. */
+    var offline: Set<String> get() = moreSet("offline"); set(v) { more.put("offline", JSONArray(v.toList())) }
+    var hideOffline: Boolean get() = more.optBoolean("hideOffline"); set(v) { more.put("hideOffline", v) }
+    var offlineCheckedAt: Long get() = more.optLong("offlineAt"); set(v) { more.put("offlineAt", v) }
+
     /** Each profile's sound language, subtitle language and audio description: "en|en|1". */
     fun languagesOf(profile: String): Triple<String?, String?, Boolean> {
         val p = moreStr("lang_$profile", "").split('|')

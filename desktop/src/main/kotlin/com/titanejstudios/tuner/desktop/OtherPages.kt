@@ -226,6 +226,7 @@ fun YouTubePage(app: AppState) {
 fun SettingsPage(app: AppState) {
     var adding by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<PcProfile?>(null) }
+    var managing by remember { mutableStateOf(false) }
     var logVersion by remember { mutableStateOf(0) }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(24.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item { Text("Settings", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.ExtraBold) }
@@ -321,6 +322,19 @@ fun SettingsPage(app: AppState) {
                     }
                     Pill("↻ Reload channels and guide") { app.reload() }
                 }
+                Spacer(Modifier.height(10.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Pill("☰ Manage groups and channels", selected = true) { managing = true }
+                    Pill(app.checking ?: "🩺 Check my channels") { app.checkChannels() }
+                    val mv = app.manageVersion
+                    Pill(if (app.config.hideOffline) "✓ Hide channels that don't answer" else "Hide channels that don't answer") { app.setHideOffline(!app.config.hideOffline) }
+                    if (app.config.offline.isNotEmpty()) Pill("Clear the list (${app.config.offline.size})") { app.clearOffline() }
+                }
+                Text(
+                    "Hide, rename, reorder or lock groups; hide channels; fix a channel's missing guide. " +
+                        "The check tries your favourites and every channel (up to 600) to see which don't answer.",
+                    color = Soft, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp),
+                )
                 if (app.problems.isNotEmpty()) Text(app.problems.joinToString("\n"), color = Gold, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
             }
         }
@@ -508,6 +522,7 @@ fun SettingsPage(app: AppState) {
         }
     }
     editing?.let { p -> ProfileEditor(app, p) { editing = null } }
+    if (managing) ManageChannels(app) { managing = false }
     if (adding) AddPlaylistDialog(onDismiss = { adding = false }) { src ->
         app.config.sources = app.config.sources + src
         app.config.save()
