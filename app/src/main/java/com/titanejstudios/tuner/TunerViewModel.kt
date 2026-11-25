@@ -3157,7 +3157,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
                     copies.isEmpty() -> playMovie(m, fromStart, viaPlex = false, ageChecked = true)
                     copies.size == 1 -> {
                         showNotice("Playing from Plex" + (copies[0].library?.let { " ($it)" } ?: "") + " – hold OK on the film for the IPTV copy")
-                        playPlexEntry(copies[0], fromStart, chosen = true) { playMovie(m, fromStart, viaPlex = false) }
+                        playPlexEntry(copies[0], fromStart, chosen = true, fallback = { playMovie(m, fromStart, viaPlex = false) })
                     }
                     else -> {
                         // You've said which you prefer: no need to ask.
@@ -3166,7 +3166,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
                             pick == "iptv" -> playMovie(m, fromStart, viaPlex = false)
                             pick != null -> copies.first { copyId(it) == pick }.let { c ->
                                 showNotice("Playing from Plex" + (c.library?.let { " ($it)" } ?: "") + " – your usual choice")
-                                playPlexEntry(c, fromStart, chosen = true) { playMovie(m, fromStart, viaPlex = false) }
+                                playPlexEntry(c, fromStart, chosen = true, fallback = { playMovie(m, fromStart, viaPlex = false) })
                             }
                             else -> plexCopyChoice = PlexCopyChoice(m.name, copies, fromStart, m)
                         }
