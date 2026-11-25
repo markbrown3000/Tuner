@@ -92,7 +92,14 @@ object Updater {
     }
 
     /** Checks the file is a Tuner APK, then hands it to Android's installer. */
+    /** When the last install was handed to Android (pressing Update again straight away doesn't start another). */
+    @Volatile private var installingAt = 0L
+
     fun install(context: Context, apk: File) {
+        if (System.currentTimeMillis() - installingAt < 90_000L) {
+            onStatus?.invoke("Already installing – confirm on screen. Flicker closes for a moment while it updates.")
+            return
+        }
         val info = context.packageManager.getPackageArchiveInfo(apk.path, 0)
             ?: throw IllegalArgumentException("That file isn't an Android app (APK)")
         if (info.packageName != context.packageName) throw IllegalArgumentException("That APK is a different app (${info.packageName})")
@@ -109,8 +116,9 @@ object Updater {
             val pending = PendingIntent.getBroadcast(context, id, Intent(context, InstallResultReceiver::class.java), flags)
             session.commit(pending.intentSender)
         }
+        installingAt = System.currentTimeMillis()
         AppLog.info("Installing Flicker ${info.versionName}")
-        onStatus?.invoke("Installing Flicker ${info.versionName}… confirm on screen")
+        onStatus?.invoke("Installing Flicker ${info.versionName}… confirm on screen. Flicker closes for a moment while it updates, then opens again.")
     }
 }
 
@@ -137,5 +145,23 @@ class InstallResultReceiver : BroadcastReceiver() {
                 Updater.onStatus?.invoke("Update failed: $friendly")
             }
         }
+    }
+}
+
+
+/**
+ * Android closes an app while it replaces it with the new version (that's the "crash" you see
+ * after Update). This runs in the new version straight afterwards: it notes the update and
+ * opens Flicker again (where the TV allows it).
+ */
+class UpdatedReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        if (intent.action != Intent.ACTION_MY_PACKAGE_REPLACED) return
+        AppLog.info("Updated to Flicker ${Updater.installedVersion(context)} – opening it again")
+        runCatching {
+            context.packageManager.getLaunchIntentForPackage(context.packageName)
+                ?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                ?.let { context.startActivity(it) }
+        }.onFailure { AppLog.warn("Couldn't reopen Flicker after the update", it) }
     }
 }
