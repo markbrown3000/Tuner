@@ -1,5 +1,7 @@
 package com.titanejstudios.tuner.desktop
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import com.sun.jna.NativeLibrary
 import uk.co.caprica.vlcj.factory.discovery.NativeDiscovery
 import uk.co.caprica.vlcj.player.component.EmbeddedMediaPlayerComponent
