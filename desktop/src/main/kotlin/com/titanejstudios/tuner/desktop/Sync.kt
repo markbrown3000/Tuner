@@ -45,6 +45,7 @@ class Sync(private val config: Config) {
             .put("watchlist", JSONObject().put("at", config.watchlistAt).put("data", config.watchlistJson))
             .put("followed", JSONObject().put("at", config.followedAt).put("data", config.followedJson))
             .put("picks", JSONObject().put("at", config.familyPicksAt).put("data", config.familyPicksJson))
+            .put("lists", JSONObject().put("at", config.collectionsAt).put("data", config.collectionsJson))
             .put("resume", JSONObject().put("data", JSONArray().apply { config.resume.values.forEach { put(it.toJson()) } }))
             .put("done", JSONObject().apply { config.done.entries.sortedByDescending { it.value }.take(200).forEach { (k, v) -> put(k, v.toString()) } })
         // Profiles changed on this PC go back to the TV (the newest change wins there).
@@ -81,7 +82,12 @@ class Sync(private val config: Config) {
             val d = all.optJSONObject(id) ?: continue
             val at = d.optLong("at")
             names += d.optString("name")
-            d.optString("pin").takeIf { it.isNotBlank() && it != "null" }?.let { config.pin = it }
+            // The parental PIN: the most recently set or removed one wins (set here, on the TV…).
+            val theirPinAt = d.optLong("pin_at")
+            if (theirPinAt > config.pinAt) {
+                config.pin = d.optString("pin").takeIf { it.isNotBlank() && it != "null" }
+                config.pinAt = theirPinAt
+            } else if (config.pinAt == 0L && config.pin == null) d.optString("pin").takeIf { it.isNotBlank() && it != "null" }?.let { config.pin = it }
             // The house's linked-devices key (phone remote and "Watch on…").
             d.optString("link_key").takeIf { it.isNotBlank() && it != "null" }?.let { k ->
                 if (k != config.linkKey) {
@@ -129,6 +135,22 @@ class Sync(private val config: Config) {
                     config.watchlistJson = data
                     config.watchlistAt = stamp
                     listsChanged = true
+                }
+            }
+            sections.optJSONObject("lists")?.let { r ->
+                val stamp = r.optLong("at")
+                val data = r.optString("data", "{}")
+                if (stamp > config.collectionsAt && data != config.collectionsJson) {
+                    config.collectionsJson = data
+                    config.collectionsAt = stamp
+                    listsChanged = true
+                }
+            }
+            // What each profile likes on the TV: a head start for the PC's Top picks.
+            sections.optJSONObject("taste")?.let { t ->
+                for (p in config.profiles) {
+                    val theirs = t.optString(p.name.lowercase().trim()).takeIf { it.isNotBlank() } ?: continue
+                    if (config.tasteOf(p.id) == null) config.saveTaste(p.id, theirs)
                 }
             }
             sections.optJSONObject("picks")?.let { r ->
@@ -217,6 +239,7 @@ class Sync(private val config: Config) {
         all.put(
             me,
             JSONObject().put("name", deviceName()).put("house", "Home").put("phone", false).put("pc", true)
+                .put("pin", config.pin ?: "").put("pin_at", config.pinAt)
                 .put("at", System.currentTimeMillis()).put("snapshot", snapshot()),
         )
         root.put("app", "Flicker").put("v", 1).put("devices", all)

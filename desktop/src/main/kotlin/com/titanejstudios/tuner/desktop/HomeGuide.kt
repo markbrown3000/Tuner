@@ -54,6 +54,10 @@ private class OnNow(val channel: Channel, val programme: Programme, val score: I
 /** Home: a big pick at the top, then rows – like the TV's Home. */
 @Composable
 fun HomePage(app: AppState) {
+    if (app.kids) {
+        KidsHome(app)
+        return
+    }
     val now = app.now
     val minute = now / 60_000
     val version = app.listsVersion
@@ -260,6 +264,22 @@ fun HomePage(app: AppState) {
                         }
                 }
 
+                "collections" -> if (!app.kids) {
+                    for ((name, list) in app.collections) row(app, "📚 $name") {
+                        items(list, key = { "c" + name + it.id }) { w ->
+                            WithMenu(listOf("✕ Remove from $name" to { app.removeFromCollection(name, w.id) })) {
+                                PosterTile(w.name, w.image, if (w.isSeries) "Series" else w.category, width = 140.dp) { app.openWatchItem(w) }
+                            }
+                        }
+                    }
+                }
+                "bookmarks" -> if (app.bookmarks.isNotEmpty()) row(app, "🔖 Bookmarks") {
+                    items(app.bookmarks, key = { "bm" + it.id }) { b ->
+                        WithMenu(listOf("✕ Delete the bookmark" to { app.deleteBookmark(b.id) })) {
+                            WideTile(b.title, b.poster, listOfNotNull(b.subtitle, "at " + clock(b.posMs)).joinToString(" · "), width = 260.dp) { app.playBookmark(b) }
+                        }
+                    }
+                }
                 "picks" -> if (topPicks.isNotEmpty()) row(app, "Top picks for you") {
                     items(topPicks, key = { "tp" + it.channel.id + it.programme.start }) { pk -> ProgrammeTile(app, OnNow(pk.channel, pk.programme, 0), pk.reason) }
                 }
@@ -520,6 +540,24 @@ fun GuidePage(app: AppState) {
             }
         }
     }
+    // What's on, small in the corner, while you look through the guide.
+    if (app.playingChannel != null && app.watching == null && !app.videoElsewhere) {
+        LaunchedEffect(Unit) {
+            kotlinx.coroutines.delay(400)
+            app.player.restart()
+        }
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomEnd) {
+            Column(Modifier.padding(18.dp).width(360.dp).clip(RoundedCornerShape(12.dp)).background(Ink)) {
+                VideoBox(app, Modifier.fillMaxWidth().aspectRatio(16f / 9f))
+                Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(app.playingChannel?.name ?: "", color = Color.White, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                    Pill("⤢") { app.page = Page.Live }
+                    Spacer(Modifier.width(6.dp))
+                    Pill("✕") { app.player.stop(); app.playingChannel = null }
+                }
+            }
+        }
+    }
     menu?.let { (c, p) -> ProgrammeMenu(app, c, p) { menu = null } }
 }
 
@@ -594,6 +632,43 @@ private fun ProgrammeMenu(app: AppState, c: Channel, p: Programme, onDismiss: ()
                 Pill("👎", selected = t == -1) { app.thumb(p.title, false) }
                 if (!app.kids) Pill(if (app.seriesLinkFor(c, p)) "Cancel the series link" else "🔁 Every episode") { app.toggleSeriesLink(c, p); onDismiss() }
                 if (app.link.key != null) Pill("📺 On the TV") { onDismiss(); app.watchOnTv(c, p.takeIf { it.stop <= now }) }
+            }
+        }
+    }
+}
+
+
+/** Kids' Home: big, bright tiles – their channels with what's on, and a big "keep watching". */
+@Composable
+private fun KidsHome(app: AppState) {
+    val now = app.now
+    val channels = app.visibleChannels
+    val colours = listOf(0xFFFF6B6B, 0xFFFFB347, 0xFF4ECDC4, 0xFF5D9CEC, 0xFFAC92EC, 0xFF48CFAD, 0xFFFC6E51, 0xFFEC87C0)
+    Column(Modifier.fillMaxSize().padding(24.dp)) {
+        Text("Hello, ${app.profile?.name ?: "you"}! 👋", color = Color.White, fontSize = 34.sp, fontWeight = FontWeight.ExtraBold)
+        app.profile?.takeIf { it.limitMinutes > 0 }?.let { p ->
+            val left = (p.limitMinutes - app.minutesToday(p)).coerceAtLeast(0)
+            Text("⏱ $left minutes of TV left today", color = Gold, fontSize = 18.sp, modifier = Modifier.padding(top = 4.dp))
+        }
+        Spacer(Modifier.height(16.dp))
+        if (channels.isEmpty()) Text("A grown-up needs to choose your channels (Settings › Profiles › Edit).", color = Soft, fontSize = 18.sp)
+        androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
+            androidx.compose.foundation.lazy.grid.GridCells.Adaptive(260.dp),
+            horizontalArrangement = Arrangement.spacedBy(18.dp), verticalArrangement = Arrangement.spacedBy(18.dp),
+        ) {
+            items(channels.size, key = { channels[it].id }) { i ->
+                val c = channels[i]
+                val p = app.guide[c.id]?.firstOrNull { it.start <= now && it.stop > now }
+                Column(
+                    Modifier.clip(RoundedCornerShape(22.dp)).background(Color(colours[i % colours.size])).clickable { app.playChannel(c) }.padding(14.dp),
+                ) {
+                    Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(16.dp)).background(Color.White.copy(alpha = 0.25f)), contentAlignment = Alignment.Center) {
+                        if (!p?.image.isNullOrBlank()) NetImage(p?.image, Modifier.fillMaxSize(), contentScale = androidx.compose.ui.layout.ContentScale.Crop)
+                        else NetImage(c.logo, Modifier.fillMaxSize().padding(24.dp))
+                    }
+                    Text(p?.title ?: c.name, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 8.dp))
+                    Text(c.name, color = Color.White.copy(alpha = 0.85f), fontSize = 14.sp, maxLines = 1)
+                }
             }
         }
     }

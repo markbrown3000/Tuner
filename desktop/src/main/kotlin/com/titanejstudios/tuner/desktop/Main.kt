@@ -63,6 +63,11 @@ fun main(args: Array<String>) {
     )
     Thread.setDefaultUncaughtExceptionHandler { _, e ->
         com.titanejstudios.tuner.data.AppLog.warn("Crash", e)
+        // Shown next time Flicker opens, with a button to copy the log.
+        runCatching {
+            java.io.File(com.titanejstudios.tuner.data.AppLog.file.parentFile, "crashed.txt")
+                .writeText((e.javaClass.simpleName + ": " + (e.message ?: "")).take(300))
+        }
         runCatching {
             javax.swing.JOptionPane.showMessageDialog(
                 null,
@@ -337,6 +342,7 @@ private fun Shell(app: AppState, fullScreen: Boolean, toggleFullScreen: () -> Un
                         Page.Catchup -> CatchupPage(app)
                         Page.Multi -> MultiPage(app)
                         Page.WhatsOn -> WhatsOnPage(app)
+                        Page.Sport -> SportPage(app)
                         Page.Search -> SearchPage(app)
                         Page.Recordings -> RecordingsPage(app)
                         Page.Films -> FilmsPage(app)
@@ -375,6 +381,18 @@ private fun Shell(app: AppState, fullScreen: Boolean, toggleFullScreen: () -> Un
             }
         }
         if (app.showKeys) KeysHelp(app)
+        app.lastCrash?.let { why ->
+            Row(
+                Modifier.align(Alignment.TopCenter).padding(16.dp).clip(RoundedCornerShape(12.dp)).background(Panel).padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text("⚠ Flicker closed unexpectedly last time ($why)", color = Color.White, fontSize = 14.sp, maxLines = 1, modifier = Modifier.width(560.dp))
+                Pill("📋 Copy the problem log", selected = true) { app.copyLog() }
+                Pill("OK") { app.lastCrash = null }
+            }
+        }
+        if (app.settingPin) PinSetter(app)
+        app.collectingItem?.let { item -> CollectionPicker(app, item) }
         if (app.showStreamInfo && (app.watching != null || app.playingChannel != null)) StreamInfo(app, Modifier.align(Alignment.TopEnd))
         app.subtitleHits?.let { hits -> SubtitlePicker(app, hits) }
         app.nextInSeries?.let { m ->
@@ -714,6 +732,64 @@ private fun Screensaver(app: AppState) {
         Column(Modifier.align(Alignment.BottomStart).padding(40.dp)) {
             Text(clock, color = Color.White, fontSize = 64.sp, fontWeight = FontWeight.ExtraBold)
             pic?.let { Text(it.second, color = Color.White.copy(alpha = 0.85f), fontSize = 20.sp) }
+        }
+    }
+}
+
+
+/** Set or change the parental PIN (it goes to the TV too). */
+@Composable
+private fun PinSetter(app: AppState) {
+    var first by remember { mutableStateOf("") }
+    var second by remember { mutableStateOf("") }
+    var problem by remember { mutableStateOf<String?>(null) }
+    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.7f)), contentAlignment = Alignment.Center) {
+        Column(Modifier.width(400.dp).clip(RoundedCornerShape(16.dp)).background(Panel).padding(24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("🔒 The parental PIN", color = Gold, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            Text("Used for kids' limits and locked groups – here and on the TV.", color = Soft, fontSize = 13.sp)
+            androidx.compose.material3.OutlinedTextField(
+                first, { first = it.filter { c -> c.isDigit() }.take(8); problem = null }, singleLine = true, label = { Text("New PIN (4–8 numbers)") },
+                visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth(),
+            )
+            androidx.compose.material3.OutlinedTextField(
+                second, { second = it.filter { c -> c.isDigit() }.take(8); problem = null }, singleLine = true, label = { Text("Again") },
+                visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth(),
+            )
+            problem?.let { Text(it, color = LiveRed, fontSize = 13.sp) }
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Pill("Save", selected = true) {
+                    problem = when {
+                        first.length < 4 -> "At least 4 numbers"
+                        first != second -> "They don't match"
+                        else -> null
+                    }
+                    if (problem == null) app.savePin(first)
+                }
+                if (app.config.pin != null) Pill("Remove the PIN") { app.savePin(null) }
+                Pill("Cancel") { app.settingPin = false }
+            }
+        }
+    }
+}
+
+/** 📚 Add to a collection: pick one, or name a new one. */
+@Composable
+private fun CollectionPicker(app: AppState, item: com.titanejstudios.tuner.data.WatchItem) {
+    var name by remember { mutableStateOf("") }
+    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.6f)).clickable { app.collectingItem = null }, contentAlignment = Alignment.Center) {
+        Column(Modifier.width(440.dp).clip(RoundedCornerShape(16.dp)).background(Panel).clickable(enabled = false) {}.padding(22.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Add ${item.name} to…", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            for ((n, list) in app.collections) Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(PanelLight).clickable { app.addToCollection(n, item); app.collectingItem = null }.padding(10.dp),
+            ) {
+                Text("📚 $n", color = Color.White, fontSize = 14.sp, modifier = Modifier.weight(1f))
+                Text("${list.size}", color = Soft, fontSize = 13.sp)
+            }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                androidx.compose.material3.OutlinedTextField(name, { name = it }, singleLine = true, placeholder = { Text("A new collection") }, modifier = Modifier.weight(1f))
+                Pill("Add", selected = true) { if (name.isNotBlank()) { app.addToCollection(name, item); app.collectingItem = null } }
+            }
+            Pill("Cancel") { app.collectingItem = null }
         }
     }
 }

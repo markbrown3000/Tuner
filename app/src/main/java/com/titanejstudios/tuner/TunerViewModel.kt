@@ -109,7 +109,7 @@ enum class Screen {
     Home, Channels, Guide, Player, Search, Movies, Series, SeriesDetail, Settings, SourceEdit, Manage,
     ProfilePicker, ProfileEdit, PhoneSetup, EpgMap, Recordings, MultiView, Sports, Apps, Log,
     WhatsOn, Stats, ShareTv, Catchup, Categories, Plex, Update, SelfTest, PlexLibrary, PlexShow, HomeRows, Languages, Recommendations, Vpn,
-    Link, Downloads, Teams, Remote, Christmas, Cloud, YouTube, YouTubePlayer, YouTubeList, More, Library,
+    Link, Downloads, Teams, Remote, Christmas, Cloud, YouTube, YouTubePlayer, YouTubeList, More, Library, Collections,
 }
 
 const val FAVOURITES = "★ Favourites"
@@ -144,6 +144,8 @@ class SearchResults(
     val programmes: List<Pair<Channel, Programme>>,
     val films: List<VodItem> = emptyList(),
     val seriesFound: List<SeriesItem> = emptyList(),
+    /** The actor whose films are first in [films] ("Tom Hanks"), when the search was a name. */
+    val actor: String? = null,
 )
 
 /** Tracks how long a live programme has been watched (for "finish what you started"). */
@@ -964,6 +966,13 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     /** When an episode of each series last started (no recap when you're binge-watching). */
     private val lastEpisodeStart = HashMap<String, Long>()
     // (Kept above init: start-up code can reach these before the rest of the class is set up.)
+    var collections by mutableStateOf(Watchlist.decodeCollections(store.collectionsJson)); private set
+    var collectingItem by mutableStateOf<WatchItem?>(null)
+    var openCollection by mutableStateOf<String?>(null); private set
+    var bookmarks by mutableStateOf(Watchlist.decodeBookmarks(store.bookmarksJson)); private set
+    var crashNotice by mutableStateOf<String?>(
+        SafeMode.lastCrash?.takeIf { SafeMode.lastCrashAt > store.crashShownAt }
+    )
     var playingPlexEntry by mutableStateOf<com.titanejstudios.tuner.integrations.Plex.Entry?>(null); private set
     var familyPicks by mutableStateOf(Watchlist.decodePicks(store.familyPicksJson)); private set
     var comingSoon by mutableStateOf(decodeComing(store.comingSoonJson)); private set
@@ -2230,6 +2239,8 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
                     if (first == second) {
                         pin = first
                         store.pin = first
+                        store.pinAt = System.currentTimeMillis()
+                        cloud.syncSoon()
                         unlocked = true
                         pinPrompt = null
                         showNotice("PIN saved")
@@ -2248,6 +2259,8 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         requestPin {
             pin = null
             store.pin = null
+            store.pinAt = System.currentTimeMillis()
+            cloud.syncSoon()
             lockedGroups = emptySet()
             store.lockedGroups = emptySet()
             recomputeVisible()
@@ -2955,9 +2968,34 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
                     .take(200)
                 val words = needle.split(Regex("\\s+")).filter { it.isNotBlank() }
                 fun hit(name: String) = name.lowercase().let { n -> words.all { it in n } }
-                val films = filmPool.filter { hit(it.name) }.take(40)
-                val shows = seriesPool.filter { hit(it.name) }.take(40)
-                SearchResults(matchedChannels, progs, films, shows)
+                // Exact matches first, then near misses (small typos).
+                fun <T> find(pool: List<T>, name: (T) -> String): List<T> {
+                    val exact = pool.filter { hit(name(it)) }
+                    if (exact.size >= 40) return exact.take(40)
+                    val near = pool.asSequence().filter { !hit(name(it)) }
+                        .map { it to com.titanejstudios.tuner.data.Fuzzy.score(q, name(it)) }.filter { it.second > 0 }
+                        .sortedByDescending { it.second }.map { it.first }.take(40 - exact.size).toList()
+                    return exact + near
+                }
+                val films = find(filmPool) { it.name }
+                val shows = find(seriesPool) { it.name }
+                val chans = if (matchedChannels.size >= 10) matchedChannels
+                else matchedChannels + pool.filter { it !in matchedChannels && com.titanejstudios.tuner.data.Fuzzy.matches(q, it.name) }.take(20)
+                SearchResults(chans, progs, films, shows)
+            }
+            // An actor's name: their films you've got ("Tom Hanks").
+            val key = tmdbKey
+            if (key != null && filmPool.isNotEmpty() && q.contains(' ') && q.length >= 5) {
+                val (actor, theirs) = withContext(Dispatchers.IO) {
+                    val person = Tmdb.findPerson(key, q) ?: return@withContext null to emptyList<VodItem>()
+                    fun norm(s: String) = FilmName.parse(s).first.lowercase().filter { it.isLetterOrDigit() }
+                    val by = filmPool.groupBy { norm(it.name) }
+                    person.second to runCatching { Tmdb.personFilms(key, person.first) }.getOrDefault(emptyList()).mapNotNull { by[norm(it.title)]?.firstOrNull() }
+                }
+                if (actor != null && theirs.isNotEmpty() && searchQuery.trim() == q) {
+                    val r = searchResults
+                    searchResults = SearchResults(r.channels, r.programmes, (theirs + r.films).distinctBy { it.id }.take(50), r.seriesFound, actor)
+                }
             }
         }
     }
@@ -4494,6 +4532,75 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     fun goToChannelGuide() {
         leavePlayer()
         openGuide()
+    }
+
+    // ---------------- Your own collections ("Christmas films") ----------------
+
+    /** The film or series being added to a collection (shows the picker). */
+
+    private fun saveCollections(map: Map<String, List<WatchItem>>) {
+        collections = map
+        store.collectionsJson = Watchlist.encodeCollections(map)
+        markChanged(com.titanejstudios.tuner.integrations.LinkSync.COLLECTIONS)
+        link.tellOthers()
+    }
+
+    fun addToCollection(name: String, item: WatchItem) {
+        val n = name.trim().take(40).ifEmpty { return }
+        val list = collections[n].orEmpty()
+        if (list.any { it.id == item.id }) return showNotice("Already in $n")
+        saveCollections(collections + (n to list + item))
+        showNotice("Added ${item.name} to $n")
+    }
+
+    fun removeFromCollection(name: String, id: String) {
+        val list = collections[name].orEmpty().filter { it.id != id }
+        saveCollections(if (list.isEmpty()) collections - name else collections + (name to list))
+    }
+
+    fun deleteCollection(name: String) {
+        saveCollections(collections - name)
+        showNotice("Deleted the collection $name")
+        if (screen == Screen.Collections) back()
+    }
+
+    fun showCollection(name: String) {
+        openCollection = name
+        navigate(Screen.Collections)
+    }
+
+    // ---------------- Bookmarks ----------------
+
+
+    /** 🔖 Bookmark this moment (films and episodes). */
+    fun bookmarkHere() {
+        val m = mode as? PlayMode.Vod ?: return
+        val pos = playback.positionMs
+        val b = Watchlist.Bookmark(java.util.UUID.randomUUID().toString(), m.contentId, m.title, m.subtitle, m.poster, m.url, m.seriesId, pos, System.currentTimeMillis())
+        bookmarks = (listOf(b) + bookmarks).take(50)
+        store.bookmarksJson = Watchlist.encodeBookmarks(bookmarks)
+        showNotice("🔖 Bookmarked ${m.title} at ${pos / 60_000}:${"%02d".format((pos / 1000) % 60)}")
+    }
+
+    fun playBookmark(b: Watchlist.Bookmark) {
+        if (b.contentId.startsWith("plex:")) return showNotice("Bookmarks of Plex films play from Plex itself")
+        episodeQueue = emptyList()
+        startVod(PlayMode.Vod(b.contentId, b.title, b.subtitle, b.poster, b.url, b.seriesId), fromStart = false, startAt = b.posMs)
+    }
+
+    fun deleteBookmark(id: String) {
+        bookmarks = bookmarks.filter { it.id != id }
+        store.bookmarksJson = Watchlist.encodeBookmarks(bookmarks)
+    }
+
+    // ---------------- "Flicker closed unexpectedly" ----------------
+
+    /** Shown once after a crash, with what went wrong. */
+
+    fun dismissCrashNotice(showLog: Boolean) {
+        store.crashShownAt = SafeMode.lastCrashAt
+        crashNotice = null
+        if (showLog) navigate(Screen.Log)
     }
 
     // ---------------- Family picks ----------------
@@ -6468,6 +6575,8 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     }
 
     private fun applyLinkChanges(changed: Set<String>) {
+        if ("pin" in changed) pin = store.pin
+        if (com.titanejstudios.tuner.integrations.LinkSync.COLLECTIONS in changed) collections = Watchlist.decodeCollections(store.collectionsJson)
         if (com.titanejstudios.tuner.integrations.LinkSync.PROFILES in changed) {
             plexFeature.reloadKids()
             profiles = store.profiles
@@ -6483,7 +6592,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
             AppLog.info("Profiles synced from another device: " + profiles.joinToString { it.name })
         }
         if (com.titanejstudios.tuner.integrations.LinkSync.INTROS in changed) introEnds = store.introEnds
-        val lists = changed - com.titanejstudios.tuner.integrations.LinkSync.INTROS - com.titanejstudios.tuner.integrations.LinkSync.TEAMS -
+        val lists = changed - "pin" - com.titanejstudios.tuner.integrations.LinkSync.COLLECTIONS - com.titanejstudios.tuner.integrations.LinkSync.INTROS - com.titanejstudios.tuner.integrations.LinkSync.TEAMS -
             com.titanejstudios.tuner.integrations.LinkSync.STARTED - com.titanejstudios.tuner.integrations.LinkSync.PROFILES -
             com.titanejstudios.tuner.integrations.LinkSync.YOUTUBE
         if (com.titanejstudios.tuner.integrations.LinkSync.YOUTUBE in changed) youtube.reload()

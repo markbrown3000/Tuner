@@ -127,6 +127,7 @@ fun FilmsPage(app: AppState) {
                         (if (app.inWatchlist(m.id)) "✓ Remove from My list" else "+ Add to My list") to { app.toggleWatchlist(WatchItem.of(m, System.currentTimeMillis())) },
                         if (app.downloadFor(m.id) == null) "⤓ Download" to { app.download(m.id, tidy(m.name), m.category, m.poster, m.url) } else null,
                         "ⓘ Details" to { open = m },
+                        "📚 Add to a collection…" to { app.collectingItem = WatchItem.of(m, System.currentTimeMillis()) },
                     ),
                 ) {
                     PosterTile(tidy(m.name), m.poster, m.rating?.let { "★ $it" }, progress = r?.let { if (it.dur > 0) it.pos.toFloat() / it.dur else null }) { open = m }
@@ -227,6 +228,7 @@ private fun FilmDetail(app: AppState, m: VodItem, onClose: () -> Unit) {
                     Pill("👍", selected = t == 1) { app.thumb(m.name, true) }
                     Pill("👎", selected = t == -1) { app.thumb(m.name, false) }
                     if (!app.kids) Pill("👪 Recommend to the family") { app.recommendToFamily(WatchItem.of(m, System.currentTimeMillis())) }
+                    Pill("📚 Collection…") { app.collectingItem = WatchItem.of(m, System.currentTimeMillis()) }
                 }
             }
         }

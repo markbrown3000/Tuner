@@ -113,6 +113,48 @@ object Watchlist {
         else -> entry
     }
 
+    /** Your own collections: name → films and series, in the order added. */
+    fun encodeCollections(map: Map<String, List<WatchItem>>): String {
+        val o = JSONObject()
+        for ((name, list) in map) o.put(name, JSONArray().apply { list.forEach { put(toJson(it)) } })
+        return o.toString()
+    }
+
+    fun decodeCollections(json: String?): Map<String, List<WatchItem>> = try {
+        val o = JSONObject(json ?: "{}")
+        val out = LinkedHashMap<String, List<WatchItem>>()
+        for (k in o.keys()) {
+            val a = o.optJSONArray(k) ?: continue
+            out[k] = (0 until a.length()).mapNotNull { i -> a.optJSONObject(i)?.let { fromJson(it) } }
+        }
+        out
+    } catch (e: Exception) {
+        emptyMap()
+    }
+
+    /** A moment in a film or episode to go back to. */
+    class Bookmark(val id: String, val contentId: String, val title: String, val subtitle: String?, val poster: String?, val url: String, val seriesId: String?, val posMs: Long, val at: Long)
+
+    fun encodeBookmarks(list: List<Bookmark>): String = JSONArray().apply {
+        list.forEach {
+            put(
+                JSONObject().put("id", it.id).put("c", it.contentId).put("t", it.title).put("s", it.subtitle).put("p", it.poster)
+                    .put("u", it.url).put("sid", it.seriesId).put("pos", it.posMs).put("at", it.at),
+            )
+        }
+    }.toString()
+
+    fun decodeBookmarks(json: String?): List<Bookmark> = try {
+        val a = JSONArray(json ?: "[]")
+        (0 until a.length()).mapNotNull { i ->
+            val o = a.optJSONObject(i) ?: return@mapNotNull null
+            fun str(k: String) = o.optString(k).takeIf { it.isNotEmpty() && it != "null" }
+            Bookmark(o.optString("id"), o.optString("c"), o.optString("t"), str("s"), str("p"), o.optString("u"), str("sid"), o.optLong("pos"), o.optLong("at"))
+        }
+    } catch (e: Exception) {
+        emptyList()
+    }
+
     /** Family picks: someone's recommendation for everyone, newest first (30 kept, 45 days). */
     fun encodePicks(list: List<FamilyPick>): String {
         val arr = JSONArray()

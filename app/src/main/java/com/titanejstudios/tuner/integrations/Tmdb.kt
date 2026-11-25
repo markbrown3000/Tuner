@@ -64,6 +64,15 @@ object Tmdb {
         return info to Upcoming(date, n.optInt("season_number"), n.optInt("episode_number"), n.optString("name").takeIf { it.isNotBlank() })
     }
 
+    /** A well-known actor called [name] (TMDB id and their proper name), or null. Blocking. */
+    fun findPerson(apiKey: String, name: String): Pair<Long, String>? = runCatching {
+        val q = URLEncoder.encode(name.trim(), "UTF-8")
+        val r = get(apiKey, "$API/search/person?query=$q&language=en-GB").optJSONArray("results") ?: return null
+        val o = r.optJSONObject(0) ?: return null
+        if (o.optString("known_for_department") != "Acting" || o.optDouble("popularity", 0.0) < 3.0) return null
+        o.optLong("id") to o.optString("name")
+    }.getOrNull()
+
     /** An actor's best-known films, newest first. */
     fun personFilms(apiKey: String, personId: Long): List<Part> {
         val a = get(apiKey, "$API/person/$personId/movie_credits?language=en-GB").optJSONArray("cast") ?: return emptyList()

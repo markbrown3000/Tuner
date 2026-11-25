@@ -935,7 +935,9 @@ private fun OptionsMenu(
         }
         vm.playingWatchItem?.let { w ->
             if (!vm.activeProfile.kids) add(MenuItem("👪 Recommend to the family", "shows on everyone's Home") { vm.recommendToFamily(w) })
+            add(MenuItem("📚 Add to a collection…") { vm.collectingItem = w })
         }
+        if (mode is PlayMode.Vod && !mode.contentId.startsWith("plex:")) add(MenuItem("🔖 Bookmark this moment", "Home › Bookmarks") { vm.bookmarkHere() })
         vm.playingShowName?.let { name ->
             add(MenuItem("🔍 More of $name", "other showings, episodes, films and Plex") { vm.findMoreOf(name) })
         }

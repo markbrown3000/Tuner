@@ -29,6 +29,10 @@ A TiviMate-style live TV app for Google TV / Android TV. Built with Kotlin, Jetp
 - **👪 Family picks**: player menu or film info › Recommend to the family puts it in a Family picks row on everyone else's Home (and the PC's). Hold OK on it to remove.
 - **Kids can ask for more time**: when time's up, 📱 Ask a grown-up sends a request to linked phones and PCs: +15, +30, +1 hour (with the PIN) or Not now.
 - **Plex-style player menu**: for Plex episodes, 📺 Go to show, 📂 Go to Season N and ✓ Mark as watched/unwatched (works however the episode was started, Home included). The "go to" options now sit near the top, and night mode, clearer speech, sizes, lip sync and stream info are tucked into ⚙ Picture & sound ›.
+- **Smarter search**: small typos are fine ("strictley"), and an actor's name finds their films you have ("Tom Hanks").
+- **Your collections**: hold OK on a film or series › Add to a collection ("Christmas films"); they show on Home and sync to your other devices and the PC.
+- **Bookmarks**: player menu › 🔖 Bookmark this moment; Home › Bookmarks takes you back there.
+- **After a crash**, Flicker says so next time it opens and can show the problem log.
 - **Go to… from the player**: in the player menu, 📺 Go to series (or Go to show for Plex) opens all the episodes, 🎬 Go to film page shows the cast, trailer and the rest of the series, 🔍 More of… searches for other episodes and showings, and you can add it to My list or skip to the next episode. On phones it keeps playing in the mini player.
 - **Up next**: in the last 20 seconds of an episode, a card shows the next one. OK plays it now, BACK cancels.
 - **Skip intro**: the first time you skip an intro with ▶ near the start of an episode, Tuner learns where it ends for that series. Next time, a "Skip intro – press ▶" button appears.
@@ -104,6 +108,12 @@ A TiviMate-style live TV app for Google TV / Android TV. Built with Kotlin, Jetp
   - **Plex**: sort and find in a library, seasons, mark watched (right-click), Go to show from the player, and kids see only their libraries. Films › Plex + provider shows everything once.
   - **Films**: Next in the series when a film ends, and click an actor for their other films.
   - **Backup and restore**, a **Reminders** list, two more colour themes, and an **artwork screensaver** when nothing's playing.
+  - **Full screen** is a borderless window over the whole monitor (Esc or double-click to leave), and after an update Flicker opens again by itself.
+  - **Sport page**: sport on now and later by sport, with your teams' fixtures beside it. The **guide** shows what's on in a small picture while you browse.
+  - **Kids' Home**: big bright tiles of their channels, and how much TV time is left.
+  - **Set or change the PIN** on the PC (Settings › Profiles) – it goes to the TV too (the newest change wins).
+  - **Trakt**: link it in Settings to log what you finish and skip films you've seen.
+  - Recommendations start from what each profile likes on the TV.
   - **Problem log**: Settings › Problem log shows recent errors, with 📋 Copy to send them on.
   - **Kids' limits**: the TV's PIN, daily TV time and bedtime apply on the PC too. A grown-up's PIN gives 30 more minutes, and switching from a kids' profile to a grown-up one needs the PIN.
   - **What's On**: now and coming up by kind, sport (with LIVE badges), and My teams, with your teams' fixtures from ESPN and the channel showing each one.

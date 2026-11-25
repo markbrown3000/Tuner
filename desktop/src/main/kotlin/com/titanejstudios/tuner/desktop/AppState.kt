@@ -27,7 +27,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 enum class Page(val label: String, val icon: String) {
-    Search("Search", "🔍"), Home("Home", "⌂"), Live("Live TV", "📺"), Guide("TV Guide", "▦"), Catchup("Catch-up", "↺"), WhatsOn("What's On", "☰"),
+    Search("Search", "🔍"), Home("Home", "⌂"), Live("Live TV", "📺"), Guide("TV Guide", "▦"), Catchup("Catch-up", "↺"), WhatsOn("What's On", "☰"), Sport("Sport", "⚽"),
     Multi("Multi-view", "⊞"), Films("Films", "🎬"), Series("Series", "🎞"),
     Plex("Plex", "▶"), YouTube("YouTube", "▷"), Recordings("Recordings", "●"), Settings("Settings", "⚙"),
 }
@@ -519,6 +519,7 @@ class AppState(val config: Config, val player: Player, private val scope: Corout
             config.done = config.done + (w.id to System.currentTimeMillis())
             changed()
         }
+        logToTrakt(w)
         val next = w.next.takeIf { upNextCancelled != w.id }
         watching = null
         if (next != null) {
@@ -1898,6 +1899,7 @@ class AppState(val config: Config, val player: Player, private val scope: Corout
         "onnow" to "On now", "missed" to "Missed it?", "sport" to "Sport", "filmstv" to "Films on TV today", "mylist" to "My list",
         "family" to "Family picks", "coming" to "Coming soon", "plexdeck" to "Continue on Plex", "because" to "Because you watched",
         "trending" to "Trending this week", "tonight" to "Tonight", "topfilms" to "Top rated films", "plexnew" to "New on Plex",
+        "collections" to "Your collections", "bookmarks" to "Bookmarks",
     )
 
     /** Home rows in your order, with whether each is shown. */
@@ -2060,6 +2062,175 @@ class AppState(val config: Config, val player: Player, private val scope: Corout
         changed(sync = false)
     }
 
+    // ---------------- The PIN (set here, it goes to the TV too) ----------------
+
+    var settingPin by mutableStateOf(false)
+
+    fun changePin() {
+        if (config.pin != null) askPin("Your current PIN first") { settingPin = true } else settingPin = true
+    }
+
+    fun savePin(pin: String?) {
+        settingPin = false
+        config.pin = pin?.takeIf { it.length >= 4 }
+        config.pinAt = System.currentTimeMillis()
+        changed()
+        syncSoon(0)
+        say(if (config.pin != null) "PIN saved – the TV gets it at the next sync" else "PIN removed – on the TV too at the next sync")
+    }
+
+    // ---------------- "Flicker closed unexpectedly" ----------------
+
+    var lastCrash by mutableStateOf(
+        runCatching {
+            val f = java.io.File(com.titanejstudios.tuner.data.AppLog.file.parentFile, "crashed.txt")
+            if (f.exists()) f.readText().also { f.delete() }.ifBlank { null } else null
+        }.getOrNull()
+    )
+
+    fun copyLog() {
+        val text = "Flicker for Windows ${Keys.VERSION} · ${System.getProperty("os.name")}\n\n" +
+            runCatching { com.titanejstudios.tuner.data.AppLog.file.readText().takeLast(60_000) }.getOrDefault("")
+        runCatching { java.awt.Toolkit.getDefaultToolkit().systemClipboard.setContents(java.awt.datatransfer.StringSelection(text), null) }
+        say("Problem log copied – paste it into a message")
+    }
+
+    // ---------------- Bookmarks ----------------
+
+    val bookmarks: List<Watchlist.Bookmark> get() = Watchlist.decodeBookmarks(config.bookmarksJson)
+
+    fun bookmarkHere() {
+        val w = watching ?: return say("Bookmarks are for films and episodes")
+        val pos = player.positionMs
+        val b = Watchlist.Bookmark(java.util.UUID.randomUUID().toString(), w.id, w.title, w.subtitle, w.poster, w.url, w.seriesId, pos, System.currentTimeMillis())
+        config.bookmarksJson = Watchlist.encodeBookmarks((listOf(b) + bookmarks).take(50))
+        changed(sync = false)
+        say("🔖 Bookmarked at ${clock(pos)}")
+    }
+
+    fun playBookmark(b: Watchlist.Bookmark) {
+        if (blockedForKids()) return
+        stopWatching(save = true)
+        playingChannel = null
+        watching = Watching(b.contentId, b.title, b.subtitle, b.poster, b.url, b.seriesId, resumable = !b.contentId.startsWith("plex:") && !b.contentId.startsWith("rec:"))
+        player.play(b.url, b.posMs)
+        player.setVolume(config.volume)
+    }
+
+    fun deleteBookmark(id: String) {
+        config.bookmarksJson = Watchlist.encodeBookmarks(bookmarks.filter { it.id != id })
+        changed(sync = false)
+    }
+
+    // ---------------- Your collections ----------------
+
+    val collections: Map<String, List<WatchItem>> get() = Watchlist.decodeCollections(config.collectionsJson)
+    var collectingItem by mutableStateOf<WatchItem?>(null)
+
+    private fun saveCollections(map: Map<String, List<WatchItem>>) {
+        config.collectionsJson = Watchlist.encodeCollections(map)
+        config.collectionsAt = System.currentTimeMillis()
+        changed()
+    }
+
+    fun addToCollection(name: String, item: WatchItem) {
+        val n = name.trim().take(40).ifEmpty { return }
+        val list = collections[n].orEmpty()
+        if (list.any { it.id == item.id }) return say("Already in $n")
+        saveCollections(collections + (n to list + item))
+        say("Added ${item.name} to $n")
+    }
+
+    fun removeFromCollection(name: String, id: String) {
+        val list = collections[name].orEmpty().filter { it.id != id }
+        saveCollections(if (list.isEmpty()) collections - name else collections + (name to list))
+    }
+
+    fun deleteCollection(name: String) = saveCollections(collections - name)
+
+    fun openWatchItem(w: WatchItem) {
+        if (w.isSeries) {
+            openSeriesId = w.id
+            page = Page.Series
+        } else w.toVod()?.let { playFilm(it) }
+    }
+
+    // ---------------- Trakt ----------------
+
+    val traktAvailable: Boolean get() = Keys.TRAKT_ID.isNotBlank() && Keys.TRAKT_SECRET.isNotBlank()
+    var traktCode by mutableStateOf<com.titanejstudios.tuner.integrations.Trakt.DeviceCode?>(null)
+    val traktUser: String? get() = config.traktAuth?.split('\t')?.getOrNull(3)?.ifBlank { "your account" }
+    private val trakt by lazy { com.titanejstudios.tuner.integrations.Trakt(Keys.TRAKT_ID, Keys.TRAKT_SECRET) }
+
+    fun linkTrakt() {
+        if (!traktAvailable) return say("Trakt isn't set up in this build")
+        scope.launch {
+            val code = withContext(Dispatchers.IO) { runCatching { trakt.deviceCode() }.getOrNull() } ?: return@launch say("Couldn't reach Trakt")
+            traktCode = code
+            val until = System.currentTimeMillis() + code.expiresIn * 1000L
+            while (traktCode === code && System.currentTimeMillis() < until) {
+                delay(code.interval * 1000L)
+                val t = withContext(Dispatchers.IO) { runCatching { trakt.checkCode(code) }.getOrNull() } ?: continue
+                val user = withContext(Dispatchers.IO) { runCatching { trakt.username(t.access) }.getOrNull() } ?: ""
+                config.traktAuth = listOf(t.access, t.refresh, t.expiresAt.toString(), user).joinToString("\t")
+                traktCode = null
+                changed(sync = false)
+                say("Trakt linked ✓ – films and episodes you finish are logged")
+                importTraktWatched()
+                return@launch
+            }
+            if (traktCode === code) traktCode = null
+        }
+    }
+
+    fun unlinkTrakt() {
+        config.traktAuth = null
+        traktCode = null
+        changed(sync = false)
+        say("Trakt unlinked")
+    }
+
+    /** A working Trakt token (refreshed when it's run out). Blocking. */
+    private fun traktAccess(): String? {
+        val parts = config.traktAuth?.split('\t') ?: return null
+        val expires = parts.getOrNull(2)?.toLongOrNull() ?: 0L
+        if (System.currentTimeMillis() < expires - 86_400_000L) return parts[0]
+        val t = runCatching { trakt.refresh(parts[1]) }.getOrNull() ?: return null
+        config.traktAuth = listOf(t.access, t.refresh, t.expiresAt.toString(), parts.getOrNull(3) ?: "").joinToString("\t")
+        return t.access
+    }
+
+    /** Logs a finished film or episode to Trakt. */
+    fun logToTrakt(w: Watching) {
+        if (config.traktAuth == null || w.id.startsWith("rec:") || w.id.startsWith("url:") || w.id.startsWith("file:")) return
+        scope.launch(Dispatchers.IO) {
+            val access = traktAccess() ?: return@launch
+            val se = Regex("S(\\d+) ?E(\\d+)").find(w.subtitle ?: "")
+            runCatching {
+                if (se != null) trakt.addEpisode(access, com.titanejstudios.tuner.data.FilmName.parse(w.title).first, se.groupValues[1].toInt(), se.groupValues[2].toInt())
+                else com.titanejstudios.tuner.data.FilmName.parse(w.title).let { (t, y) -> trakt.addFilm(access, t, y) }
+            }
+        }
+    }
+
+    /** What you've watched on Trakt counts as watched here (Surprise me and Top rated skip them). */
+    fun importTraktWatched() {
+        val films = movies ?: return
+        scope.launch {
+            val watched = withContext(Dispatchers.IO) { traktAccess()?.let { a -> runCatching { trakt.watchedFilms(a) }.getOrDefault(emptyList()) } }.orEmpty()
+            if (watched.isEmpty()) return@launch
+            fun norm(s: String) = com.titanejstudios.tuner.data.FilmName.parse(s).first.lowercase().filter { it.isLetterOrDigit() }
+            val keys = watched.map { norm(it.title) }.toSet()
+            val add = films.filter { norm(it.name) in keys && it.id !in config.done }.associate { it.id to System.currentTimeMillis() }
+            if (add.isNotEmpty()) {
+                config.done = config.done + add
+                changed()
+                say("Trakt: ${add.size} films you've seen are marked as watched")
+            }
+        }
+    }
+
+    // ---------------- Cancel a reminder ----------------
     fun cancelReminder(r: Reminder) {
         config.reminders = config.reminders - r
         changed(sync = false)

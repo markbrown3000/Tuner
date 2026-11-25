@@ -450,6 +450,7 @@ fun WatchingMenu(app: AppState) {
                     }
                 }
                 if (w != null && !w.id.startsWith("rec:")) add(MenuLine("🔎 Find subtitles online") { app.findSubtitles() })
+                if (w != null) add(MenuLine("🔖 Bookmark this moment") { app.bookmarkHere() })
                 add(MenuLine("😴 Sleep timer: ${app.sleepLabel}", heading = true))
                 add(MenuLine("Off", selected = app.sleepAt == 0L) { app.setSleep(0) })
                 if (channel != null && w == null) add(MenuLine("At the end of this programme") { app.setSleep(-1) })
@@ -491,6 +492,7 @@ fun WatchingMenu(app: AppState) {
                 }
                 app.playingWatchItem()?.let { item ->
                     if (!app.kids) add(MenuLine("👪 Recommend to the family") { app.recommendToFamily(item) })
+                    add(MenuLine("📚 Add to a collection…") { app.collectingItem = item })
                 }
                 if (w?.seriesId != null) {
                     val d = app.player.durationMs

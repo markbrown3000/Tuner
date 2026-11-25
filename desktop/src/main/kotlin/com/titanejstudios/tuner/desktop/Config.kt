@@ -169,6 +169,14 @@ class Config {
     /** Where recordings go (a network drive is fine); blank = Videos\Flicker. */
     var recordFolder: String get() = moreStr("recFolder", ""); set(v) { more.put("recFolder", v) }
 
+    /** When the PIN was set or removed (on this PC, or the device it came from): the newest wins. */
+    var pinAt: Long get() = more.optLong("pinAt"); set(v) { more.put("pinAt", v) }
+    var bookmarksJson: String get() = moreStr("bookmarks", "[]"); set(v) { more.put("bookmarks", v) }
+    var collectionsJson: String get() = moreStr("collections", "{}"); set(v) { more.put("collections", v) }
+    var collectionsAt: Long get() = more.optLong("collectionsAt"); set(v) { more.put("collectionsAt", v) }
+    /** Trakt sign-in: "access TAB refresh TAB expiresAt TAB username". */
+    var traktAuth: String? get() = moreStr("trakt", "").ifBlank { null }; set(v) { more.put("trakt", v ?: "") }
+
     /** Plex libraries kids may see ("machineId/key"), from the TV. */
     var plexKidsSections: Set<String> get() = moreSet("plexKids"); set(v) { more.put("plexKids", JSONArray(v.toList())) }
 

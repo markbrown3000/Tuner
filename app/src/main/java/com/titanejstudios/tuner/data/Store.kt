@@ -132,6 +132,21 @@ class Store(context: Context) {
     var pin: String?
         get() = prefs.getString("pin", null)
         set(value) = prefs.edit().putString("pin", value).apply()
+    /** When the PIN was last set or removed here (the newest one wins between devices). */
+    var pinAt: Long
+        get() = prefs.getLong("pin_at", 0L)
+        set(value) = prefs.edit().putLong("pin_at", value).apply()
+    /** Bookmarks: moments in films and episodes to go back to (JSON). */
+    var bookmarksJson: String
+        get() = prefs.getString("bookmarks", null) ?: "[]"
+        set(value) = prefs.edit().putString("bookmarks", value).apply()
+    /** Your own collections ("Christmas films"): name → items (JSON). */
+    var collectionsJson: String
+        get() = prefs.getString("collections", null) ?: "{}"
+        set(value) = prefs.edit().putString("collections", value).apply()
+    var crashShownAt: Long
+        get() = prefs.getLong("crash_shown_at", 0L)
+        set(value) = prefs.edit().putLong("crash_shown_at", value).apply()
 
     // ---------------- Reminders ----------------
 

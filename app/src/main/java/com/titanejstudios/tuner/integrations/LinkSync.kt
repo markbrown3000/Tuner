@@ -19,6 +19,9 @@ object LinkSync {
     const val YOUTUBE = "youtube"
     /** Family picks (shared by every profile). */
     const val PICKS = "picks"
+    /** Your own named collections. */
+    const val COLLECTIONS = "lists"
+    const val TASTE = "taste"
     private const val DONE = "done"
 
     /** Remembers that [contentId] was finished (keeps the newest 200). */
@@ -43,6 +46,11 @@ object LinkSync {
         sections.put(TvSync.WATCHLIST, JSONObject().put("at", store.syncStamp(TvSync.WATCHLIST)).put("data", store.watchlistJson))
         sections.put(TvSync.FOLLOWED, JSONObject().put("at", store.syncStamp(TvSync.FOLLOWED)).put("data", store.followedSeriesJson))
         sections.put(PICKS, JSONObject().put("at", store.syncStamp(PICKS)).put("data", store.familyPicksJson))
+        sections.put(COLLECTIONS, JSONObject().put("at", store.syncStamp(COLLECTIONS)).put("data", store.collectionsJson))
+        // What each profile likes, by name (so a new PC's recommendations are good straight away).
+        val taste = JSONObject()
+        for (p in store.profiles) store.taste(p.id)?.let { taste.put(p.name.lowercase().trim(), it) }
+        sections.put(TASTE, taste)
         val resume = JSONArray()
         store.resume.values.forEach { resume.put(TvSync.resumeToJson(it)) }
         sections.put(TvSync.RESUME, JSONObject().put("data", resume))
@@ -212,6 +220,7 @@ object LinkSync {
             Triple(TvSync.WATCHLIST, { store.watchlistJson }, { v: String -> store.watchlistJson = v }),
             Triple(TvSync.FOLLOWED, { store.followedSeriesJson }, { v: String -> store.followedSeriesJson = v }),
             Triple(PICKS, { store.familyPicksJson }, { v: String -> store.familyPicksJson = v }),
+            Triple(COLLECTIONS, { store.collectionsJson }, { v: String -> store.collectionsJson = v }),
         )) {
             val r = sections.optJSONObject(section) ?: continue
             val theirs = r.optString("data", "[]")

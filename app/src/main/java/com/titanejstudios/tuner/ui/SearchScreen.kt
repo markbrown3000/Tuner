@@ -140,7 +140,7 @@ fun SearchScreen(vm: TunerViewModel) {
                 }
             }
             if (results.films.isNotEmpty()) {
-                item { SectionTitle("Films") }
+                item { SectionTitle(results.actor?.let { "Films with $it" } ?: "Films") }
                 item(key = "filmrow") {
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(4.dp)) {
                         items(results.films.size, key = { "f" + results.films[it].id }) { i ->

@@ -355,6 +355,7 @@ fun MoviesScreen(vm: TunerViewModel) {
                 add(MenuItem("ℹ Film info & trailer") { vm.openFilmInfo(m.name, isSeries = false) })
                 add(MenuItem(if (vm.inWatchlist(m.id)) "Remove from My list" else "＋ Add to My list") { vm.toggleWatchlist(m) })
                 add(MenuItem("Play from the beginning") { vm.playMovie(m, fromStart = true) })
+                add(MenuItem("📚 Add to a collection…") { vm.collectingItem = com.titanejstudios.tuner.data.WatchItem.of(m, System.currentTimeMillis()) })
                 if (vm.plexLinked && vm.preferPlexFilms) add(MenuItem("Play the IPTV copy", "not Plex's") { vm.playMovie(m, fromStart = false, viaPlex = false) })
                 if (vm.isPhone && vm.link.linked) add(MenuItem("📺 Watch on TV") { vm.watchOnTv(vm.filmJson(m)) })
                 if (vm.isPhone) addAll(downloadItems(vm, m.id) { vm.downloadMovie(m) })
@@ -427,6 +428,7 @@ fun SeriesScreen(vm: TunerViewModel) {
                 MenuItem("Open") { vm.openSeriesDetail(s) },
                 MenuItem("ℹ Series info & trailer") { vm.openFilmInfo(s.name, isSeries = true) },
                 MenuItem(if (vm.inWatchlist(s.id)) "Remove from My list" else "＋ Add to My list") { vm.toggleWatchlist(s) },
+                MenuItem("📚 Add to a collection…") { vm.collectingItem = com.titanejstudios.tuner.data.WatchItem.of(s, System.currentTimeMillis()) },
             ),
             onDismiss = { menuFor = null },
         )
@@ -839,4 +841,65 @@ fun LibraryScreen(vm: TunerViewModel) {
         compact = compactLayout(vm),
         phone = PhoneCatalogueInfo(vm, { it.key }, { t -> t.rating?.filter { it.isDigit() || it == '.' }?.toDoubleOrNull() ?: 0.0 }, { null }, isSeries = shows),
     )
+}
+
+
+/** 📚 Add to a collection: pick one, or start a new one. */
+@Composable
+fun CollectionPicker(vm: TunerViewModel, item: com.titanejstudios.tuner.data.WatchItem) {
+    var naming by remember { mutableStateOf(false) }
+    if (naming) {
+        TextInputDialog(title = "New collection", hint = "Christmas films, Friday film night…", label = "Name", onDismiss = { naming = false; vm.collectingItem = null }) { name ->
+            vm.addToCollection(name, item)
+            vm.collectingItem = null
+        }
+        return
+    }
+    MenuDialog(
+        title = "Add ${item.name} to…",
+        items = vm.collections.keys.map { name -> MenuItem("📚 $name", "${vm.collections[name]?.size ?: 0}") { vm.addToCollection(name, item); vm.collectingItem = null } } +
+            MenuItem("＋ A new collection…") { naming = true; vm.collectingItem = item },
+        onDismiss = { if (!naming) vm.collectingItem = null },
+    )
+}
+
+/** Your collections: one at a time, with everything in it. */
+@Composable
+fun CollectionsScreen(vm: TunerViewModel) {
+    val names = vm.collections.keys.toList()
+    var current by remember { mutableStateOf(vm.openCollection ?: names.firstOrNull()) }
+    var menuFor by remember { mutableStateOf<com.titanejstudios.tuner.data.WatchItem?>(null) }
+    val list = current?.let { vm.collections[it] }.orEmpty()
+    Column(Modifier.fillMaxSize().background(TunerColors.BackgroundBottom).padding(horizontal = 32.dp, vertical = 20.dp)) {
+        Text("Your collections", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = Color.White)
+        Spacer(Modifier.height(10.dp))
+        Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            names.forEach { n -> PillButton(n, { current = n }, selected = n == current, compact = true) }
+            current?.let { c -> PillButton("🗑 Delete \"$c\"", { vm.deleteCollection(c) }, compact = true) }
+        }
+        Spacer(Modifier.height(14.dp))
+        if (names.isEmpty()) CenterMessage("No collections yet. Hold OK on a film or series › Add to a collection.")
+        else androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
+            androidx.compose.foundation.lazy.grid.GridCells.Adaptive(150.dp),
+            horizontalArrangement = Arrangement.spacedBy(14.dp), verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            items(list.size, key = { list[it].id }) { i ->
+                val w = list[i]
+                PosterCard(
+                    title = w.name, image = w.image, caption = if (w.isSeries) "Series" else "Film", progress = null,
+                    onClick = { vm.openWatchItem(w) }, onLongClick = { menuFor = w },
+                )
+            }
+        }
+    }
+    menuFor?.let { w ->
+        MenuDialog(
+            title = w.name,
+            items = listOf(
+                MenuItem("▶ Open") { vm.openWatchItem(w) },
+                MenuItem("Remove from \"$current\"") { current?.let { vm.removeFromCollection(it, w.id) } },
+            ),
+            onDismiss = { menuFor = null },
+        )
+    }
 }

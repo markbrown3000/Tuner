@@ -260,6 +260,13 @@ class CloudSyncFeature(
             // Each house keeps its own favourites unless you've chosen to share them.
             if (!theirHouse.equals(house, true) && !shareFavourites) snap.optJSONObject("sections")?.remove(TvSync.FAVOURITES)
             changed += LinkSync.apply(store, snap)
+            // A PIN set or removed on another device (a PC) more recently than here.
+            val theirPinAt = d.optLong("pin_at")
+            if (theirPinAt > store.pinAt) {
+                store.pin = d.optString("pin").takeIf { it.isNotBlank() && it != "null" }
+                store.pinAt = theirPinAt
+                changed += "pin"
+            }
         }
         all.put(
             me,
@@ -270,7 +277,7 @@ class CloudSyncFeature(
                 // The linked-devices key, so Flicker on a PC joins the house (phone remote, Watch on…).
                 .put("link_key", store.linkKey ?: "")
                 // The parental PIN, so kids' limits work the same on a PC.
-                .put("pin", store.pin ?: ""),
+                .put("pin", store.pin ?: "").put("pin_at", store.pinAt),
         )
         root.put("app", "Flicker").put("v", 1).put("devices", all)
         val id = drive.write(accessToken(), fileId ?: store.gdriveFileId, root.toString())
