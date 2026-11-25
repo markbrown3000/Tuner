@@ -963,6 +963,14 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     var recapsOn by mutableStateOf(store.recaps); private set
     /** When an episode of each series last started (no recap when you're binge-watching). */
     private val lastEpisodeStart = HashMap<String, Long>()
+    // (Kept above init: start-up code can reach these before the rest of the class is set up.)
+    var playingPlexEntry by mutableStateOf<com.titanejstudios.tuner.integrations.Plex.Entry?>(null); private set
+    var familyPicks by mutableStateOf(Watchlist.decodePicks(store.familyPicksJson)); private set
+    var comingSoon by mutableStateOf(decodeComing(store.comingSoonJson)); private set
+    var library by mutableStateOf<List<LibraryTitle>?>(null); private set
+    var libraryShows by mutableStateOf(false); private set
+    var libraryStatus by mutableStateOf<String?>(null); private set
+    var timeRequest by mutableStateOf<TimeRequest?>(null); private set
 
     // Recording tidy-up and network drive
     var keptRecordings by mutableStateOf<Set<String>>(emptySet()); private set
@@ -4441,7 +4449,6 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     }
 
     /** The Plex film or episode that's playing, as Plex has it (looked up when it starts). */
-    var playingPlexEntry by mutableStateOf<com.titanejstudios.tuner.integrations.Plex.Entry?>(null); private set
     val playingPlexSeason: Int? get() = playingPlexEntry?.takeIf { it.type == "episode" && it.season > 0 }?.season
 
     /** Looks up what's playing on Plex: its show and season, and whether it's watched. */
@@ -4492,7 +4499,6 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     // ---------------- Family picks ----------------
 
     /** "👪 Recommend to the family": shared with every profile and linked device. */
-    var familyPicks by mutableStateOf(Watchlist.decodePicks(store.familyPicksJson)); private set
 
     /** Picks for this profile (not its own). */
     val familyPicksForMe: List<FamilyPick>
@@ -4543,7 +4549,6 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
 
     // ---------------- Coming soon: new episodes of your series ----------------
 
-    var comingSoon by mutableStateOf(decodeComing(store.comingSoonJson)); private set
 
     private fun decodeComing(json: String?): List<ComingEpisode> = runCatching {
         val a = org.json.JSONArray(json ?: "[]")
@@ -4627,9 +4632,6 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
             }
     }
 
-    var library by mutableStateOf<List<LibraryTitle>?>(null); private set
-    var libraryShows by mutableStateOf(false); private set
-    var libraryStatus by mutableStateOf<String?>(null); private set
     private var libraryJob: Job? = null
 
     fun openLibrary(shows: Boolean) {
@@ -4701,7 +4703,6 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     class TimeRequest(val from: String, val profileId: String, val kidName: String)
 
     /** A child somewhere in the house is asking for more TV (shown on grown-ups' devices). */
-    var timeRequest by mutableStateOf<TimeRequest?>(null); private set
 
     fun askForMoreTime() {
         if (!link.linked) return showNotice("Link a phone first (Settings › Linked devices) – or ask a grown-up for the PIN")
@@ -5869,30 +5870,45 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
             showNotice("Getting your films ready – try again in a moment")
             return
         }
+        if (surpriseJob?.isActive == true) return
         val seen = resume.keys + store.resumeDone.keys
         val learned = Taste.fromJson(taste.toJson())
+        val shown = surpriseShown.toSet()
+        val ratings = vodRatings.toMap()
+        val noKey = tmdbKey == null
         val t = System.currentTimeMillis()
-        // Each film scored once (rating, nudged by your taste), then a random one of the best 60.
-        val pool = list.asSequence()
-            .filter { it.id !in seen && it.id !in surpriseShown }
-            .filter { thumbOf(it.name) >= 0 }
-            .filter { !com.titanejstudios.tuner.ui.isAdultTitle(it.name, it.category) }
-            .map { it to ratingValueFor(it.name, false, it.rating) }
-            .filter { it.second >= 6.8 }
-            .map { (m, r) -> m to r + learned.score(FilmName.parse(m.name).first, null, t).first / 20.0 }
-            .toList()
-            .sortedByDescending { it.second }
-            .take(60)
-        if (pool.isEmpty()) {
-            showNotice(if (tmdbKey == null) "Surprise me needs film ratings – add a TMDB key in Settings" else "Browse Films & TV a little first so Flicker can find the ratings")
-            requestRatings(list.take(200).map { it.name }, false)
-            return
+        // Worked out away from the screen: a big film list on the main thread froze the TV (and Android closed Flicker).
+        surpriseJob = viewModelScope.launch {
+            val pool = runCatching {
+                withContext(Dispatchers.Default) {
+                    // Each film scored once (rating, nudged by your taste), then a random one of the best 60.
+                    list.asSequence()
+                        .filter { it.id !in seen && it.id !in shown }
+                        .map { it to (ratings[ratingKey(it.name, false)]?.value ?: if (noKey) it.rating?.replace(',', '.')?.toDoubleOrNull() ?: 0.0 else 0.0) }
+                        .filter { it.second >= 6.8 }
+                        .filter { !com.titanejstudios.tuner.ui.isAdultTitle(it.first.name, it.first.category) }
+                        .mapNotNull { (m, r) ->
+                            val title = FilmName.parse(m.name).first
+                            // 👎 films are left out.
+                            if (Taste.key(title) in learned.disliked) null else m to r + learned.score(title, null, t).first / 20.0
+                        }
+                        .toList()
+                        .sortedByDescending { it.second }
+                        .take(60)
+                }
+            }.onFailure { AppLog.warn("Surprise me failed", it) }.getOrDefault(emptyList())
+            if (pool.isEmpty()) {
+                showNotice(if (tmdbKey == null) "Surprise me needs film ratings – add a TMDB key in Settings" else "Browse Films & TV a little first so Flicker can find the ratings")
+                requestRatings(list.take(200).map { it.name }, false)
+                return@launch
+            }
+            val pick = pool.random().first
+            surpriseShown += pick.id
+            surprise = pick
+            requestRatings(listOf(pick.name), false)
         }
-        val pick = pool.random().first
-        surpriseShown += pick.id
-        surprise = pick
-        requestRatings(listOf(pick.name), false)
     }
+    private var surpriseJob: Job? = null
 
     fun closeSurprise() {
         surprise = null
