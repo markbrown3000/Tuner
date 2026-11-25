@@ -30,6 +30,9 @@ val googleClientSecret: String = builtInKey("TUNER_GOOGLE_CLIENT_SECRET", "googl
 val youtubeKey: String = builtInKey("TUNER_YOUTUBE_KEY", "youtube_key")
 // OMDb (IMDb ratings) – the OMDB_KEY secret, or omdb_key=… in keys.properties.
 val omdbKey: String = builtInKey("TUNER_OMDB_KEY", "omdb_key")
+// Trakt (optional) – TRAKT_CLIENT_ID and TRAKT_CLIENT_SECRET secrets, from trakt.tv/oauth/applications.
+val traktId: String = builtInKey("TUNER_TRAKT_ID", "trakt_id")
+val traktSecret: String = builtInKey("TUNER_TRAKT_SECRET", "trakt_secret")
 
 fun versionCodeFor(v: String): Int {
     val p = v.split('.', '-').mapNotNull { it.toIntOrNull() } + listOf(0, 0, 0)
@@ -51,6 +54,8 @@ android {
         buildConfigField("String", "GOOGLE_CLIENT_SECRET", "\"$googleClientSecret\"")
         buildConfigField("String", "YOUTUBE_KEY", "\"$youtubeKey\"")
         buildConfigField("String", "OMDB_KEY", "\"$omdbKey\"")
+        buildConfigField("String", "TRAKT_ID", "\"$traktId\"")
+        buildConfigField("String", "TRAKT_SECRET", "\"$traktSecret\"")
     }
 
     signingConfigs {

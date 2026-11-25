@@ -431,6 +431,14 @@ fun SettingsScreen(vm: TunerViewModel) {
             }
             item {
                 SettingRow(
+                    "Play trailers on film info",
+                    subtitle = "The trailer plays silently behind a film's details after a couple of seconds",
+                    detail = if (vm.trailerAutoplay) "On" else "Off",
+                    onClick = { vm.toggleTrailerAutoplay() },
+                )
+            }
+            item {
+                SettingRow(
                     "Subtitles online (OpenSubtitles key)",
                     subtitle = "Free from opensubtitles.com › API consumers. Then: player menu › Find subtitles online",
                     detail = if (vm.openSubtitlesKey != null) "Set" else "Not set",
@@ -439,6 +447,15 @@ fun SettingsScreen(vm: TunerViewModel) {
             }
 
             item { SectionTitle("Plex, scores & updates") }
+            if (vm.traktAvailable) item {
+                SettingRow(
+                    "Trakt",
+                    subtitle = vm.traktStatus ?: if (vm.traktUser != null) "Films and episodes you finish are logged; films you've seen there show as watched here. OK to unlink."
+                    else "Log what you watch on trakt.tv, and bring your watched films across",
+                    detail = vm.traktCode ?: vm.traktUser?.let { "Linked · $it" } ?: "Not linked",
+                    onClick = { if (vm.traktUser != null) vm.unlinkTrakt() else vm.linkTrakt() },
+                )
+            }
             item {
                 SettingRow(
                     "⚽ My teams",
@@ -470,6 +487,14 @@ fun SettingsScreen(vm: TunerViewModel) {
                         subtitle = "A film in Films & TV that's also on your Plex plays from Plex (usually a better copy). Hold OK on a film for the IPTV copy.",
                         detail = if (vm.preferPlexFilms) "On" else "Off",
                         onClick = { vm.togglePreferPlexFilms() },
+                    )
+                }
+                item {
+                    SettingRow(
+                        "Which copy to play",
+                        subtitle = "When a film's in more than one place (Films and Films 4K, or your provider too). Pick \"☆ Always use…\" when asked to stop asking.",
+                        detail = vm.preferredCopyLabel,
+                        onClick = { if (vm.preferredCopy != null) vm.choosePreferredCopy(null) else vm.showNotice("Next time you're asked which copy, choose \"☆ Always use…\"") },
                     )
                 }
             }
@@ -667,6 +692,14 @@ fun SettingsScreen(vm: TunerViewModel) {
                     "Check everything",
                     subtitle = if (vm.isPhone) "Tries each part of Flicker on this phone and says what works and what doesn't" else "Tries each part of Flicker on this TV and says what works and what doesn't",
                     onClick = { vm.openSelfTest() },
+                )
+            }
+            item {
+                SettingRow(
+                    "🛠 Fix it",
+                    subtitle = "Something not working? Checks the internet, VPN and your provider, restarts what's playing and reloads an old guide",
+                    detail = if (vm.fixing) "Checking…" else null,
+                    onClick = { vm.fixIt() },
                 )
             }
             item {

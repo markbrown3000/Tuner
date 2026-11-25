@@ -100,6 +100,8 @@ fun LogScreen(vm: TunerViewModel) {
             Spacer(Modifier.weight(1f))
             PillButton("Refresh", { vm.loadLog() }, Modifier.focusRequester(first), compact = true)
             Spacer(Modifier.width(10.dp))
+            PillButton("📋 Copy", { vm.copyLog() }, compact = true)
+            Spacer(Modifier.width(10.dp))
             PillButton("Clear", { vm.clearLog() }, compact = true)
         }
         Text(

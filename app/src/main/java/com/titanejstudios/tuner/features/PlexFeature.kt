@@ -30,6 +30,40 @@ class PlexFeature(private val store: Store, private val scope: CoroutineScope) {
 
     private fun client() = Plex(store.plexClientId)
 
+    /** The Plex Home user this profile watches as (null = the main account). */
+    var userToken: String? = null; private set
+
+    private fun activeToken(): String? = if (store.plexToken == null) null else userToken ?: store.plexToken
+
+    /** A different Flicker profile: its own Plex Home user (or the main account). */
+    fun useUser(token: String?) {
+        if (token == userToken) return
+        userToken = token
+        job?.cancel()
+        servers = emptyList()
+        items = emptyList()
+        recent = emptyList()
+        sections = emptyList()
+        sectionItems = emptyMap()
+        if (linked) refresh(force = true)
+    }
+
+    /** The next episode after [item] and the show's name (null for films, or the last episode). */
+    suspend fun nextEpisode(item: Plex.Item): Pair<Plex.Entry, String>? =
+        withContext(Dispatchers.IO) { runCatching { client().nextEpisode(item.server, item.ratingKey) }.getOrNull() }
+
+    /** Plex Home users, for the profile editor. */
+    suspend fun homeUsers(): List<Plex.HomeUser> {
+        val token = store.plexToken ?: return emptyList()
+        return withContext(Dispatchers.IO) { runCatching { client().homeUsers(token) }.getOrDefault(emptyList()) }
+    }
+
+    /** Signs in as a Plex Home user; their token, or an error message. */
+    suspend fun switchTo(user: Plex.HomeUser, pin: String?): Result<String> {
+        val token = store.plexToken ?: return Result.failure(IllegalStateException("Plex isn't linked"))
+        return withContext(Dispatchers.IO) { runCatching { client().switchUser(token, user.uuid, pin, user.id) } }
+    }
+
     /** Shows a code to type in at plex.tv/link, then waits for it to be used. */
     fun link() {
         job?.cancel()
@@ -73,20 +107,24 @@ class PlexFeature(private val store: Store, private val scope: CoroutineScope) {
 
     /** Re-reads Continue watching from each server. */
     fun refresh(force: Boolean = false) {
-        val token = store.plexToken ?: return
+        val token = activeToken() ?: return
         if (!force && job?.isActive == true) return
         job = scope.launch {
             val plex = client()
+            val known = servers
             val result = withContext(Dispatchers.IO) {
                 runCatching {
-                    if (servers.isEmpty() || force) servers = plex.servers(token)
-                    val deck = plex.onDeck(servers)
-                    deck to runCatching { plex.recentlyAdded(servers) }.getOrNull()
+                    val srv = if (known.isEmpty() || force) plex.servers(token) else known
+                    val deck = plex.onDeck(srv)
+                    Triple(srv, deck, runCatching { plex.recentlyAdded(srv) }.getOrNull())
                 }.onFailure { AppLog.warn("Plex: couldn't load Continue watching", it) }.getOrNull()
             }
+            // Switched Plex user meanwhile: this answer is for someone else.
+            if (token != activeToken()) return@launch
             if (result != null) {
-                items = result.first
-                result.second?.let { recent = it }
+                servers = result.first
+                items = result.second
+                result.third?.let { recent = it }
                 if (force) {
                     status = if (servers.isEmpty()) "Linked, but no Plex server answered on this network"
                     else "Linked ✓ · ${servers.joinToString { it.name }}"
@@ -116,7 +154,7 @@ class PlexFeature(private val store: Store, private val scope: CoroutineScope) {
 
     /** Finds the film and TV libraries on your servers. */
     fun loadSections(force: Boolean = false) {
-        val token = store.plexToken ?: return
+        val token = activeToken() ?: return
         if (sections.isNotEmpty() && !force) return
         libraryStatus = "Looking for your Plex libraries…"
         scope.launch {
@@ -159,7 +197,7 @@ class PlexFeature(private val store: Store, private val scope: CoroutineScope) {
         searchJob = scope.launch {
             val result = withContext(Dispatchers.IO) {
                 runCatching {
-                    if (servers.isEmpty()) store.plexToken?.let { servers = client().servers(it) }
+                    if (servers.isEmpty()) activeToken()?.let { servers = client().servers(it) }
                     client().search(servers, q)
                 }
             }
@@ -180,7 +218,7 @@ class PlexFeature(private val store: Store, private val scope: CoroutineScope) {
         scope.launch {
             val found = withContext(Dispatchers.IO) {
                 runCatching {
-                    if (servers.isEmpty()) store.plexToken?.let { servers = client().servers(it) }
+                    if (servers.isEmpty()) activeToken()?.let { servers = client().servers(it) }
                     val s = servers.firstOrNull { it.machineId == serverId } ?: return@runCatching emptyList()
                     client().similar(s, ratingKey)
                 }.getOrDefault(emptyList())
@@ -231,14 +269,14 @@ class PlexFeature(private val store: Store, private val scope: CoroutineScope) {
     /** Every copy of a film on your Plex servers, 4K first. Empty if none (or Plex isn't answering). */
     suspend fun copiesOf(title: String, year: String?): List<Plex.Entry> = withContext(Dispatchers.IO) {
         runCatching {
-            if (servers.isEmpty()) store.plexToken?.let { servers = client().servers(it) }
+            if (servers.isEmpty()) activeToken()?.let { servers = client().servers(it) }
             client().copiesOf(servers, title, year)
         }.getOrDefault(emptyList())
     }
 
     suspend fun showNamed(title: String): Plex.Entry? = withContext(Dispatchers.IO) {
         runCatching {
-            if (servers.isEmpty()) store.plexToken?.let { servers = client().servers(it) }
+            if (servers.isEmpty()) activeToken()?.let { servers = client().servers(it) }
             client().showNamed(servers, title)
         }.getOrNull()
     }

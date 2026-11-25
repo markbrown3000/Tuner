@@ -469,6 +469,17 @@ class YouTubeFeature(private val store: Store, private val scope: CoroutineScope
 
     // ---------------- Kids: approved channels ----------------
 
+    /** A quick search for Flicker's main Search (no Shorts; empty without a key or sign-in). */
+    suspend fun quickSearch(q: String, kids: Boolean): List<YouTube.Video> = withContext(Dispatchers.IO) {
+        if (!canSearch) return@withContext emptyList()
+        runCatching {
+            YouTube.withoutShorts(
+                YouTube.search(q, apiKey, if (apiKey == null) runCatching { accessToken() }.getOrNull() else null, strict = kids),
+                apiKey, if (apiKey == null) runCatching { accessToken() }.getOrNull() else null,
+            ).take(20)
+        }.getOrDefault(emptyList())
+    }
+
     fun searchChannels(q: String) {
         val text = q.trim()
         if (text.length < 2) return

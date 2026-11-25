@@ -198,6 +198,21 @@ fun PhoneMoreScreen(vm: TunerViewModel) {
         if (vm.plexLinked && vm.hasVod && (!vm.activeProfile.kids || vm.kidsHavePlex)) item {
             SettingRow("Plex", subtitle = "Your Plex libraries", onClick = { vm.openPlexLibrary() })
         }
+        val kids = vm.profiles.filter { it.kids }
+        if (!vm.activeProfile.kids && kids.isNotEmpty()) {
+            item { SettingRow("🎁 Extra TV time", subtitle = "Give the kids more minutes today on the TVs", detail = if (vm.link.tvs.isEmpty()) "No TVs found" else null, onClick = { vm.link.search() }) }
+            item {
+                Column(Modifier.padding(start = 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    kids.forEach { k ->
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(k.name, color = Color.White, fontSize = 16.sp, modifier = Modifier.width(90.dp))
+                            listOf(15, 30, 60).forEach { m -> PillButton("+$m min", { vm.sendBonusTime(k, m) }, compact = true) }
+                        }
+                    }
+                }
+            }
+            item { SettingRow("📊 Kids' week", subtitle = "What they watched and anything blocked", onClick = { vm.openStats(kids.first()) }) }
+        }
         if (!vm.activeProfile.kids) {
             item { SettingRow("● Recordings", onClick = { vm.navigate(com.titanejstudios.tuner.Screen.Recordings) }) }
             item { SettingRow("⬇ Downloads", subtitle = "Films and episodes to watch offline", onClick = { vm.navigate(com.titanejstudios.tuner.Screen.Downloads) }) }

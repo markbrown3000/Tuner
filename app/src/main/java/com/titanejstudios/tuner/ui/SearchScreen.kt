@@ -1,6 +1,7 @@
 package com.titanejstudios.tuner.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -73,12 +74,12 @@ fun SearchScreen(vm: TunerViewModel) {
     ) {
         // The remote's microphone: say what you're looking for.
         val voice = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
-            r.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()?.let { vm.updateSearch(it) }
+            r.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()?.let { vm.voiceHeard(it) }
         }
         fun startVoice() {
             val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
                 .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                .putExtra(RecognizerIntent.EXTRA_PROMPT, "What would you like to watch?")
+                .putExtra(RecognizerIntent.EXTRA_PROMPT, "Say a channel, or what you'd like to watch")
             try {
                 voice.launch(intent)
             } catch (e: ActivityNotFoundException) {
@@ -101,7 +102,7 @@ fun SearchScreen(vm: TunerViewModel) {
         OutlinedTextField(
             value = vm.searchQuery,
             onValueChange = { vm.updateSearch(it) },
-            label = { Text("Channel, programme, film, series or Plex") },
+            label = { Text("Channel, programme, film, series, Plex or YouTube") },
             singleLine = true,
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
             keyboardActions = KeyboardActions(onSearch = {
@@ -116,7 +117,7 @@ fun SearchScreen(vm: TunerViewModel) {
         if (vm.searchQuery.trim().length >= 2 && results.channels.isEmpty() && results.programmes.isEmpty() &&
             results.films.isEmpty() && results.seriesFound.isEmpty() && plexFound.isEmpty()
         ) {
-            Text("Nothing found", color = TunerColors.TextSecondary, fontSize = 18.sp)
+            Text(if (vm.searchYouTube.isEmpty()) "Nothing found" else "Only on YouTube", color = TunerColors.TextSecondary, fontSize = 18.sp)
         }
 
         LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -168,6 +169,15 @@ fun SearchScreen(vm: TunerViewModel) {
                     }
                 }
             }
+            val yt = vm.searchYouTube
+            if (yt.isNotEmpty()) {
+                item { SectionTitle("YouTube") }
+                item(key = "ytrow") {
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(4.dp)) {
+                        items(yt.size, key = { "yt$it" }) { i -> Box(Modifier.width(240.dp)) { VideoCard(vm, yt[i], narrowScreen(), queue = yt) } }
+                    }
+                }
+            }
             if (results.channels.isNotEmpty()) {
                 item { SectionTitle("Channels") }
                 items(results.channels, key = { "c" + it.id }) { ch ->
@@ -180,9 +190,15 @@ fun SearchScreen(vm: TunerViewModel) {
                     )
                 }
             }
-            if (results.programmes.isNotEmpty()) {
-                item { SectionTitle("Programmes") }
-                items(results.programmes, key = { (c, p) -> "p" + c.id + "@" + p.start }) { (ch, p) ->
+            // Programmes grouped by when: on now, coming up (the week ahead), then earlier.
+            val progGroups = listOf(
+                "On now" to results.programmes.filter { (_, p) -> p.start <= now && p.stop > now },
+                "Coming up" to results.programmes.filter { (_, p) -> p.start > now }.sortedBy { it.second.start },
+                "Earlier – catch-up" to results.programmes.filter { (_, p) -> p.stop <= now }.sortedByDescending { it.second.start },
+            ).filter { it.second.isNotEmpty() }
+            for ((groupTitle, group) in progGroups) {
+                item(key = "pt$groupTitle") { SectionTitle(groupTitle) }
+                items(group, key = { (c, p) -> "p" + c.id + "@" + p.start }) { (ch, p) ->
                     val key = ch.id + "@" + p.start
                     val live = p.start <= now && p.stop > now
                     val catchup = p.stop <= now && vm.canCatchup(ch, p)

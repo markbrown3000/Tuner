@@ -114,6 +114,7 @@ fun ProfileEditScreen(vm: TunerViewModel) {
     var youtube by remember { mutableStateOf(existing?.youtube ?: true) }
     var ytOnly by remember { mutableStateOf(existing?.ytApprovedOnly ?: false) }
     var ytChannels by remember { mutableStateOf(existing?.ytChannels ?: emptyList()) }
+    var maxCert by remember { mutableStateOf(existing?.maxCertificate ?: "") }
     var pickingChannels by remember { mutableStateOf(false) }
     val first = remember { FocusRequester() }
     LaunchedEffect(pickingChannels) {
@@ -134,6 +135,7 @@ fun ProfileEditScreen(vm: TunerViewModel) {
                 youtube = youtube,
                 ytApprovedOnly = youtube && ytOnly,
                 ytChannels = ytChannels,
+                maxCertificate = maxCert,
             )
         )
     }
@@ -220,6 +222,19 @@ fun ProfileEditScreen(vm: TunerViewModel) {
                 }
                 item {
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("Films and series up to – the UK age rating (anything older needs your PIN)", color = TunerColors.TextSecondary, fontSize = 16.sp)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            listOf("" to "Any age", "U" to "U", "PG" to "PG", "12" to "12", "15" to "15").forEach { (c, label) ->
+                                PillButton(label, { maxCert = c }, selected = maxCert == c, compact = true)
+                            }
+                        }
+                    }
+                }
+                if (existing != null && vm.plexLinked) {
+                    item { PlexUserPicker(vm, existing.id) }
+                }
+                item {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text("YouTube – no Shorts, and it counts towards their TV time", color = TunerColors.TextSecondary, fontSize = 16.sp)
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             PillButton("Only channels I pick", { youtube = true; ytOnly = true }, selected = youtube && ytOnly, compact = true)
@@ -259,6 +274,59 @@ fun ProfileEditScreen(vm: TunerViewModel) {
                     PillButton("✓ Save", { save() })
                     PillButton("Cancel", { vm.back() })
                 }
+            }
+        }
+    }
+}
+
+
+/** Which Plex Home user this profile watches as (their own Continue watching and watched list). */
+@Composable
+private fun PlexUserPicker(vm: TunerViewModel, profileId: String) {
+    var current by remember { mutableStateOf(vm.plexUserNameOf(profileId)) }
+    var asking by remember { mutableStateOf<com.titanejstudios.tuner.integrations.Plex.HomeUser?>(null) }
+    var pin by remember { mutableStateOf("") }
+    val users = vm.plexHomeUsers
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(
+            "Plex user – " + (current.ifEmpty { "the main account" }) + "  (Plex Home users have their own Continue watching)",
+            color = TunerColors.TextSecondary, fontSize = 16.sp,
+        )
+        if (users == null) {
+            PillButton("Choose a Plex Home user…", { vm.loadPlexHomeUsers() }, compact = true)
+        } else {
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                item {
+                    PillButton("Main account", {
+                        vm.setProfilePlexUser(profileId, null, null)
+                        current = ""
+                        asking = null
+                    }, selected = current.isEmpty(), compact = true)
+                }
+                items(users.filter { !it.admin }.size) { i ->
+                    val u = users.filter { !it.admin }[i]
+                    PillButton((if (u.protected) "🔒 " else "") + u.title, {
+                        if (u.protected) {
+                            asking = u
+                            pin = ""
+                        } else vm.setProfilePlexUser(profileId, u, null) { ok -> if (ok) current = u.title }
+                    }, selected = current == u.title, compact = true)
+                }
+            }
+        }
+        asking?.let { u ->
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = pin,
+                    onValueChange = { pin = it.filter { c -> c.isDigit() }.take(4) },
+                    label = { Text("${u.title}'s Plex PIN") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.NumberPassword, imeAction = ImeAction.Done),
+                    modifier = Modifier.width(220.dp),
+                )
+                PillButton("OK", {
+                    vm.setProfilePlexUser(profileId, u, pin) { ok -> if (ok) { current = u.title; asking = null } }
+                }, compact = true)
             }
         }
     }

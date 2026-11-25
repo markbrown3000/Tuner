@@ -492,7 +492,8 @@ fun StatsScreen(vm: TunerViewModel) {
             profilePills()
         }
         Text(
-            if (vm.isPhone) "Time spent watching in Flicker on this phone over the last 7 days."
+            if (profile.kids && vm.link.peers.isNotEmpty()) "The last 7 days on every linked device – including YouTube."
+            else if (vm.isPhone) "Time spent watching in Flicker on this phone over the last 7 days."
             else "Time spent watching in Flicker on this TV over the last 7 days.",
             color = TunerColors.TextSecondary, fontSize = 15.sp,
         )
@@ -533,21 +534,53 @@ fun StatsScreen(vm: TunerViewModel) {
                 }
             }
         }
+        // Kids: what they actually watched, and what was stopped or blocked.
+        val kidsExtras: @Composable () -> Unit = {
+            if (profile.kids) {
+                Spacer(Modifier.height(18.dp))
+                StatList("What they watched", s.titles, 10)
+                Spacer(Modifier.height(18.dp))
+                Text("Stopped or blocked", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.height(6.dp))
+                val blocked = vm.statsBlocked
+                if (blocked.isEmpty()) Text("Nothing this week", color = TunerColors.TextSecondary, fontSize = 15.sp)
+                blocked.take(8).forEach { (t, what, why) ->
+                    Text(
+                        java.text.SimpleDateFormat("EEE HH:mm", java.util.Locale.UK).format(java.util.Date(t)) + "  ·  $what  ·  $why",
+                        color = TunerColors.TextSecondary, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                if (!vm.activeProfile.kids) {
+                    Spacer(Modifier.height(12.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf(15, 30, 60).forEach { m -> PillButton("🎁 +$m min today", { vm.sendBonusTime(profile, m) }, compact = true) }
+                    }
+                }
+            }
+        }
         if (narrow) {
             week()
             Spacer(Modifier.height(24.dp))
             StatList("Top channels", s.channels)
             Spacer(Modifier.height(18.dp))
             StatList("Kinds of programme", s.genres)
+            kidsExtras()
             Spacer(Modifier.height(24.dp))
         } else {
             Row(Modifier.fillMaxSize()) {
-                Column(Modifier.weight(1f).fillMaxHeight()) { week() }
+                Column(Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState())) {
+                    week()
+                    kidsExtras()
+                }
                 Spacer(Modifier.width(32.dp))
                 Column(Modifier.width(330.dp)) {
                     StatList("Top channels", s.channels)
                     Spacer(Modifier.height(18.dp))
                     StatList("Kinds of programme", s.genres)
+                    if (!profile.kids && s.titles.isNotEmpty()) {
+                        Spacer(Modifier.height(18.dp))
+                        StatList("Most watched", s.titles)
+                    }
                 }
             }
         }
@@ -555,11 +588,11 @@ fun StatsScreen(vm: TunerViewModel) {
 }
 
 @Composable
-private fun StatList(title: String, rows: List<Pair<String, Long>>) {
+private fun StatList(title: String, rows: List<Pair<String, Long>>, show: Int = 6) {
     Text(title, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
     Spacer(Modifier.height(6.dp))
     if (rows.isEmpty()) Text("Nothing yet", color = TunerColors.TextSecondary, fontSize = 15.sp)
-    rows.take(6).forEach { (name, secs) ->
+    rows.take(show).forEach { (name, secs) ->
         Row(Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
             Text(name, color = TunerColors.TextSecondary, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
             Text(WatchStats.hoursText(secs), color = Color.White, fontSize = 15.sp)

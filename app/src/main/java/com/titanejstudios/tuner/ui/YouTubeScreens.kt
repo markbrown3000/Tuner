@@ -601,7 +601,7 @@ fun YouTubeScreen(vm: TunerViewModel) {
             item(span = { GridItemSpan(maxLineSpan) }) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Header("Watch later (${yt.later.size})", narrow)
-                    PillButton("▶ Play all", { vm.playYouTube(yt.later.first(), yt.later) }, compact = true)
+                    PillButton("▶ Play all", { yt.later.firstOrNull()?.let { vm.playYouTube(it, yt.later) } }, compact = true)
                     PillButton("See all", { vm.openYouTubeLater() }, compact = true)
                 }
             }
@@ -626,7 +626,7 @@ fun YouTubeScreen(vm: TunerViewModel) {
             item(span = { GridItemSpan(maxLineSpan) }) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Header("Liked videos", narrow)
-                    PillButton("▶ Play all", { vm.playYouTube(yt.liked.first(), yt.liked) }, compact = true)
+                    PillButton("▶ Play all", { yt.liked.firstOrNull()?.let { vm.playYouTube(it, yt.liked) } }, compact = true)
                 }
             }
             items(yt.liked.size, key = { "lk" + yt.liked[it].id }) { i -> VideoCard(vm, yt.liked[i], narrow, yt.liked) }
@@ -777,7 +777,7 @@ private fun Header(text: String, narrow: Boolean) {
 }
 
 @Composable
-private fun VideoCard(vm: TunerViewModel, v: YouTube.Video, narrow: Boolean, queue: List<YouTube.Video> = emptyList(), recommended: Boolean = false) {
+internal fun VideoCard(vm: TunerViewModel, v: YouTube.Video, narrow: Boolean, queue: List<YouTube.Video> = emptyList(), recommended: Boolean = false) {
     val watched = vm.youtube.history.firstOrNull { it.video.id == v.id }
     FocusSurface(
         onClick = { vm.playYouTube(v, queue) },
@@ -944,4 +944,31 @@ private fun YouTubeSignInCode(url: String, userCode: String, narrow: Boolean, on
             PillButton("Cancel", onCancel, compact = true)
         }
     }
+}
+
+
+/** A trailer playing silently behind a film's info (YouTube's embed, muted, on a loop). Not focusable. */
+@Composable
+fun MutedTrailer(id: String, modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    val referrer = "https://" + context.packageName
+    val page = remember(id) {
+        WebView(context).apply {
+            settings.javaScriptEnabled = true
+            settings.domStorageEnabled = true
+            settings.mediaPlaybackRequiresUserGesture = false
+            setBackgroundColor(android.graphics.Color.TRANSPARENT)
+            isFocusable = false
+            isFocusableInTouchMode = false
+            descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
+            webViewClient = android.webkit.WebViewClient()
+            webChromeClient = android.webkit.WebChromeClient()
+            loadUrl(
+                "https://www.youtube.com/embed/$id?autoplay=1&mute=1&controls=0&loop=1&playlist=$id&rel=0&iv_load_policy=3&modestbranding=1&playsinline=1&origin=$referrer",
+                mapOf("Referer" to "$referrer/"),
+            )
+        }
+    }
+    DisposableEffect(page) { onDispose { runCatching { page.destroy() } } }
+    androidx.compose.runtime.key(page) { androidx.compose.ui.viewinterop.AndroidView(factory = { page }, modifier = modifier) }
 }

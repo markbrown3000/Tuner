@@ -639,6 +639,12 @@ fun PlayerScreen(vm: TunerViewModel) {
                 ) {
                     Text(it, color = Color.White, fontSize = 20.sp)
                     if (isLive) Text("▲ ▼ to try another channel", color = TunerColors.TextSecondary, fontSize = 15.sp)
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        if (vm.fixing) "🛠 Checking…" else if (vm.isPhone) "🛠 Tap to fix it" else "🛠 Hold OK › Fix it",
+                        color = Color(0xFFFFD54F), fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.tvClickable({ vm.fixIt() }).padding(6.dp),
+                    )
                 }
             }
 
@@ -731,7 +737,11 @@ fun PlayerScreen(vm: TunerViewModel) {
                         },
                         items = peers.map { p ->
                             MenuItem((if (p.phone) "📱  " else "📺  ") + p.name) { vm.sendTo(p) }
-                        } + MenuItem("↻ Look again") {
+                        } + peers.map { p ->
+                            MenuItem("👫  Watch together with ${p.name}", "both play it – pause or skip on either and the other follows") { vm.watchTogether(p) }
+                        } + listOfNotNull(
+                            vm.togetherWith?.let { p -> MenuItem("✕  Stop watching together with ${p.name}") { vm.stopTogether() } }
+                        ) + MenuItem("↻ Look again") {
                             vm.link.search()
                             overlay = Overlay.Send
                         },
@@ -845,6 +855,7 @@ private fun OptionsMenu(
                 ) { playback.togglePause() }
             )
             if (playback.canSeek) add(MenuItem("Jump to live") { playback.goLive() })
+            add(MenuItem("🛠 Fix it", "something wrong? restart it and check the connection") { vm.fixIt() })
             add(MenuItem("Mini guide") { onOverlay(Overlay.MiniGuide) })
             val current = vm.nowNext(channel.id, vm.now).first
             if (current != null && vm.canCatchup(channel, current)) {

@@ -1,5 +1,9 @@
 package com.titanejstudios.tuner.ui
 
+import androidx.compose.foundation.lazy.items
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -89,6 +93,16 @@ fun FilmInfoDialog(vm: TunerViewModel) {
             Box(Modifier.fillMaxWidth().aspectRatio(2.4f)) {
                 val pic = info.backdrop ?: info.poster
                 if (pic != null) AsyncImage(model = pic, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                // The trailer quietly takes over the picture after a moment (muted).
+                val trailerKey = info.trailerKey
+                if (trailerKey != null && vm.trailerAutoplay) {
+                    var showTrailer by remember(trailerKey) { mutableStateOf(false) }
+                    LaunchedEffect(trailerKey) {
+                        delay(2_500)
+                        showTrailer = true
+                    }
+                    if (showTrailer) com.titanejstudios.tuner.ui.MutedTrailer(trailerKey, Modifier.fillMaxSize())
+                }
                 Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, TunerColors.Panel))))
                 Column(Modifier.align(Alignment.BottomStart).padding(horizontal = 28.dp, vertical = 12.dp)) {
                     Text(
@@ -110,6 +124,31 @@ fun FilmInfoDialog(vm: TunerViewModel) {
                 if (info.cast.isNotEmpty()) {
                     Spacer(Modifier.height(10.dp))
                     Text("With " + info.cast.joinToString(", "), color = TunerColors.TextSecondary, fontSize = 15.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                }
+                // Part of a series: the films in order, yours to play.
+                vm.filmCollection?.let { (name, parts) ->
+                    Spacer(Modifier.height(12.dp))
+                    Text(name, color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.height(6.dp))
+                    androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(parts.size) { i ->
+                            val p = parts[i]
+                            val here = p.part.title.equals(info.title, ignoreCase = true)
+                            FocusSurface(
+                                onClick = { vm.playSeriesPart(p) },
+                                baseColor = if (here) TunerColors.Accent.copy(alpha = 0.35f) else TunerColors.PanelLight,
+                                modifier = Modifier.width(92.dp),
+                            ) { _ ->
+                                Column {
+                                    Box(Modifier.fillMaxWidth().aspectRatio(2f / 3f)) {
+                                        AsyncImage(model = p.part.poster, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                                        if (p.film == null) Box(Modifier.fillMaxSize().background(Color(0x99000000)))
+                                    }
+                                    Text("${i + 1}. " + p.part.title, color = if (p.film != null) Color.White else TunerColors.TextSecondary, fontSize = 11.sp, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(4.dp))
+                                }
+                            }
+                        }
+                    }
                 }
                 Spacer(Modifier.height(18.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {

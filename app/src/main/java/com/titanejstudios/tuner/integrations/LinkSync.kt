@@ -76,7 +76,12 @@ object LinkSync {
                 .put("ids", JSONObject(store.footballTeamIds)),
         )
         sections.put(DONE, JSONObject(store.resumeDone))
-        return JSONObject().put("app", "Flicker").put("v", 1).put("sections", sections)
+        // Kids' weeks (watch time and anything blocked), read by a grown-up's phone for the report.
+        val kids = JSONObject()
+        for (p in store.profiles) if (p.kids) {
+            kids.put(p.id, JSONObject().put("stats", store.stats(p.id)).put("blocked", JSONArray(store.blockedLog(p.id))))
+        }
+        return JSONObject().put("app", "Flicker").put("v", 1).put("sections", sections).put("kidsweek", kids)
     }
 
     /**

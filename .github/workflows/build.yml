@@ -30,6 +30,8 @@ jobs:
       # Optional: YouTube search (see README › YouTube).
       TUNER_YOUTUBE_KEY: ${{ secrets.YOUTUBE_KEY }}
       TUNER_OMDB_KEY: ${{ secrets.OMDB_KEY }}
+      TUNER_TRAKT_ID: ${{ secrets.TRAKT_CLIENT_ID }}
+      TUNER_TRAKT_SECRET: ${{ secrets.TRAKT_CLIENT_SECRET }}
     steps:
       - uses: actions/checkout@v5
 

@@ -534,3 +534,34 @@ Films and series show their real rating – **IMDb 7.3** – instead of the prov
 
 1. Go to **omdbapi.com › API Key**, choose **FREE (1,000 daily limit)**, enter your email, and click the link in the email to turn the key on.
 2. Add it as a GitHub secret called `OMDB_KEY` (or `omdb_key=…` in `keys.properties`), and make a new release.
+
+## More (5.4)
+
+- **🛠 Fix it** – Settings, the player's Options, or hold OK on an error: checks the internet, the VPN and your provider, restarts the stream, clears stuck pictures and reloads an old guide.
+- **Which copy to play** – when a film is in more than one place, pick "☆ Always use…" and Flicker stops asking. Change it in Settings › Which copy to play.
+- **Age ratings for kids** – each kids' profile can have a UK age limit (U, PG, 12, 15). Films and series rated above it need the grown-ups' PIN. Ratings come from TMDB, so a TMDB key is needed. Titles with no rating are allowed.
+- **New episodes** – series you watch are checked every 6 hours. Any with new episodes get a 🆕 badge and appear in the New episodes row on Home.
+- **Plex Home users** – Edit profile › Plex user lets each Flicker profile watch as its own Plex Home user, with its own Continue watching and watched list. A protected user needs their Plex PIN once.
+- **👫 Watch together** – in the player, Send to… › Watch together starts the same thing on another linked device in the house. Pausing or skipping on either one does the same on the other. This only works between devices on the same network.
+- **Faster start-up** – "now and next" appears straight away and the rest of the guide follows. More posters are kept between starts.
+
+## Even more (5.4)
+
+- **📊 Kids' week** – Watch time for a kids' profile now lists what they watched (YouTube included) and anything stopped or blocked (age rating, daily limit, bedtime). On a phone it adds up every linked TV. Open it from More › Kids' week, or Settings › Watch time.
+- **🎁 Extra TV time from your phone** – More › Extra TV time sends +15, +30 or +60 minutes to a kids' profile on every linked TV. It asks for the PIN if one is set.
+- **Missed while you were away** – "Missed it?" now puts your shows first when they aired while nothing was playing in Flicker.
+- **📱 About this** – TV remote › About this on the phone shows the cast, rating and plot of what's on the TV. Tap an actor to see what else they're in, and ▶ On TV plays any of those films you have.
+- **Film series** – a film's info shows the rest of its series in order, and the films you have can be played from there. When one finishes, Flicker offers the next one you have.
+- **🎲 Surprise me** – in Films, this picks a well-rated film you haven't watched. Choose Play, Another one, or What's it about.
+- **Trailers on film info** – the trailer plays silently behind a film's details after a couple of seconds. You can turn this off in Settings › Films & series.
+- **Search** – YouTube results are included now, and programmes are grouped into On now, Coming up and Earlier.
+
+## Trakt (optional, one-off setup)
+
+1. Sign in at trakt.tv, go to Settings › Your API Apps (trakt.tv/oauth/applications) and choose **New application**.
+2. Name it Flicker and use `urn:ietf:wg:oauth:2.0:oob` as the redirect URI. Save it.
+3. In GitHub, go to the repo › Settings › Secrets and variables › Actions. Add **TRAKT_CLIENT_ID** and **TRAKT_CLIENT_SECRET** from the app page.
+4. After the next build, go to Settings › Trakt on the TV and enter the code at trakt.tv/activate.
+
+Films and episodes you finish on grown-up profiles are logged, and films Trakt says you've seen count as watched in Flicker. Letterboxd has no public API, so it can't be added.
+- **🎤 Say a channel** – say a channel's name or number into any 🎤 Say it button ("BBC One", "Sky Sports Main Event", "101") and Flicker goes straight to it. Anything else is searched for.

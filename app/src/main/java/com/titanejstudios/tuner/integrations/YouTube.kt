@@ -66,7 +66,7 @@ object YouTube {
             val id = it.optJSONObject("id")?.optString("videoId")?.takeIf { v -> v.isNotBlank() } ?: return@mapNotNull null
             video(id, it.optJSONObject("snippet"))
         }
-        return withoutShorts(found, apiKey, access)
+        return withoutShorts(found.distinctBy { it.id }, apiKey, access)
     }
 
     /**
@@ -105,7 +105,7 @@ object YouTube {
             val it = items.optJSONObject(i) ?: return@mapNotNull null
             val id = it.optString("id").takeIf { v -> v.isNotBlank() } ?: return@mapNotNull null
             video(id, it.optJSONObject("snippet"))?.with(seconds(it.optJSONObject("contentDetails")?.optString("duration").orEmpty()), null)
-        }.filterNot { it.seconds in 1..60 }
+        }.filterNot { it.seconds in 1..60 }.distinctBy { it.id }
     }
 
     /** Your own playlists (signed in). 1 unit. */
@@ -130,7 +130,7 @@ object YouTube {
             val id = sn.optJSONObject("resourceId")?.optString("videoId")?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
             video(id, sn)
         }
-        return withoutShorts(list, apiKey, access)
+        return withoutShorts(list.distinctBy { it.id }, apiKey, access)
     }
 
     /** A channel's videos: newest (about 1 unit) or most popular (a search, 100 units). */

@@ -145,7 +145,7 @@ fun SportsScreen(vm: TunerViewModel) {
             listOf("On now" to onNow, "Later today" to today, "Tomorrow" to tomorrow).forEach { (title, list) ->
                 if (list.isNotEmpty()) {
                     item(key = "h-$title") { SectionTitle(title) }
-                    items(list, key = { it.programme.title + it.programme.start + it.channels.first().id }) { ev ->
+                    items(list.distinctBy { it.programme.title + it.programme.start + it.channels.first().id }, key = { it.programme.title + it.programme.start + it.channels.first().id }) { ev ->
                         SportRow(vm, ev, now, restorer) {
                             restorer.key = ev.programme.title + ev.programme.start
                             menuFor = ev

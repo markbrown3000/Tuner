@@ -449,6 +449,12 @@ class Store(context: Context) {
         get() = prefs.getString("plex_token", null)
         set(value) = prefs.edit().putString("plex_token", value).apply()
 
+    /** A profile's Plex Home user: "uuid\tname\ttoken" (null = the main account). */
+    fun plexUserOf(profileId: String): Triple<String, String, String>? =
+        prefs.getString("plex_user_$profileId", null)?.split('\t')?.takeIf { it.size == 3 }?.let { Triple(it[0], it[1], it[2]) }
+    fun savePlexUser(profileId: String, user: Triple<String, String, String>?) =
+        prefs.edit().putString("plex_user_$profileId", user?.let { "${it.first}\t${it.second}\t${it.third}" }).apply()
+
     // Football scores (football-data.org)
     var footballKey: String?
         get() = prefs.getString("football_key", null)
@@ -534,6 +540,34 @@ class Store(context: Context) {
         set(value) = prefs.edit().putString("live_tab_rows", value).apply()
 
     // ---- Watch-time stats (per profile, JSON – see WatchStats) ----
+    /** Things a kids' profile tried and couldn't watch: "time\twhat\twhy", newest last (two weeks). */
+    fun blockedLog(profileId: String): List<String> =
+        prefs.getString("blocked_log_$profileId", null)?.split('\n')?.filter { it.isNotBlank() } ?: emptyList()
+    fun addBlocked(profileId: String, what: String, why: String) {
+        val cutoff = System.currentTimeMillis() - 14 * 86_400_000L
+        val kept = blockedLog(profileId).filter { (it.substringBefore('\t').toLongOrNull() ?: 0L) > cutoff }.takeLast(99)
+        val line = "${System.currentTimeMillis()}\t${what.replace('\t', ' ').replace('\n', ' ')}\t$why"
+        prefs.edit().putString("blocked_log_$profileId", (kept + line).joinToString("\n")).apply()
+    }
+
+    /** Quarter-hours (time / 15 min) something was playing this past week – "were you watching?". */
+    var watchingSlots: String
+        get() = prefs.getString("watching_slots", null) ?: ""
+        set(value) = prefs.edit().putString("watching_slots", value).apply()
+
+    /** Film trailers play (muted) on the info card. */
+    var trailerAutoplay: Boolean
+        get() = prefs.getBoolean("trailer_autoplay", true)
+        set(value) = prefs.edit().putBoolean("trailer_autoplay", value).apply()
+
+    /** Trakt sign-in: "access\trefresh\texpiresAt\tusername" (null = not linked). */
+    var traktAuth: String?
+        get() = prefs.getString("trakt_auth", null)
+        set(value) = prefs.edit().putString("trakt_auth", value).apply()
+    var traktImportedAt: Long
+        get() = prefs.getLong("trakt_imported_at", 0L)
+        set(value) = prefs.edit().putLong("trakt_imported_at", value).apply()
+
     fun stats(profileId: String): String = prefs.getString(profileKey("watch_stats", profileId), null) ?: "{}"
     fun setStats(profileId: String, json: String) = prefs.edit().putString(profileKey("watch_stats", profileId), json).apply()
 
@@ -740,6 +774,10 @@ class Store(context: Context) {
     var vodRatings: String?
         get() = prefs.getString("vod_ratings", null)
         set(value) = prefs.edit().putString("vod_ratings", value).apply()
+    /** Which copy of a film to play without asking: "iptv", or "plex:<library name>" (null = ask). */
+    var preferredCopy: String?
+        get() = prefs.getString("preferred_copy", null)
+        set(value) = prefs.edit().putString("preferred_copy", value).apply()
     var hideAdult: Boolean
         get() = prefs.getBoolean("hide_adult", true)
         set(value) = prefs.edit().putBoolean("hide_adult", value).apply()
@@ -859,7 +897,7 @@ class Store(context: Context) {
 
     // ---------------- Backup & restore ----------------
 
-    private val notBackedUp = listOf("preview_channel_id", "watch_next_ids", "last_refresh_", "usage_", "bonus_", "schema", "dead_channels", "health_checked_at", "recordings", "watch_stats", "live_tab_rows", "plex_client_id", "flaky_streams", "db_tidy_at", "new_eps_checked_at", "crash_reported_at", "sport_auto_done", "sync_stamp_", "synced_at", "nas_backup_at", "update_checked_at", "update_dismissed", "vpn_", "device_mode", "link_device_id", "link_name", "downloads", "habits_", "widget_now", "football_team_list", "football_fixtures", "team_announced", "text_scale", "gdrive_", "cloud_", "yt_")
+    private val notBackedUp = listOf("preview_channel_id", "watch_next_ids", "last_refresh_", "usage_", "bonus_", "schema", "dead_channels", "health_checked_at", "recordings", "watch_stats", "live_tab_rows", "plex_client_id", "flaky_streams", "db_tidy_at", "new_eps_checked_at", "crash_reported_at", "sport_auto_done", "sync_stamp_", "synced_at", "nas_backup_at", "update_checked_at", "update_dismissed", "vpn_", "device_mode", "link_device_id", "link_name", "downloads", "habits_", "widget_now", "football_team_list", "football_fixtures", "team_announced", "text_scale", "gdrive_", "cloud_", "yt_", "plex_user_", "watching_slots", "blocked_log_", "trakt_")
 
     /** Every setting as JSON (playlists, profiles, favourites, PIN, reminders, guide fixes…). */
     fun exportBackup(): String {
@@ -941,7 +979,7 @@ class Store(context: Context) {
                     JSONObject().put("id", it.id).put("name", it.name).put("kids", it.kids)
                         .put("groups", JSONArray(it.allowedGroups.toList())).put("limit", it.dailyLimitMinutes)
                         .put("bedtime", it.bedtimeMinutes).put("colour", it.colour).put("icon", it.icon).put("yt", it.youtube)
-                        .put("yt_only", it.ytApprovedOnly).put("yt_ch", JSONArray(it.ytChannels))
+                        .put("yt_only", it.ytApprovedOnly).put("yt_ch", JSONArray(it.ytChannels)).put("cert", it.maxCertificate)
                 )
             }
             return arr
@@ -962,6 +1000,7 @@ class Store(context: Context) {
                 youtube = o.optBoolean("yt", true),
                 ytApprovedOnly = o.optBoolean("yt_only"),
                 ytChannels = o.optJSONArray("yt_ch")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList(),
+                maxCertificate = o.optString("cert"),
             )
         }
         const val DEFAULT_UPDATE_REPO = "markbrown3000/Tuner"

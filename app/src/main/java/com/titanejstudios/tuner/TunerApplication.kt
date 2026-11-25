@@ -22,7 +22,8 @@ class TunerApplication : Application(), ImageLoaderFactory {
         .diskCache {
             DiskCache.Builder()
                 .directory(cacheDir.resolve("images"))
-                .maxSizeBytes(150L * 1024 * 1024)
+                // Posters and logos kept between starts (Home appears with its pictures straight away).
+                .maxSizeBytes(if ((cacheDir.usableSpace) > 4L * 1024 * 1024 * 1024) 400L * 1024 * 1024 else 150L * 1024 * 1024)
                 .build()
         }
         .respectCacheHeaders(false) // many IPTV logo hosts send "no-cache"

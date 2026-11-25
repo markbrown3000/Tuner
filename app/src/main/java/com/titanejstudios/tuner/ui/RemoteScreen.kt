@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -44,6 +45,9 @@ fun RemoteScreen(vm: TunerViewModel) {
     var tab by remember { mutableStateOf("buttons") }
     var nowTitle by remember { mutableStateOf<String?>(null) }
     var nowDetail by remember { mutableStateOf<String?>(null) }
+    var nowWhat by remember { mutableStateOf<String?>(null) }
+    var nowSeries by remember { mutableStateOf(true) }
+    var nowDesc by remember { mutableStateOf<String?>(null) }
     var channels by remember { mutableStateOf<List<org.json.JSONObject>?>(null) }
     var filter by remember { mutableStateOf("") }
     var typing by remember { mutableStateOf(false) }
@@ -56,6 +60,9 @@ fun RemoteScreen(vm: TunerViewModel) {
             link.remoteState(t)?.let {
                 nowTitle = it.optString("title")
                 nowDetail = it.optString("detail")
+                nowWhat = it.optString("what").takeIf { w -> w.isNotBlank() }
+                nowSeries = it.optBoolean("series", true)
+                nowDesc = it.optString("desc").takeIf { d -> d.isNotBlank() }
             }
             delay(3_000)
         }
@@ -106,9 +113,14 @@ fun RemoteScreen(vm: TunerViewModel) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             PillButton("Buttons", { tab = "buttons" }, compact = true, selected = tab == "buttons")
             PillButton("Channels", { tab = "channels" }, compact = true, selected = tab == "channels")
+            PillButton("ⓘ About this", { tab = "about" }, compact = true, selected = tab == "about")
         }
         Spacer(Modifier.height(12.dp))
 
+        if (tab == "about") {
+            AboutTvPanel(vm, t, nowWhat, nowSeries, nowDesc)
+            return@Column
+        }
         if (tab == "buttons") {
             @Composable
             fun Key(label: String, code: Int, size: Int = 64, wide: Boolean = false) {
@@ -157,9 +169,9 @@ fun RemoteScreen(vm: TunerViewModel) {
                 CenterMessage("Getting the TV's channels…")
             } else {
                 val q = filter.trim().lowercase()
-                val shown = if (q.isEmpty()) all else all.filter {
+                val shown = (if (q.isEmpty()) all else all.filter {
                     it.optString("name").lowercase().contains(q) || it.optString("now").lowercase().contains(q)
-                }
+                }).distinctBy { it.optString("id") }
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     items(shown.size, key = { shown[it].optString("id") }) { i ->
                         val c = shown[i]
@@ -191,5 +203,96 @@ fun RemoteScreen(vm: TunerViewModel) {
             filter = it
             typing = false
         }
+    }
+}
+
+
+/**
+ * The phone as a second screen: cast, rating and plot for what the TV is showing, and what else
+ * the actors are in (with any you have, ready to send to the TV).
+ */
+@Composable
+private fun AboutTvPanel(vm: TunerViewModel, tv: LinkFeature.Peer, what: String?, series: Boolean, desc: String?) {
+    var info by remember { mutableStateOf<com.titanejstudios.tuner.integrations.Tmdb.Info?>(null) }
+    var looking by remember { mutableStateOf(false) }
+    var actor by remember { mutableStateOf<Pair<Long, String>?>(null) }
+    var films by remember { mutableStateOf<List<TunerViewModel.SeriesPart>?>(null) }
+    LaunchedEffect(what, series) {
+        info = null
+        actor = null
+        if (what == null) return@LaunchedEffect
+        looking = true
+        info = vm.aboutTv(what, series)
+        looking = false
+    }
+    LaunchedEffect(actor) {
+        films = null
+        val a = actor ?: return@LaunchedEffect
+        films = vm.actorFilms(a.first)
+    }
+    androidx.compose.foundation.lazy.LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        when {
+            what == null -> item { Text("Nothing to look up – the TV isn't playing a programme or film.", color = Color.White, fontSize = 15.sp) }
+            vm.tmdbKey == null -> item { Text("Add a TMDB key on this phone (Settings › Films & series) to see the cast and details.", color = Color.White, fontSize = 15.sp) }
+            looking -> item { Text("Looking up $what…", color = TunerColors.TextSecondary, fontSize = 15.sp) }
+            info == null -> item {
+                Column {
+                    Text(what, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+                    desc?.let { Text(it, color = TunerColors.TextSecondary, fontSize = 14.sp) }
+                    Text("No more details found.", color = TunerColors.TextSecondary, fontSize = 13.sp)
+                }
+            }
+        }
+        val i = info ?: return@LazyColumn
+        item {
+            Row {
+                i.poster?.let {
+                    coil.compose.AsyncImage(model = it, contentDescription = null, modifier = Modifier.width(96.dp).aspectRatio(2f / 3f).clip(RoundedCornerShape(8.dp)), contentScale = androidx.compose.ui.layout.ContentScale.Crop)
+                    Spacer(Modifier.width(12.dp))
+                }
+                Column(Modifier.weight(1f)) {
+                    Text(i.title + (i.year?.let { " ($it)" } ?: ""), color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Bold)
+                    Text(
+                        listOfNotNull(
+                            vm.ratingLabelFor(what ?: i.title, series, null),
+                            i.runtimeMinutes?.let { "${it / 60}h ${it % 60}m".removePrefix("0h ") },
+                            i.genres.take(2).joinToString(", ").ifEmpty { null },
+                        ).joinToString("  ·  "),
+                        color = TunerColors.Gold, fontSize = 14.sp,
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(desc ?: i.overview ?: "", color = Color(0xFFD5DCF2), fontSize = 14.sp)
+                }
+            }
+        }
+        if (i.castIds.isNotEmpty()) {
+            item { Text("Cast – tap for what else they're in", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold) }
+            item {
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    items(i.castIds.size) { k ->
+                        val c = i.castIds[k]
+                        PillButton(c.second, { actor = if (actor == c) null else c }, compact = true, selected = actor == c)
+                    }
+                }
+            }
+        }
+        actor?.let { a ->
+            item { Text("${a.second} is also in", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold) }
+            val list = films
+            if (list == null) item { Text("…", color = TunerColors.TextSecondary) }
+            else if (list.isEmpty()) item { Text("Nothing found", color = TunerColors.TextSecondary, fontSize = 14.sp) }
+            else items(list.size) { k ->
+                val p = list[k]
+                val mine = p.film
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(TunerColors.Panel).padding(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(p.part.title + (p.part.year?.let { " ($it)" } ?: ""), color = Color.White, fontSize = 15.sp, modifier = Modifier.weight(1f))
+                    if (mine != null) PillButton("▶ On TV", { vm.playFilmOnTv(tv, mine) }, compact = true)
+                }
+            }
+        }
+        item { Text("Details from TMDB", color = TunerColors.TextSecondary, fontSize = 12.sp) }
     }
 }

@@ -207,6 +207,8 @@ data class Profile(
     val ytApprovedOnly: Boolean = false,
     /** The approved channels, as "UC…id\tName". */
     val ytChannels: List<String> = emptyList(),
+    /** Kids: the oldest age rating allowed ("U", "PG", "12", "15"; empty = no limit). */
+    val maxCertificate: String = "",
 ) {
     val ytChannelIds: List<String> get() = ytChannels.map { it.substringBefore('\t') }
 }

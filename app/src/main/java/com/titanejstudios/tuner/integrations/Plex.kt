@@ -70,6 +70,44 @@ class Plex(private val clientId: String) {
         conn.disconnect()
     }
 
+    /** Someone in your Plex Home (Plex's own profiles). */
+    class HomeUser(val uuid: String, val title: String, val protected: Boolean, val admin: Boolean, val id: Long = 0L)
+
+    /** The people in your Plex Home (empty if you don't use Plex Home). */
+    fun homeUsers(token: String): List<HomeUser> {
+        val o = JSONObject(read(open("https://clients.plex.tv/api/v2/home/users", token = token)))
+        val a = o.optJSONArray("users") ?: return emptyList()
+        return (0 until a.length()).mapNotNull { i ->
+            val u = a.optJSONObject(i) ?: return@mapNotNull null
+            val uuid = u.optString("uuid").ifBlank { return@mapNotNull null }
+            HomeUser(
+                uuid,
+                u.optString("title").ifBlank { u.optString("username") }.ifBlank { "Plex user" },
+                u.optBoolean("protected"),
+                u.optBoolean("admin"),
+                u.optLong("id"),
+            )
+        }
+    }
+
+    /** Switches to a Plex Home user: their own token (their watched list, Continue watching and restrictions). */
+    fun switchUser(token: String, uuid: String, pin: String?, id: Long = 0L): String {
+        val q = pin?.takeIf { it.isNotBlank() }?.let { "?pin=" + URLEncoder.encode(it, "UTF-8") } ?: ""
+        val v2 = runCatching {
+            JSONObject(read(open("https://clients.plex.tv/api/v2/home/users/$uuid/switch$q", "POST", token = token)))
+                .optString("authToken").takeIf { it.isNotBlank() }
+        }
+        v2.getOrNull()?.let { return it }
+        // The older way (by number), which some accounts still need.
+        if (id > 0) {
+            val text = read(open("https://plex.tv/api/home/users/$id/switch$q", "POST", token = token))
+            val token2 = runCatching { JSONObject(text).let { it.optString("authToken").ifBlank { it.optJSONObject("user")?.optString("authToken").orEmpty() } } }.getOrNull()?.takeIf { it.isNotBlank() }
+                ?: Regex("authenticationToken=\"([^\"]+)\"").find(text)?.groupValues?.get(1)
+            if (!token2.isNullOrBlank()) return token2
+        }
+        throw v2.exceptionOrNull() ?: IllegalStateException("Plex didn't switch user – wrong PIN?")
+    }
+
     /** Step 1: get a code to type in at plex.tv/link. */
     fun createPin(): Pin {
         val o = JSONObject(read(open("https://plex.tv/api/v2/pins?strong=false", "POST")))
@@ -181,6 +219,8 @@ class Plex(private val clientId: String) {
         val sectionKey: String? = null,
         /** Wide background picture (16:9), for Home's big top area and wide tiles. */
         val art: String? = null,
+        /** The age rating Plex has ("PG", "gb/12A", "TV-14"…). */
+        val contentRating: String? = null,
     ) {
         val isShow: Boolean get() = type == "show"
 
@@ -232,6 +272,22 @@ class Plex(private val clientId: String) {
         ).joinToString("&")
         val url = "${s.uri}/library/sections/${section.key}/all" + (if (q.isEmpty()) "" else "?$q")
         return paged(url, s, poster = true, onPage = onPage)
+    }
+
+    /**
+     * The episode after this one (the next season's first, at a season's end), wherever it was
+     * started from – Home's Continue watching doesn't know the rest of the show. Null at the end.
+     */
+    fun nextEpisode(s: Server, ratingKey: String): Pair<Entry, String>? {
+        val md = JSONObject(read(open("${s.uri}/library/metadata/$ratingKey", token = s.token)))
+            .optJSONObject("MediaContainer")?.optJSONArray("Metadata")?.optJSONObject(0) ?: return null
+        if (md.optString("type") != "episode") return null
+        val show = md.optString("grandparentRatingKey").ifBlank { return null }
+        val all = paged("${s.uri}/library/metadata/$show/allLeaves", s, poster = false)
+            .sortedWith(compareBy({ it.season }, { it.episode }))
+        val i = all.indexOfFirst { it.ratingKey == ratingKey }
+        val next = (if (i >= 0) all.getOrNull(i + 1) else null) ?: return null
+        return next to md.optString("grandparentTitle")
     }
 
     /** Every episode of a show, season by season. */
@@ -450,6 +506,7 @@ class Plex(private val clientId: String) {
                 server = s,
                 library = m.optString("librarySectionTitle").takeIf { it.isNotBlank() },
                 sectionKey = m.optString("librarySectionID").takeIf { it.isNotBlank() && it != "0" },
+                contentRating = m.optString("contentRating").ifBlank { m.optString("grandparentContentRating") }.takeIf { it.isNotBlank() },
                 art = m.optString("art").ifBlank { m.optString("grandparentArt") }.takeIf { it.isNotBlank() }?.let {
                     "${s.uri}/photo/:/transcode?width=960&height=540&minSize=1&upscale=1&url=" +
                         URLEncoder.encode(it, "UTF-8") + "&X-Plex-Token=" + s.token

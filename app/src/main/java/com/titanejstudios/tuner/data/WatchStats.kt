@@ -20,7 +20,19 @@ object WatchStats {
         val channels: List<Pair<String, Long>>,
         val genres: List<Pair<String, Long>>,
         val previousWeekSeconds: Long,
+        /** Programmes, films and videos watched most this week. */
+        val titles: List<Pair<String, Long>> = emptyList(),
     )
+
+    /** Adds time to a programme / film / video title for one day. */
+    fun addTitle(json: String, day: String, title: String, seconds: Long): String {
+        val root = try { JSONObject(json) } catch (e: Exception) { JSONObject() }
+        val d = root.optJSONObject(day) ?: JSONObject().also { root.put(day, it) }
+        val t = d.optJSONObject("t") ?: JSONObject().also { d.put("t", it) }
+        val k = title.take(80)
+        if (t.length() < 200 || t.has(k)) t.put(k, t.optLong(k) + seconds)
+        return root.toString()
+    }
 
     fun dayKey(t: Long): String = SimpleDateFormat("yyyyMMdd", Locale.US).format(Date(t))
 
@@ -39,6 +51,22 @@ object WatchStats {
         return root.toString()
     }
 
+    /** Two devices' stats added together (a kid's week across every TV). */
+    fun merge(a: String, b: String): String {
+        val ra = try { JSONObject(a) } catch (e: Exception) { JSONObject() }
+        val rb = try { JSONObject(b) } catch (e: Exception) { return ra.toString() }
+        for (day in rb.keys()) {
+            val db = rb.optJSONObject(day) ?: continue
+            val da = ra.optJSONObject(day) ?: JSONObject().also { ra.put(day, it) }
+            for (part in listOf("c", "g", "t")) {
+                val pb = db.optJSONObject(part) ?: continue
+                val pa = da.optJSONObject(part) ?: JSONObject().also { da.put(part, it) }
+                for (k in pb.keys()) pa.put(k, pa.optLong(k) + pb.optLong(k))
+            }
+        }
+        return ra.toString()
+    }
+
     fun summary(json: String, now: Long): Summary {
         val root = try { JSONObject(json) } catch (e: Exception) { JSONObject() }
         val cal = Calendar.getInstance().apply { timeInMillis = now }
@@ -46,6 +74,7 @@ object WatchStats {
         val days = ArrayList<Pair<String, Long>>()
         val channels = HashMap<String, Long>()
         val genres = HashMap<String, Long>()
+        val titles = HashMap<String, Long>()
         val thisWeek = ArrayList<String>()
         cal.add(Calendar.DAY_OF_YEAR, -6)
         repeat(7) {
@@ -61,6 +90,7 @@ object WatchStats {
                 }
             }
             d?.optJSONObject("g")?.let { g -> for (k in g.keys()) genres[k] = (genres[k] ?: 0L) + g.optLong(k) }
+            d?.optJSONObject("t")?.let { t -> for (k in t.keys()) titles[k] = (titles[k] ?: 0L) + t.optLong(k) }
             days += label.format(cal.time) to total
             cal.add(Calendar.DAY_OF_YEAR, 1)
         }
@@ -78,6 +108,7 @@ object WatchStats {
             channels = channels.entries.sortedByDescending { it.value }.take(10).map { it.key to it.value },
             genres = genres.entries.sortedByDescending { it.value }.take(8).map { it.key to it.value },
             previousWeekSeconds = previous,
+            titles = titles.entries.sortedByDescending { it.value }.take(15).map { it.key to it.value },
         )
     }
 

@@ -49,6 +49,12 @@ class StreamCushion(
 
     /** The channel played cleanly for a long stretch. */
     @Synchronized
+    /** Fix-it: forget what's been learned about [key] (start it like a channel that's never had trouble). */
+    fun forget(key: String) {
+        ensure()
+        if (entries.remove(key) != null) persist()
+    }
+
     fun healthy(key: String) {
         ensure()
         val e = entries[key] ?: return

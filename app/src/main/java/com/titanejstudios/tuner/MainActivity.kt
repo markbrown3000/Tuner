@@ -300,6 +300,31 @@ private fun TunerApp(vm: TunerViewModel) {
                     onDismiss = { vm.dismissStartOver() },
                 )
             }
+            // 🎲 Surprise me
+            vm.surprise?.let { m ->
+                MenuDialog(
+                    title = "🎲 How about… " + com.titanejstudios.tuner.data.FilmName.parse(m.name).let { (t, y) -> t + (y?.let { " ($it)" } ?: "") },
+                    subtitle = listOfNotNull(vm.ratingLabelFor(m.name, false, m.rating), m.category).joinToString("  ·  "),
+                    items = listOf(
+                        MenuItem("▶ Play it") { vm.playMovie(m, fromStart = false) },
+                        MenuItem("🎲 Another one") { vm.surpriseMe() },
+                        MenuItem("ⓘ What's it about?") { vm.openFilmInfo(m.name, false) },
+                    ),
+                    onDismiss = { vm.closeSurprise() },
+                )
+            }
+            // A film in a series just ended: the next one.
+            vm.nextInSeries?.let { m ->
+                MenuDialog(
+                    title = "Next in the series",
+                    subtitle = com.titanejstudios.tuner.data.FilmName.parse(m.name).first,
+                    items = listOf(
+                        MenuItem("▶ Play it now") { vm.playNextInSeries() },
+                        MenuItem("Not now") { vm.dismissNextInSeries() },
+                    ),
+                    onDismiss = { vm.dismissNextInSeries() },
+                )
+            }
             vm.plexCopyChoice?.let { c ->
                 MenuDialog(
                     title = "Which copy of ${c.title}?",
@@ -310,6 +335,12 @@ private fun TunerApp(vm: TunerViewModel) {
                             add(MenuItem("Plex – $where", if (vm.plexServerCount > 1) e.server.name else null) { vm.choosePlexCopy(c, e) })
                         }
                         if (c.iptv != null) add(MenuItem("Your IPTV provider") { vm.choosePlexCopy(c, null) })
+                        // The same, remembered for next time.
+                        c.copies.forEach { e ->
+                            val where = e.library ?: "Plex"
+                            add(MenuItem("☆ Always use $where", "play from here without asking") { vm.choosePlexCopyAlways(c, e) })
+                        }
+                        if (c.iptv != null) add(MenuItem("☆ Always use your IPTV provider", "play from here without asking") { vm.choosePlexCopyAlways(c, null) })
                     },
                     onDismiss = { vm.cancelPlexCopyChoice() },
                 )

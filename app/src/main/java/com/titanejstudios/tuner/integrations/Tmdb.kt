@@ -28,7 +28,51 @@ object Tmdb {
         val imdbId: String? = null,
         /** How many people rated it on TMDB (a 10.0 from 2 votes means little). */
         val votes: Int = 0,
+        /** UK age rating: "U", "PG", "12", "15" or "18" (from the US one if there's no UK one). */
+        val certificate: String? = null,
+        /** The film series it belongs to ("Harry Potter Collection"), if any. */
+        val collectionId: Long? = null,
+        val collectionName: String? = null,
+        /** The cast's TMDB ids and names (for "what else are they in?"). */
+        val castIds: List<Pair<Long, String>> = emptyList(),
     )
+
+    /** An actor's best-known films, newest first. */
+    fun personFilms(apiKey: String, personId: Long): List<Part> {
+        val a = get(apiKey, "$API/person/$personId/movie_credits?language=en-GB").optJSONArray("cast") ?: return emptyList()
+        return (0 until a.length()).mapNotNull { a.optJSONObject(it) }
+            .filter { it.optInt("vote_count") >= 50 && it.optString("release_date").isNotBlank() }
+            .sortedByDescending { it.optDouble("popularity") }
+            .take(20)
+            .sortedByDescending { it.optString("release_date") }
+            .map { o ->
+                Part(o.optString("title"), o.optString("release_date").take(4), o.optString("poster_path").takeIf { it.startsWith("/") }?.let { IMAGES + "w342" + it })
+            }
+    }
+
+    /** One film in a series, in release order. */
+    class Part(val title: String, val year: String?, val poster: String?)
+
+    private val collections = HashMap<Long, List<Part>>()
+
+    /** The films in a series, oldest first (released ones only). */
+    fun collection(apiKey: String, id: Long): List<Part> {
+        synchronized(collections) { collections[id]?.let { return it } }
+        val a = get(apiKey, "$API/collection/$id?language=en-GB").optJSONArray("parts") ?: return emptyList()
+        val today = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date())
+        val parts = (0 until a.length()).mapNotNull { a.optJSONObject(it) }
+            .map { it.optString("release_date") to it }
+            .filter { (d, _) -> d.isNotBlank() && d <= today }
+            .sortedBy { it.first }
+            .map { (d, o) ->
+                Part(
+                    o.optString("title"), d.take(4),
+                    o.optString("poster_path").takeIf { it.startsWith("/") }?.let { IMAGES + "w342" + it },
+                )
+            }
+        synchronized(collections) { collections[id] = parts }
+        return parts
+    }
 
     private const val API = "https://api.themoviedb.org/3"
     private const val IMAGES = "https://image.tmdb.org/t/p/"
@@ -90,7 +134,7 @@ object Tmdb {
     }
 
     private fun details(apiKey: String, kind: String, id: Long): Info {
-        val o = get(apiKey, "$API/$kind/$id?append_to_response=credits,videos,external_ids&language=en-GB")
+        val o = get(apiKey, "$API/$kind/$id?append_to_response=credits,videos,external_ids,release_dates,content_ratings&language=en-GB")
         val date = o.optString("release_date").ifEmpty { o.optString("first_air_date") }
         val runtime = o.optInt("runtime", 0).takeIf { it > 0 }
             ?: o.optJSONArray("episode_run_time")?.optInt(0, 0)?.takeIf { it > 0 }
@@ -121,7 +165,59 @@ object Tmdb {
             trailerKey = trailer,
             imdbId = (o.optString("imdb_id").takeIf { it.startsWith("tt") } ?: o.optJSONObject("external_ids")?.optString("imdb_id"))?.takeIf { it.startsWith("tt") },
             votes = o.optInt("vote_count", 0),
+            certificate = certificateOf(o),
+            collectionId = o.optJSONObject("belongs_to_collection")?.optLong("id")?.takeIf { it > 0 },
+            collectionName = o.optJSONObject("belongs_to_collection")?.optString("name")?.takeIf { it.isNotBlank() },
+            castIds = o.optJSONObject("credits")?.optJSONArray("cast")?.let { a ->
+                (0 until minOf(8, a.length())).mapNotNull { i -> a.optJSONObject(i)?.let { c -> c.optLong("id") to c.optString("name") } }
+                    .filter { it.first > 0 && it.second.isNotBlank() }
+            }.orEmpty(),
         )
+    }
+
+    /** The UK age rating from a film's release dates or a show's content ratings (US one, translated, if no UK one). */
+    private fun certificateOf(o: JSONObject): String? {
+        val byCountry = HashMap<String, String>()
+        o.optJSONObject("release_dates")?.optJSONArray("results")?.let { a ->
+            for (i in 0 until a.length()) {
+                val r = a.optJSONObject(i) ?: continue
+                val dates = r.optJSONArray("release_dates") ?: continue
+                for (j in 0 until dates.length()) {
+                    val c = dates.optJSONObject(j)?.optString("certification")?.trim().orEmpty()
+                    if (c.isNotEmpty()) {
+                        byCountry.putIfAbsent(r.optString("iso_3166_1"), c)
+                        break
+                    }
+                }
+            }
+        }
+        o.optJSONObject("content_ratings")?.optJSONArray("results")?.let { a ->
+            for (i in 0 until a.length()) {
+                val r = a.optJSONObject(i) ?: continue
+                val c = r.optString("rating").trim()
+                if (c.isNotEmpty()) byCountry.putIfAbsent(r.optString("iso_3166_1"), c)
+            }
+        }
+        byCountry["GB"]?.let { gb -> ukCertificate(gb)?.let { return it } }
+        return ukCertificate(byCountry["US"])
+    }
+
+    /** Any age rating ("12A", "gb/15", "PG-13", "TV-MA"…) as a UK one: U, PG, 12, 15 or 18 (null if unknown). */
+    fun ukCertificate(raw: String?): String? {
+        val c = raw?.trim()?.uppercase()?.substringAfterLast('/')?.removePrefix("UK-") ?: return null
+        return when (c) {
+            "U", "UC" -> "U"
+            "PG" -> "PG"
+            "12", "12A" -> "12"
+            "15" -> "15"
+            "18", "R18" -> "18"
+            "G", "TV-Y", "TV-G" -> "U"
+            "TV-Y7", "TV-PG" -> "PG"
+            "PG-13", "TV-14" -> "12"
+            "R" -> "15"
+            "NC-17", "TV-MA" -> "18"
+            else -> null
+        }
     }
 
     /** Accepts either kind of TMDB key: the short "API key" or the long "read access token". */

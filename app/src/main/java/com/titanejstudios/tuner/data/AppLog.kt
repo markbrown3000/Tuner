@@ -53,6 +53,15 @@ object AppLog {
         }
     }
 
+    /** The last [lines] lines in the order they were written (for copying – crash details read top to bottom). */
+    @Synchronized
+    fun readInOrder(lines: Int = 400): String = try {
+        val f = file
+        if (f == null || !f.exists()) "" else f.readLines().takeLast(lines).joinToString("\n")
+    } catch (e: Exception) {
+        ""
+    }
+
     /** Newest entries first. */
     @Synchronized
     fun read(): String = try {

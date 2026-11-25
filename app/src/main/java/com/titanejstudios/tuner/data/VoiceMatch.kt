@@ -22,7 +22,7 @@ object VoiceMatch {
     /** A number on its own ("101") means a channel number. */
     fun number(query: String): Int? = clean(query).toIntOrNull()
 
-    fun find(channels: List<Channel>, query: String): Channel? {
+    fun find(channels: List<Channel>, query: String, strict: Boolean = false): Channel? {
         val q = clean(query)
         if (q.isEmpty()) return null
         val key = StreamAlternates.nameKey(q)
@@ -31,7 +31,8 @@ object VoiceMatch {
         val keyed = channels.map { it to StreamAlternates.nameKey(it.name) }
         keyed.firstOrNull { it.second == key }?.let { return it.first }
         keyed.filter { it.second.startsWith(key) }.minByOrNull { it.second.length }?.let { return it.first }
-        keyed.filter { it.second.contains(key) }.minByOrNull { it.second.length }?.let { return it.first }
+        // (Strict: Flicker's own 🎤 – "football" should search, not tune to a channel with it in the name.)
+        if (!strict) keyed.filter { it.second.contains(key) }.minByOrNull { it.second.length }?.let { return it.first }
         // "BBC 1" vs "BBC One"
         val alt = key.replace("1", "one").replace("2", "two").replace("3", "three").replace("4", "four")
         if (alt != key) keyed.firstOrNull { it.second == alt || it.second.startsWith(alt) }?.let { return it.first }

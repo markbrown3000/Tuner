@@ -57,7 +57,16 @@ internal fun ratingLabel(raw: String?): String? {
     return "★ " + String.format(java.util.Locale.UK, "%.1f", r)
 }
 
-private fun ratingOf(raw: String?): Double = raw?.trim()?.replace(',', '.')?.toDoubleOrNull() ?: 0.0
+private fun ratingOf(raw: String?): Double = raw?.trim()?.replace(',', '.')?.toDoubleOrNull()?.takeIf { !it.isNaN() } ?: 0.0
+
+/**
+ * Highest first, by a number worked out once per item (a rating that changes while sorting –
+ * one arriving from IMDb, say – made Android's sort give up and close the app).
+ */
+private fun <T> byKey(list: List<T>, key: (T) -> Double): List<T> {
+    val keyed = list.map { it to key(it).let { k -> if (k.isNaN()) 0.0 else k } }
+    return keyed.sortedWith { a, b -> java.lang.Double.compare(b.second, a.second) }.map { it.first }
+}
 
 /** The provider's number for an item ("…/m12345" → 12345): bigger is newer, so it sorts by recently added. */
 private fun addedOrder(id: String): Long = id.substringAfterLast('/').trimStart('m', 's').toLongOrNull() ?: 0L
@@ -142,6 +151,8 @@ private fun <T> CatalogueScreen(
     updating: Boolean = false,
     /** "Plex ›" button, when Plex is linked. */
     onPlex: (() -> Unit)? = null,
+    /** 🎲 Surprise me (films). */
+    onSurprise: (() -> Unit)? = null,
     /** Poster and details for the strip above the grid. */
     imageOf: (T) -> String? = { null },
     detailsOf: (T) -> String? = { null },
@@ -200,6 +211,10 @@ private fun <T> CatalogueScreen(
                 color = TunerColors.TextSecondary,
             )
             Spacer(Modifier.weight(1f))
+            if (onSurprise != null) {
+                PillButton("🎲 Surprise me", onSurprise, compact = true)
+                Spacer(Modifier.width(8.dp))
+            }
             if (onPlex != null) {
                 PillButton("Plex ›", onPlex, compact = true)
                 Spacer(Modifier.width(8.dp))
@@ -320,6 +335,7 @@ fun MoviesScreen(vm: TunerViewModel) {
         },
         myList = remember(vm.watchlist) { vm.watchlist.filter { !it.isSeries }.mapNotNull { it.toVod() } },
         updating = vm.vodUpdating,
+        onSurprise = { vm.surpriseMe() },
         onPlex = if (vm.plexLinked) ({ vm.openPlexLibrary() }) else null,
         tintOn = vm.tintFromPicture,
         compact = compactLayout(vm),
@@ -377,7 +393,11 @@ fun SeriesScreen(vm: TunerViewModel) {
             PosterCard(
                 title = s.name,
                 image = s.cover,
-                caption = listOfNotNull(vm.ratingLabelFor(s.name, true, s.rating), if (vm.inWatchlist(s.id)) "✓ My list" else null)
+                caption = listOfNotNull(
+                    vm.followedSeries.firstOrNull { it.series.id == s.id && it.newEpisodes > 0 }?.let { "🆕 ${it.newEpisodes} new episode" + if (it.newEpisodes > 1) "s" else "" },
+                    vm.ratingLabelFor(s.name, true, s.rating),
+                    if (vm.inWatchlist(s.id)) "✓ My list" else null,
+                )
                     .joinToString("  ·  ").ifEmpty { null },
                 progress = null,
                 onClick = { vm.openSeriesDetail(s) },
@@ -423,7 +443,7 @@ fun SeriesDetailScreen(vm: TunerViewModel) {
         else lastWatched
     }
     var season by remember(seasons) { mutableStateOf(upTo?.season ?: seasons.firstOrNull() ?: 1) }
-    val shown = remember(eps, season) { eps.orEmpty().filter { it.season == season } }
+    val shown = remember(eps, season) { eps.orEmpty().filter { it.season == season }.distinctBy { it.id } }
     var resumeAsk by remember { mutableStateOf<Episode?>(null) }
     var episodeMenu by remember { mutableStateOf<Episode?>(null) }
     val firstFocus = remember { FocusRequester() }
@@ -633,7 +653,7 @@ private fun <T> PhoneCatalogue(
     val all = remember(items, hideAdult) { items.orEmpty().filter { !hideAdult || !isAdultTitle(nameOf(it), categoryOf(it)) } }
     val categories = remember(all) { all.map(categoryOf).distinct() }
     fun sorted(list: List<T>): List<T> = when (sort) {
-        "rating" -> list.sortedByDescending { info.ratingValue(it) }
+        "rating" -> byKey(list) { info.ratingValue(it) }
         "year" -> list.sortedByDescending { com.titanejstudios.tuner.integrations.Tmdb.cleanTitle(nameOf(it)).second ?: 0 }
         "az" -> list.sortedBy { com.titanejstudios.tuner.integrations.Tmdb.cleanTitle(nameOf(it)).first.lowercase() }
         else -> list.sortedByDescending { addedOrder(info.idOf(it)) }
@@ -653,6 +673,10 @@ private fun <T> PhoneCatalogue(
                 PillButton("Films", { if (info.isSeries) onSwitch() }, selected = !info.isSeries, compact = true)
                 PillButton("Series", { if (!info.isSeries) onSwitch() }, selected = info.isSeries, compact = true)
                 if (onPlex != null) PillButton("Plex", onPlex, compact = true)
+            }
+            if (!info.isSeries) {
+                PillButton("🎲", { vm.surpriseMe() }, compact = true)
+                Spacer(Modifier.width(6.dp))
             }
             PillButton("🔍", { searching = true }, selected = query.isNotBlank(), compact = true)
             Spacer(Modifier.width(6.dp))
@@ -694,18 +718,18 @@ private fun <T> PhoneCatalogue(
                 val recent = remember(all) { all.sortedByDescending { addedOrder(info.idOf(it)) }.take(30) }
                 // Top rated: real ratings (IMDb/TMDB) as they arrive – the provider's best-scored first in line.
                 LaunchedEffect(all) {
-                    val candidates = all.sortedByDescending { ratingOf(info.providerRating(it)) }.take(120) + recent
+                    val candidates = runCatching { byKey(all) { ratingOf(info.providerRating(it)) }.take(120) }.getOrDefault(emptyList()) + recent
                     vm.requestRatings(candidates.map(nameOf), info.isSeries)
                 }
                 val known = vm.vodRatings.size
-                val top = remember(all, known) { all.filter { info.ratingValue(it) >= 7.0 }.sortedByDescending { info.ratingValue(it) }.take(30) }
+                val top = remember(all, known) { byKey(all.filter { info.ratingValue(it) >= 7.0 }) { info.ratingValue(it) }.take(30) }
                 val byCategory = remember(all) { all.groupBy(categoryOf) }
                 LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp), contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 16.dp)) {
                     if (continueEntries.isNotEmpty()) {
                         item(key = "h-cont") { RowTitle("Carry on watching", null) }
                         item(key = "r-cont") {
                             LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                items(continueEntries, key = { it.contentId }) { e ->
+                                items(continueEntries.size) { ci -> val e = continueEntries[ci]
                                     PosterCard(
                                         title = e.title, image = e.poster,
                                         caption = e.subtitle ?: "${clock(e.positionMs)} of ${clock(e.durationMs)}",
@@ -716,10 +740,13 @@ private fun <T> PhoneCatalogue(
                             }
                         }
                     }
+                    // Keys by position: a provider category called "Top rated" (say) mustn't clash.
+                    var rowNo = 0
                     fun row(name: String, list: List<T>, seeAll: (() -> Unit)?) {
                         if (list.isEmpty()) return
-                        item(key = "h-$name") { RowTitle(name, seeAll) }
-                        item(key = "r-$name") {
+                        val n = rowNo++
+                        item(key = "h$n") { RowTitle(name, seeAll) }
+                        item(key = "r$n") {
                             LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                                 items(list.size) { i -> tile(list[i], Modifier.width(112.dp)) }
                             }
