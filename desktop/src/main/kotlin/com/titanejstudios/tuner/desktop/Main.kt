@@ -142,7 +142,7 @@ private fun runApp() = application {
             app.tickKids()
             if (app.watching != null) app.saveProgress()
             if (ticks % 18 == 0) app.syncSoon(0)
-            if (ticks % 360 == 0) app.checkForUpdate()
+            if (ticks % 1080 == 0) app.checkForUpdate()
         }
     }
     // Flicker in the system tray: closing the window leaves it running (recordings and reminders carry on).

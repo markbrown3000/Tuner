@@ -661,9 +661,10 @@ class AppState(val config: Config, val player: Player, private val scope: Corout
     var update by mutableStateOf<Updater.Release?>(null)
     var updateProgress by mutableStateOf<Float?>(null)
 
-    /** Once a day (or now): is there a newer Flicker for Windows? */
+    /** At start and every few hours (or now): is there a newer Flicker for Windows? */
     fun checkForUpdate(manual: Boolean = false) {
-        if (!manual && System.currentTimeMillis() - config.lastUpdateCheck < 20 * 3_600_000L) return
+        // Every start, then every few hours while it's open (not more than once an hour).
+        if (!manual && System.currentTimeMillis() - config.lastUpdateCheck < 3_600_000L) return
         scope.launch {
             val r = withContext(Dispatchers.IO) { runCatching { Updater.latest() }.getOrNull() }
             config.lastUpdateCheck = System.currentTimeMillis()
