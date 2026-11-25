@@ -22,7 +22,7 @@ val sharedFiles = listOf(
 // Keys built in from GitHub's secrets (the same ones as the TV app): Google sign-in for sync,
 // TMDB for film info, YouTube for search. Never in the code itself.
 val generateKeys by tasks.registering {
-    val out = layout.buildDirectory.file("generated/com/titanejstudios/tuner/desktop/Keys.kt")
+    val out = layout.buildDirectory.file("flickerKeys/com/titanejstudios/tuner/desktop/Keys.kt")
     val values = listOf("TUNER_GOOGLE_CLIENT_ID", "TUNER_GOOGLE_CLIENT_SECRET", "TUNER_TMDB_KEY", "TUNER_YOUTUBE_KEY")
         .associateWith { (System.getenv(it) ?: "").trim() }
     inputs.property("keys", values.mapValues { it.value.hashCode() })
@@ -54,7 +54,7 @@ val copyShared by tasks.registering(Copy::class) {
 
 kotlin {
     sourceSets["main"].kotlin.srcDir(layout.buildDirectory.dir("shared"))
-    sourceSets["main"].kotlin.srcDir(layout.buildDirectory.dir("generated"))
+    sourceSets["main"].kotlin.srcDir(layout.buildDirectory.dir("flickerKeys"))
 }
 
 tasks.named("compileKotlin") { dependsOn(copyShared, generateKeys) }

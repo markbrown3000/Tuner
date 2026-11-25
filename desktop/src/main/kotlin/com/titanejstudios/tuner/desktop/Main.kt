@@ -38,6 +38,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Tray
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowPlacement
 import androidx.compose.ui.window.application
@@ -146,7 +147,7 @@ private fun runApp() = application {
     }
     // Flicker in the system tray: closing the window leaves it running (recordings and reminders carry on).
     if (config.keepRunning && icon != null) {
-        androidx.compose.ui.window.Tray(
+        Tray(
             icon = icon,
             tooltip = "Flicker",
             onAction = { shown = true },
