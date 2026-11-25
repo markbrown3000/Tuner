@@ -43,7 +43,7 @@ object Library {
         }
         if (merge) channels = ChannelMerge.merge(channels, emptyMap()).channels
 
-        // The guide: from 3 hours ago to a day ahead (plus catch-up days for channels that have it).
+        // The guide: from 3 hours ago to a day and a half ahead (plus catch-up days for channels that have it).
         val guide = HashMap<String, ArrayList<Programme>>()
         val now = System.currentTimeMillis()
         for ((sourceId, url) in guideUrls) {
@@ -59,7 +59,7 @@ object Library {
             }
             try {
                 Http.open(url.trim()).use { input ->
-                    XmltvParser.parse(input, byId, byName, now - 3 * 3_600_000L, now + 24 * 3_600_000L, catchupFrom) { id, p ->
+                    XmltvParser.parse(input, byId, byName, now - 3 * 3_600_000L, now + 36 * 3_600_000L, catchupFrom) { id, p ->
                         guide.getOrPut(id) { ArrayList() }.add(p)
                     }
                 }

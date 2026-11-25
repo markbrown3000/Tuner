@@ -16,8 +16,34 @@ val sharedFiles = listOf(
     "data/Models.kt", "data/M3uParser.kt", "data/XtreamClient.kt", "data/Http.kt", "data/XmltvParser.kt",
     "data/Catchup.kt", "data/ChannelMerge.kt", "data/Sports.kt", "data/WhatsOn.kt", "data/HomeFeed.kt",
     "data/Languages.kt", "data/FilmName.kt", "data/Taste.kt", "data/Recommend.kt", "data/SportFollow.kt",
-    "data/Football.kt", "integrations/Plex.kt", "integrations/Tmdb.kt",
+    "data/Watchlist.kt", "integrations/Plex.kt", "integrations/Tmdb.kt", "integrations/YouTube.kt", "integrations/GoogleDrive.kt",
 )
+
+// Keys built in from GitHub's secrets (the same ones as the TV app): Google sign-in for sync,
+// TMDB for film info, YouTube for search. Never in the code itself.
+val generateKeys by tasks.registering {
+    val out = layout.buildDirectory.file("generated/com/titanejstudios/tuner/desktop/Keys.kt")
+    val values = listOf("TUNER_GOOGLE_CLIENT_ID", "TUNER_GOOGLE_CLIENT_SECRET", "TUNER_TMDB_KEY", "TUNER_YOUTUBE_KEY")
+        .associateWith { (System.getenv(it) ?: "").trim() }
+    inputs.property("keys", values.mapValues { it.value.hashCode() })
+    outputs.file(out)
+    doLast {
+        fun q(v: String) = "\"" + v.replace("\\", "\\\\").replace("\"", "\\\"").replace("$", "\\$") + "\""
+        out.get().asFile.apply {
+            parentFile.mkdirs()
+            writeText(
+                "package com.titanejstudios.tuner.desktop\n\n" +
+                    "/** Built in at build time from GitHub's secrets. */\n" +
+                    "object Keys {\n" +
+                    "    const val GOOGLE_CLIENT_ID = ${q(values.getValue("TUNER_GOOGLE_CLIENT_ID"))}\n" +
+                    "    const val GOOGLE_CLIENT_SECRET = ${q(values.getValue("TUNER_GOOGLE_CLIENT_SECRET"))}\n" +
+                    "    const val TMDB_KEY = ${q(values.getValue("TUNER_TMDB_KEY"))}\n" +
+                    "    const val YOUTUBE_KEY = ${q(values.getValue("TUNER_YOUTUBE_KEY"))}\n" +
+                    "}\n"
+            )
+        }
+    }
+}
 
 val copyShared by tasks.registering(Copy::class) {
     from("../app/src/main/java/com/titanejstudios/tuner") { include(sharedFiles) }
@@ -26,9 +52,10 @@ val copyShared by tasks.registering(Copy::class) {
 
 kotlin {
     sourceSets["main"].kotlin.srcDir(layout.buildDirectory.dir("shared"))
+    sourceSets["main"].kotlin.srcDir(layout.buildDirectory.dir("generated"))
 }
 
-tasks.named("compileKotlin") { dependsOn(copyShared) }
+tasks.named("compileKotlin") { dependsOn(copyShared, generateKeys) }
 
 tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
     compilerOptions.jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
@@ -55,11 +82,14 @@ compose.desktop {
         mainClass = "com.titanejstudios.tuner.desktop.MainKt"
         nativeDistributions {
             targetFormats(TargetFormat.Msi, TargetFormat.Exe)
-            packageName = "Tuner"
+            packageName = "Flicker"
             packageVersion = tunerVersion
             vendor = "Titan EJ Studios"
             description = "IPTV player"
             includeAllModules = true
+            // VLC's engine (libvlc and its plugins), put in resources/windows/vlc by the GitHub build,
+            // so nothing else needs installing. Without it, an installed VLC is used.
+            appResourcesRootDir.set(project.layout.projectDirectory.dir("resources"))
             windows {
                 menu = true
                 shortcut = true

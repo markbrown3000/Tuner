@@ -264,7 +264,9 @@ class CloudSyncFeature(
         all.put(
             me,
             JSONObject().put("name", deviceName()).put("house", house).put("phone", isPhone()).put("at", now)
-                .put("snapshot", LinkSync.snapshot(store)),
+                .put("snapshot", LinkSync.snapshot(store))
+                // Your playlists, so Flicker on a PC signs in once and has the same channels (same ids).
+                .put("sources", runCatching { org.json.JSONArray(store.sourcesJson) }.getOrDefault(org.json.JSONArray())),
         )
         root.put("app", "Flicker").put("v", 1).put("devices", all)
         val id = drive.write(accessToken(), fileId ?: store.gdriveFileId, root.toString())

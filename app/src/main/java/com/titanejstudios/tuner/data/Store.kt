@@ -32,6 +32,9 @@ class Store(context: Context) {
             prefs.edit().putString("sources", arr.toString()).apply()
         }
 
+    /** The playlists as saved (for Flicker on a PC, through your own Google Drive). */
+    val sourcesJson: String get() = prefs.getString("sources", "[]") ?: "[]"
+
     /** A playlist id, or "all" to combine every playlist. */
     var activeSourceId: String
         get() = prefs.getString("active_source", "all") ?: "all"

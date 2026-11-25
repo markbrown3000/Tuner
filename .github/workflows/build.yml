@@ -97,13 +97,17 @@ jobs:
           files: app/build/outputs/apk/release/app-release.apk
           generate_release_notes: true
 
-  # Tuner for Windows: built on a Windows machine (installers can only be made there).
+  # Flicker for Windows: built on a Windows machine (installers can only be made there).
   # A separate build, so a problem here never stops the TV app.
   windows:
-    # Paused for now – change false to true to build the Windows installer again.
-    if: false
     needs: build
     runs-on: windows-latest
+    env:
+      # The same keys as the TV app (sync sign-in, film info, YouTube).
+      TUNER_TMDB_KEY: ${{ secrets.TMDB_KEY }}
+      TUNER_GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+      TUNER_GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+      TUNER_YOUTUBE_KEY: ${{ secrets.YOUTUBE_KEY }}
     steps:
       - uses: actions/checkout@v5
 
@@ -120,6 +124,22 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         shell: bash
         run: echo "TUNER_VERSION_NAME=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+
+      # VLC's engine goes inside the installer, so the PC needs nothing else.
+      - name: Bundle VLC
+        shell: bash
+        run: |
+          set -e
+          VLC=3.0.21
+          curl -fsSL --retry 3 -o vlc.zip "https://get.videolan.org/vlc/$VLC/win64/vlc-$VLC-win64.zip" \
+            || curl -fsSL --retry 3 -o vlc.zip "https://download.videolan.org/pub/videolan/vlc/$VLC/win64/vlc-$VLC-win64.zip"
+          unzip -q vlc.zip -d vlc-unzipped
+          mkdir -p desktop/resources/windows/vlc
+          cp vlc-unzipped/vlc-$VLC/libvlc.dll vlc-unzipped/vlc-$VLC/libvlccore.dll desktop/resources/windows/vlc/
+          cp -r vlc-unzipped/vlc-$VLC/plugins desktop/resources/windows/vlc/
+          # Not needed for playing streams: VLC's own windows, skins and the like.
+          rm -rf desktop/resources/windows/vlc/plugins/gui desktop/resources/windows/vlc/plugins/visualization
+          du -sh desktop/resources/windows/vlc
 
       - name: Build the Windows installer
         shell: bash

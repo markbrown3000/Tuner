@@ -12,3 +12,6 @@ keys.properties
 .kotlin
 /desktop/build
 /desktop/.gradle
+/desktop/build
+/desktop/.gradle
+/desktop/resources/windows/vlc
