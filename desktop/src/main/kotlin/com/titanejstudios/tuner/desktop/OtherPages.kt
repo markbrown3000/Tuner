@@ -512,10 +512,10 @@ fun SettingsPage(app: AppState) {
                             Text("Add", color = Color.White, fontSize = 12.sp)
                         }
                     }
-                    Text(
-                        "The PIN, and which apps kids can use, are set on the TV. Kids' daily time is counted here too.",
-                        color = Soft, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp),
-                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 10.dp)) {
+                        if (!app.kids || app.grownUp) Pill(if (app.config.pin != null) "🔒 Change the PIN" else "🔒 Set a PIN") { app.changePin() }
+                        Text("The PIN goes to the TV too. Kids' daily time is counted here as well.", color = Soft, fontSize = 12.sp)
+                    }
                 }
             }
         }
@@ -539,6 +539,34 @@ fun SettingsPage(app: AppState) {
                         Pill("Forget what I like (recommendations)") { app.forgetTaste() }
                     }
                     Text("Top picks, Your shows and Missed it? learn from what each profile watches on this PC.", color = Soft, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
+                }
+            }
+        }
+
+        if (app.traktAvailable && !app.kids) {
+            item { SectionTitle("Trakt") }
+            item {
+                Card {
+                    val code = app.traktCode
+                    when {
+                        app.traktUser != null -> Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text("Linked to ${app.traktUser} – films and episodes you finish are logged.", color = Color.White, fontSize = 14.sp)
+                            Pill("Import what I've watched") { app.importTraktWatched() }
+                            Pill("Unlink") { app.unlinkTrakt() }
+                        }
+                        code != null -> Column {
+                            Text("Go to ${code.url} and enter:", color = Soft, fontSize = 14.sp)
+                            Text(code.userCode, color = Color.White, fontSize = 36.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.padding(vertical = 6.dp))
+                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                Pill("Open ${code.url} ↗", selected = true) { openInBrowser(code.url) }
+                                Pill("Cancel") { app.traktCode = null }
+                            }
+                        }
+                        else -> Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text("Log what you watch to trakt.tv, and skip films you've already seen.", color = Soft, fontSize = 13.sp)
+                            Pill("Link Trakt", selected = true) { app.linkTrakt() }
+                        }
+                    }
                 }
             }
         }

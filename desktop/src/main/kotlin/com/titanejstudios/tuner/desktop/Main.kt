@@ -63,6 +63,11 @@ fun main(args: Array<String>) {
     )
     Thread.setDefaultUncaughtExceptionHandler { _, e ->
         com.titanejstudios.tuner.data.AppLog.warn("Crash", e)
+        // Shown next time Flicker opens, with a button to copy the log.
+        runCatching {
+            java.io.File(com.titanejstudios.tuner.data.AppLog.file.parentFile, "crashed.txt")
+                .writeText((e.javaClass.simpleName + ": " + (e.message ?: "")).take(300))
+        }
         runCatching {
             javax.swing.JOptionPane.showMessageDialog(
                 null,
@@ -115,9 +120,17 @@ private fun runApp() = application {
             )
         }.getOrNull()
     }
-    fun fullScreen() = windowState.placement == WindowPlacement.Fullscreen
+    // Full screen: a borderless window over the whole monitor the window's on (taskbar too).
+    val mainWindowRef = remember { arrayOfNulls<java.awt.Window>(1) }
+    fun fullScreen() = app.secondScreen != null && app.fullHere
     fun toggleFullScreen() {
-        windowState.placement = if (fullScreen()) WindowPlacement.Floating else WindowPlacement.Fullscreen
+        if (app.secondScreen != null) {
+            app.leaveFull()
+            return
+        }
+        val r = mainWindowRef[0]?.graphicsConfiguration?.bounds
+            ?: java.awt.GraphicsEnvironment.getLocalGraphicsEnvironment().defaultScreenDevice.defaultConfiguration.bounds
+        app.goFull(r)
     }
     fun rememberWindow() {
         if (windowState.placement == WindowPlacement.Floating) {
@@ -189,6 +202,39 @@ private fun runApp() = application {
             },
         )
     }
+    // The keys work the same in the main window and the full-screen one.
+    val onKey: (androidx.compose.ui.input.key.KeyEvent) -> Boolean = handler@{ e ->
+        app.activity()
+        if (e.type != KeyEventType.KeyDown) return@handler false
+        val watching = app.watching != null && !app.mini
+        when {
+            e.key == Key.F11 || (e.key == Key.F && e.isCtrlPressed) -> { toggleFullScreen(); true }
+            e.key == Key.F1 || (e.key == Key.Slash && e.isShiftPressed && app.page != Page.Search && app.page != Page.Settings) -> { app.showKeys = !app.showKeys; true }
+            e.key == Key.Escape && app.showKeys -> { app.showKeys = false; true }
+            e.key == Key.Escape && app.secondScreen != null -> { app.leaveFull(); true }
+            e.key == Key.Escape && watching -> { app.stopWatching(save = true); true }
+            e.key == Key.Spacebar && watching && app.player.ready -> { app.player.togglePause(); true }
+            // Live TV: Space pauses (and keeps recording), then carries on from there.
+            e.key == Key.Spacebar && app.page == Page.Live && app.player.ready -> { app.togglePauseLive(); true }
+            // Typing a channel number (not while typing in a search box – that keeps the keys).
+            !watching && digitOf(e.key) != null && app.page in setOf(Page.Live, Page.Home, Page.Guide) -> { app.typeDigit(digitOf(e.key)!!); true }
+            watching && e.key == Key.DirectionLeft -> { app.player.skip(-10_000L); true }
+            watching && e.key == Key.DirectionRight -> { app.player.skip(30_000L); true }
+            !watching && (e.key == Key.PageUp || (fullScreen() && e.key == Key.DirectionUp)) -> { app.zapBy(-1); true }
+            !watching && (e.key == Key.PageDown || (fullScreen() && e.key == Key.DirectionDown)) -> { app.zapBy(1); true }
+            e.key == Key.M && e.isCtrlPressed -> { app.player.toggleMute(); true }
+            // The keyboard's media and volume keys.
+            e.key == Key.MediaPlayPause || e.key == Key.MediaPlay || e.key == Key.MediaPause ->
+                { if (watching) app.player.togglePause() else app.togglePauseLive(); true }
+            e.key == Key.MediaNext -> { if (!watching) app.zapBy(1) else app.player.skip(30_000L); true }
+            e.key == Key.MediaPrevious -> { if (!watching) app.zapBy(-1) else app.player.skip(-10_000L); true }
+            e.key == Key.MediaStop -> { app.stopWatching(save = true); true }
+            e.key == Key.VolumeUp || (e.key == Key.DirectionUp && e.isCtrlPressed) -> { app.setVolume(app.config.volume + 10); true }
+            e.key == Key.VolumeDown || (e.key == Key.DirectionDown && e.isCtrlPressed) -> { app.setVolume(app.config.volume - 10); true }
+            e.key == Key.VolumeMute -> { app.player.toggleMute(); true }
+            else -> false
+        }
+    }
     Window(
         onCloseRequest = {
             if (config.keepRunning && icon != null) {
@@ -206,38 +252,7 @@ private fun runApp() = application {
         state = windowState,
         title = "Flicker",
         icon = icon,
-        onKeyEvent = handler@{ e ->
-            app.activity()
-            if (e.type != KeyEventType.KeyDown) return@handler false
-            val watching = app.watching != null && !app.mini
-            when {
-                e.key == Key.F11 || (e.key == Key.F && e.isCtrlPressed) -> { toggleFullScreen(); true }
-                e.key == Key.F1 || (e.key == Key.Slash && e.isShiftPressed && app.page != Page.Search && app.page != Page.Settings) -> { app.showKeys = !app.showKeys; true }
-                e.key == Key.Escape && app.showKeys -> { app.showKeys = false; true }
-                e.key == Key.Escape && fullScreen() -> { windowState.placement = WindowPlacement.Floating; true }
-                e.key == Key.Escape && watching -> { app.stopWatching(save = true); true }
-                e.key == Key.Spacebar && watching && app.player.ready -> { app.player.togglePause(); true }
-                // Live TV: Space pauses (and keeps recording), then carries on from there.
-                e.key == Key.Spacebar && app.page == Page.Live && app.player.ready -> { app.togglePauseLive(); true }
-                // Typing a channel number (not while typing in a search box – that keeps the keys).
-                !watching && digitOf(e.key) != null && app.page in setOf(Page.Live, Page.Home, Page.Guide) -> { app.typeDigit(digitOf(e.key)!!); true }
-                watching && e.key == Key.DirectionLeft -> { app.player.skip(-10_000L); true }
-                watching && e.key == Key.DirectionRight -> { app.player.skip(30_000L); true }
-                !watching && (e.key == Key.PageUp || (fullScreen() && e.key == Key.DirectionUp)) -> { app.zapBy(-1); true }
-                !watching && (e.key == Key.PageDown || (fullScreen() && e.key == Key.DirectionDown)) -> { app.zapBy(1); true }
-                e.key == Key.M && e.isCtrlPressed -> { app.player.toggleMute(); true }
-                // The keyboard's media and volume keys.
-                e.key == Key.MediaPlayPause || e.key == Key.MediaPlay || e.key == Key.MediaPause ->
-                    { if (watching) app.player.togglePause() else app.togglePauseLive(); true }
-                e.key == Key.MediaNext -> { if (!watching) app.zapBy(1) else app.player.skip(30_000L); true }
-                e.key == Key.MediaPrevious -> { if (!watching) app.zapBy(-1) else app.player.skip(-10_000L); true }
-                e.key == Key.MediaStop -> { app.stopWatching(save = true); true }
-                e.key == Key.VolumeUp || (e.key == Key.DirectionUp && e.isCtrlPressed) -> { app.setVolume(app.config.volume + 10); true }
-                e.key == Key.VolumeDown || (e.key == Key.DirectionDown && e.isCtrlPressed) -> { app.setVolume(app.config.volume - 10); true }
-                e.key == Key.VolumeMute -> { app.player.toggleMute(); true }
-                else -> false
-            }
-        },
+        onKeyEvent = onKey,
     ) {
         MaterialTheme(colorScheme = darkColorScheme(primary = Sky, background = Ink, surface = Panel)) {
             // Text size (Settings › This PC): everything scales together.
@@ -245,7 +260,8 @@ private fun runApp() = application {
             androidx.compose.runtime.CompositionLocalProvider(
                 androidx.compose.ui.platform.LocalDensity provides androidx.compose.ui.unit.Density(d.density * uiScale, d.fontScale),
             ) {
-                Shell(app, fullScreen(), ::toggleFullScreen)
+                LaunchedEffect(Unit) { mainWindowRef[0] = window }
+                Shell(app, false, ::toggleFullScreen)
             }
         }
     }
@@ -262,15 +278,20 @@ private fun runApp() = application {
             title = "Flicker",
             icon = icon,
             undecorated = true,
-            onKeyEvent = { e ->
-                if (e.type == KeyEventType.KeyDown && e.key == Key.Escape) {
-                    app.toggleSecondScreen()
-                    true
-                } else false
-            },
+            alwaysOnTop = app.fullHere,
+            onKeyEvent = onKey,
         ) {
             MaterialTheme(colorScheme = darkColorScheme(primary = Sky, background = Ink, surface = Panel)) {
-                VideoBox(app, Modifier.fillMaxSize(), inMini = true)
+                Box(Modifier.fillMaxSize().background(Color.Black)) {
+                    VideoBox(app, Modifier.fillMaxSize(), inMini = true)
+                    // A reminder of how to get out, for a few seconds.
+                    var hint by remember { mutableStateOf(true) }
+                    LaunchedEffect(Unit) { delay(3_500); hint = false }
+                    if (hint) Text(
+                        "Esc or double-click to leave full screen", color = Color.White, fontSize = 15.sp,
+                        modifier = Modifier.align(Alignment.TopCenter).padding(24.dp).clip(RoundedCornerShape(10.dp)).background(Color.Black.copy(alpha = 0.7f)).padding(horizontal = 14.dp, vertical = 8.dp),
+                    )
+                }
             }
         }
     }
@@ -321,6 +342,7 @@ private fun Shell(app: AppState, fullScreen: Boolean, toggleFullScreen: () -> Un
                         Page.Catchup -> CatchupPage(app)
                         Page.Multi -> MultiPage(app)
                         Page.WhatsOn -> WhatsOnPage(app)
+                        Page.Sport -> SportPage(app)
                         Page.Search -> SearchPage(app)
                         Page.Recordings -> RecordingsPage(app)
                         Page.Films -> FilmsPage(app)
@@ -359,6 +381,18 @@ private fun Shell(app: AppState, fullScreen: Boolean, toggleFullScreen: () -> Un
             }
         }
         if (app.showKeys) KeysHelp(app)
+        app.lastCrash?.let { why ->
+            Row(
+                Modifier.align(Alignment.TopCenter).padding(16.dp).clip(RoundedCornerShape(12.dp)).background(Panel).padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text("⚠ Flicker closed unexpectedly last time ($why)", color = Color.White, fontSize = 14.sp, maxLines = 1, modifier = Modifier.width(560.dp))
+                Pill("📋 Copy the problem log", selected = true) { app.copyLog() }
+                Pill("OK") { app.lastCrash = null }
+            }
+        }
+        if (app.settingPin) PinSetter(app)
+        app.collectingItem?.let { item -> CollectionPicker(app, item) }
         if (app.showStreamInfo && (app.watching != null || app.playingChannel != null)) StreamInfo(app, Modifier.align(Alignment.TopEnd))
         app.subtitleHits?.let { hits -> SubtitlePicker(app, hits) }
         app.nextInSeries?.let { m ->
@@ -698,6 +732,64 @@ private fun Screensaver(app: AppState) {
         Column(Modifier.align(Alignment.BottomStart).padding(40.dp)) {
             Text(clock, color = Color.White, fontSize = 64.sp, fontWeight = FontWeight.ExtraBold)
             pic?.let { Text(it.second, color = Color.White.copy(alpha = 0.85f), fontSize = 20.sp) }
+        }
+    }
+}
+
+
+/** Set or change the parental PIN (it goes to the TV too). */
+@Composable
+private fun PinSetter(app: AppState) {
+    var first by remember { mutableStateOf("") }
+    var second by remember { mutableStateOf("") }
+    var problem by remember { mutableStateOf<String?>(null) }
+    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.7f)), contentAlignment = Alignment.Center) {
+        Column(Modifier.width(400.dp).clip(RoundedCornerShape(16.dp)).background(Panel).padding(24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("🔒 The parental PIN", color = Gold, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            Text("Used for kids' limits and locked groups – here and on the TV.", color = Soft, fontSize = 13.sp)
+            androidx.compose.material3.OutlinedTextField(
+                first, { first = it.filter { c -> c.isDigit() }.take(8); problem = null }, singleLine = true, label = { Text("New PIN (4–8 numbers)") },
+                visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth(),
+            )
+            androidx.compose.material3.OutlinedTextField(
+                second, { second = it.filter { c -> c.isDigit() }.take(8); problem = null }, singleLine = true, label = { Text("Again") },
+                visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth(),
+            )
+            problem?.let { Text(it, color = LiveRed, fontSize = 13.sp) }
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Pill("Save", selected = true) {
+                    problem = when {
+                        first.length < 4 -> "At least 4 numbers"
+                        first != second -> "They don't match"
+                        else -> null
+                    }
+                    if (problem == null) app.savePin(first)
+                }
+                if (app.config.pin != null) Pill("Remove the PIN") { app.savePin(null) }
+                Pill("Cancel") { app.settingPin = false }
+            }
+        }
+    }
+}
+
+/** 📚 Add to a collection: pick one, or name a new one. */
+@Composable
+private fun CollectionPicker(app: AppState, item: com.titanejstudios.tuner.data.WatchItem) {
+    var name by remember { mutableStateOf("") }
+    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.6f)).clickable { app.collectingItem = null }, contentAlignment = Alignment.Center) {
+        Column(Modifier.width(440.dp).clip(RoundedCornerShape(16.dp)).background(Panel).clickable(enabled = false) {}.padding(22.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Add ${item.name} to…", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            for ((n, list) in app.collections) Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(PanelLight).clickable { app.addToCollection(n, item); app.collectingItem = null }.padding(10.dp),
+            ) {
+                Text("📚 $n", color = Color.White, fontSize = 14.sp, modifier = Modifier.weight(1f))
+                Text("${list.size}", color = Soft, fontSize = 13.sp)
+            }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                androidx.compose.material3.OutlinedTextField(name, { name = it }, singleLine = true, placeholder = { Text("A new collection") }, modifier = Modifier.weight(1f))
+                Pill("Add", selected = true) { if (name.isNotBlank()) { app.addToCollection(name, item); app.collectingItem = null } }
+            }
+            Pill("Cancel") { app.collectingItem = null }
         }
     }
 }

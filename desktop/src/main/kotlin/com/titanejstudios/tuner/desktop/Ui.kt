@@ -132,7 +132,7 @@ fun VideoBox(app: AppState, modifier: Modifier, inMini: Boolean = false) {
     Box(modifier.background(Color.Black), contentAlignment = Alignment.Center) {
         val video = if (player.ready) player.component else null
         if (app.videoElsewhere && !inMini) Text(
-            if (app.secondScreen != null) "🖥 Playing on your other screen\nClick to bring it back here" else "▣ Playing in the mini player\nClick to bring it back here",
+            if (app.fullHere) "⛶ Full screen\nClick (or Esc) to come back" else if (app.secondScreen != null) "🖥 Playing on your other screen\nClick to bring it back here" else "▣ Playing in the mini player\nClick to bring it back here",
             color = Soft, fontSize = 15.sp,
             modifier = Modifier.clickable { if (app.secondScreen != null) app.toggleSecondScreen() else app.toggleMini() }.padding(24.dp),
         )

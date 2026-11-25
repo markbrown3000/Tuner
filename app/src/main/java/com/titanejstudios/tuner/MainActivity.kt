@@ -263,6 +263,7 @@ private fun TunerApp(vm: TunerViewModel) {
                 Screen.YouTubeList -> com.titanejstudios.tuner.ui.YouTubeListScreen(vm)
                 Screen.More -> com.titanejstudios.tuner.ui.PhoneMoreScreen(vm)
                 Screen.Library -> com.titanejstudios.tuner.ui.LibraryScreen(vm)
+                Screen.Collections -> com.titanejstudios.tuner.ui.CollectionsScreen(vm)
             }
             }
         }
@@ -281,6 +282,18 @@ private fun TunerApp(vm: TunerViewModel) {
             vm.categoryPickFor?.let { CategoryPicker(vm, it) }
             if (vm.timesUp) TimesUpDialog(vm)
             vm.timeRequest?.let { com.titanejstudios.tuner.ui.TimeRequestDialog(vm, it) }
+            vm.collectingItem?.let { item -> com.titanejstudios.tuner.ui.CollectionPicker(vm, item) }
+            vm.crashNotice?.let { why ->
+                MenuDialog(
+                    title = "Flicker closed unexpectedly last time",
+                    subtitle = why,
+                    items = listOf(
+                        MenuItem("OK") { vm.dismissCrashNotice(showLog = false) },
+                        MenuItem("Show the problem log") { vm.dismissCrashNotice(showLog = true) },
+                    ),
+                    onDismiss = { vm.dismissCrashNotice(showLog = false) },
+                )
+            }
             if (vm.filmInfoOpen) FilmInfoDialog(vm)
             if (vm.stillWatchingAsk) StillWatchingDialog(vm)
             vm.updateOffer?.let { UpdateDialog(vm, it) }

@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -53,7 +54,7 @@ import java.util.Locale
 
 /** One row in What's On, Sport and search: a programme on a channel. */
 @Composable
-private fun ProgrammeRow(app: AppState, c: Channel, p: Programme, badge: String? = null) {
+internal fun ProgrammeRow(app: AppState, c: Channel, p: Programme, badge: String? = null) {
     val now = app.now
     val on = p.start <= now && p.stop > now
     Row(
@@ -142,7 +143,7 @@ fun WhatsOnPage(app: AppState) {
 
 /** Your teams (from the TV): fixtures from ESPN, with the channel showing each one. */
 @Composable
-private fun TeamsView(app: AppState) {
+internal fun TeamsView(app: AppState) {
     val teams = app.config.teams
     var fixtures by remember { mutableStateOf<List<Espn.Fixture>?>(null) }
     LaunchedEffect(teams) {
@@ -228,12 +229,26 @@ fun SearchPage(app: AppState) {
         }
     }
     val now = app.now
-    val chans = if (q.length < 2) emptyList() else app.visibleChannels.filter { it.name.lowercase().contains(q) }.take(20)
+    // Exact matches first, then near misses (small typos: "strictley", "eastenders").
+    val chans = remember(q, app.visibleChannels) {
+        if (q.length < 2) emptyList() else app.visibleChannels.filter { it.name.lowercase().contains(q) }.take(20)
+            .let { exact -> if (exact.size >= 10) exact else exact + app.visibleChannels.filter { it !in exact && com.titanejstudios.tuner.data.Fuzzy.matches(q, it.name) }.take(10) }
+    }
     val progs = if (q.length < 3) emptyList() else app.visibleChannels.flatMap { c ->
         app.guide[c.id].orEmpty().filter { it.stop > now - 7 * 86_400_000L && it.title.lowercase().contains(q) }.map { c to it }
     }.distinctBy { it.first.id + "@" + it.second.start }.sortedBy { it.second.start }
-    val films = if (q.length < 3 || app.kids) emptyList() else app.movies.orEmpty().filter { it.name.lowercase().contains(q) }.take(30)
-    val shows = if (q.length < 3 || app.kids) emptyList() else app.series.orEmpty().filter { it.name.lowercase().contains(q) }.take(30)
+    val films = remember(q, app.movies, app.kids) { if (q.length < 3 || app.kids) emptyList() else app.movies.orEmpty().let { all ->
+        val exact = all.filter { it.name.lowercase().contains(q) }.take(30)
+        if (exact.size >= 15) exact else exact + all.asSequence().filter { it !in exact }
+            .map { it to com.titanejstudios.tuner.data.Fuzzy.score(q, it.name) }.filter { it.second > 0 }
+            .sortedByDescending { it.second }.map { it.first }.take(15).toList()
+    } }
+    val shows = remember(q, app.series, app.kids) { if (q.length < 3 || app.kids) emptyList() else app.series.orEmpty().let { all ->
+        val exact = all.filter { it.name.lowercase().contains(q) }.take(30)
+        if (exact.size >= 15) exact else exact + all.asSequence().filter { it !in exact }
+            .map { it to com.titanejstudios.tuner.data.Fuzzy.score(q, it.name) }.filter { it.second > 0 }
+            .sortedByDescending { it.second }.map { it.first }.take(15).toList()
+    } }
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(24.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
         item {
@@ -300,6 +315,47 @@ fun SearchPage(app: AppState) {
         }
         if (q.length >= 3 && chans.isEmpty() && progs.isEmpty() && films.isEmpty() && shows.isEmpty() && plex.isEmpty() && youtube.isEmpty()) {
             item { Text("Nothing found for \"$query\"", color = Soft, fontSize = 15.sp, modifier = Modifier.padding(top = 12.dp)) }
+        }
+    }
+}
+
+
+/** ⚽ Sport: what's on now and later today, by sport, and your teams' fixtures (from ESPN). */
+@Composable
+fun SportPage(app: AppState) {
+    val now = app.now
+    val minute = now / 60_000L
+    val all = remember(minute / 5, app.guide, app.visibleChannels) {
+        app.visibleChannels.asSequence().flatMap { c ->
+            app.guide[c.id].orEmpty().asSequence()
+                .filter { it.stop > now && it.start < now + 18 * 3_600_000L }
+                .mapNotNull { p -> com.titanejstudios.tuner.data.Sports.classify(p, c.group)?.let { Triple(it, c, p) } }
+        }.toList().distinctBy { it.third.title.lowercase() + it.third.start }
+    }
+    val sports = remember(all) { listOf("All") + all.map { it.first }.distinct().sorted() }
+    var chosen by remember { mutableStateOf("All") }
+    val shown = all.filter { chosen == "All" || it.first == chosen }
+    val onNow = shown.filter { it.third.start <= now }.sortedBy { it.first }
+    val later = shown.filter { it.third.start > now }.sortedBy { it.third.start }
+    // Two side by side (a scrolling list can't go inside another): the guide's sport, and your teams.
+    Row(Modifier.fillMaxSize().padding(24.dp), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
+        LazyColumn(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            item {
+                Text("Sport", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.ExtraBold)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(vertical = 10.dp)) {
+                    for (s in sports.take(12)) Pill(s, selected = s == chosen) { chosen = s }
+                }
+            }
+            item { SectionTitle("On now") }
+            if (onNow.isEmpty()) item { Text("No sport on right now.", color = Soft, fontSize = 14.sp) }
+            items(onNow, key = { "n" + it.second.id + it.third.start }) { (sport, c, p) -> ProgrammeRow(app, c, p, sport) }
+            item { SectionTitle("Later today") }
+            if (later.isEmpty()) item { Text("Nothing else in the guide today.", color = Soft, fontSize = 14.sp) }
+            items(later.take(80), key = { "l" + it.second.id + it.third.start }) { (sport, c, p) -> ProgrammeRow(app, c, p, sport) }
+        }
+        Column(Modifier.width(440.dp).fillMaxHeight()) {
+            Text("★ My teams", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
+            TeamsView(app)
         }
     }
 }

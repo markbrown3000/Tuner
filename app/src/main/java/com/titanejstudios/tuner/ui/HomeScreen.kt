@@ -100,6 +100,8 @@ enum class HomeRow(val title: String) {
     Recordings("Recordings"),
     NewEpisodes("New episodes"),
     FamilyPicks("Family picks"),
+    Collections("Your collections"),
+    Bookmarks("Bookmarks"),
     ComingSoon("Coming soon"),
     MyList("My list"),
     Apps("Your apps"),
@@ -528,7 +530,7 @@ fun HomeScreen(vm: TunerViewModel) {
         vm.yourShows, vm.plexFeature.similar, vm.becauseFilms, vm.trending,
         vm.resume, vm.recordings, vm.followedSeries, vm.watchlist, vm.reminders,
         vm.missed, vm.unfinished, vm.youtube.feed, vm.youtube.history, vm.youtube.recommended,
-        vm.familyPicks, vm.comingSoon,
+        vm.familyPicks, vm.comingSoon, vm.collections, vm.bookmarks,
     ) {
         buildMap {
             put(HomeRow.Continue, buildList {
@@ -557,6 +559,25 @@ fun HomeScreen(vm: TunerViewModel) {
                 put(HomeRow.NewEpisodes, vm.newEpisodeSeries.map { watchCard(vm, it.series, "${it.newEpisodes} new", removable = false) })
                 put(HomeRow.MyList, vm.watchlist.take(30).map { watchCard(vm, it, if (it.isSeries) "Series" else "Film", removable = true) })
                 put(HomeRow.FamilyPicks, vm.familyPicksForMe.map { pickedCard(vm, it) })
+                put(HomeRow.Collections, vm.collections.map { (name, list) ->
+                    HomeCard(
+                        key = "col$name", tag = "${list.size}", tagBg = TunerColors.Accent, tagFg = Color.White,
+                        title = "📚 $name", line1 = list.take(3).joinToString(", ") { it.name }, line2 = "Your collection",
+                        image = list.firstOrNull()?.image, poster = true, channel = null, progress = null, progressColor = TunerColors.Accent,
+                        onClick = { vm.showCollection(name) }, onLongClick = null,
+                        hero = HeroInfo(name, "Your collection · ${list.size} films and series", list.joinToString(", ") { it.name }.take(300), null, list.firstOrNull()?.image, wide = false, label = "COLLECTION"),
+                    )
+                })
+                put(HomeRow.Bookmarks, vm.bookmarks.take(20).map { b ->
+                    val at = "${b.posMs / 60_000}:${"%02d".format((b.posMs / 1000) % 60)}"
+                    HomeCard(
+                        key = "bm" + b.id, tag = "🔖 $at", tagBg = TunerColors.Accent, tagFg = Color.White,
+                        title = b.title, line1 = b.subtitle, line2 = "Hold OK to remove",
+                        image = b.poster, poster = true, channel = null, progress = null, progressColor = TunerColors.Accent,
+                        onClick = { vm.playBookmark(b) }, onLongClick = { vm.deleteBookmark(b.id) },
+                        hero = HeroInfo(b.title, "🔖 Bookmarked at $at" + (b.subtitle?.let { "  ·  $it" } ?: ""), null, null, b.poster, wide = false, label = "BOOKMARK"),
+                    )
+                })
                 put(HomeRow.ComingSoon, vm.comingSoonNow.take(20).map { comingCard(vm, it) })
             }
             put(HomeRow.All, allChannels.take(40).map { channelCard(vm, it, allChannels, now, followed) })

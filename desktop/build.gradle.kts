@@ -17,13 +17,14 @@ val sharedFiles = listOf(
     "data/Catchup.kt", "data/ChannelMerge.kt", "data/Sports.kt", "data/WhatsOn.kt", "data/HomeFeed.kt",
     "data/Languages.kt", "data/FilmName.kt", "data/Taste.kt", "data/Recommend.kt", "data/SportFollow.kt",
     "data/Watchlist.kt", "integrations/Plex.kt", "integrations/Tmdb.kt", "integrations/YouTube.kt", "integrations/GoogleDrive.kt", "integrations/Espn.kt", "integrations/OpenSubtitles.kt",
+    "data/Fuzzy.kt", "integrations/Trakt.kt",
 )
 
 // Keys built in from GitHub's secrets (the same ones as the TV app): Google sign-in for sync,
 // TMDB for film info, YouTube for search. Never in the code itself.
 val generateKeys by tasks.registering {
     val out = layout.buildDirectory.file("flickerKeys/com/titanejstudios/tuner/desktop/Keys.kt")
-    val values = listOf("TUNER_GOOGLE_CLIENT_ID", "TUNER_GOOGLE_CLIENT_SECRET", "TUNER_TMDB_KEY", "TUNER_YOUTUBE_KEY")
+    val values = listOf("TUNER_GOOGLE_CLIENT_ID", "TUNER_GOOGLE_CLIENT_SECRET", "TUNER_TMDB_KEY", "TUNER_YOUTUBE_KEY", "TUNER_TRAKT_ID", "TUNER_TRAKT_SECRET")
         .associateWith { (System.getenv(it) ?: "").trim() }
     inputs.property("keys", values.mapValues { it.value.hashCode() })
     inputs.property("version", tunerVersion)
@@ -40,6 +41,8 @@ val generateKeys by tasks.registering {
                     "    const val GOOGLE_CLIENT_SECRET = ${q(values.getValue("TUNER_GOOGLE_CLIENT_SECRET"))}\n" +
                     "    const val TMDB_KEY = ${q(values.getValue("TUNER_TMDB_KEY"))}\n" +
                     "    const val YOUTUBE_KEY = ${q(values.getValue("TUNER_YOUTUBE_KEY"))}\n" +
+                    "    const val TRAKT_ID = ${q(values.getValue("TUNER_TRAKT_ID"))}\n" +
+                    "    const val TRAKT_SECRET = ${q(values.getValue("TUNER_TRAKT_SECRET"))}\n" +
                     "    const val VERSION = ${q(tunerVersion)}\n" +
                     "}\n"
             )
@@ -79,7 +82,11 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-swing:1.9.0")
     // Finding the TV and phone on the Wi-Fi (the same "linked devices" as the TV app).
     implementation("org.jmdns:jmdns:3.5.9")
+    testImplementation(kotlin("test"))
 }
+
+tasks.withType<Test>().configureEach { useJUnitPlatform() }
+tasks.named("compileTestKotlin") { dependsOn(copyShared, generateKeys) }
 
 compose.desktop {
     application {
