@@ -144,9 +144,12 @@ class Database private constructor(context: Context) :
         fill: (addProgramme: (String, Programme) -> Unit, addXmlChannel: (String, String) -> Unit) -> Unit,
     ) {
         writableDatabase.inTransaction {
-            delete("programmes", "source_id = ?", arrayOf(sourceId))
+            // The new guide goes into a side table first: guide files usually only start a few hours
+            // back, so the older programmes already saved (for catch-up, up to a week) are kept.
+            execSQL("CREATE TEMP TABLE IF NOT EXISTS programmes_new AS SELECT * FROM programmes WHERE 0")
+            execSQL("DELETE FROM programmes_new")
             delete("xmltv_channels", "source_id = ?", arrayOf(sourceId))
-            val prog = compileStatement("INSERT INTO programmes VALUES (?,?,?,?,?,?,?,?,?)")
+            val prog = compileStatement("INSERT INTO programmes_new VALUES (?,?,?,?,?,?,?,?,?)")
             val xml = compileStatement("INSERT INTO xmltv_channels VALUES (?,?,?)")
             fill(
                 { channelId, p ->
@@ -172,6 +175,16 @@ class Database private constructor(context: Context) :
             )
             prog.close()
             xml.close()
+            val now = System.currentTimeMillis()
+            // Keep this source's older programmes only from before each channel's new guide starts
+            // (and no older than a week); everything from then on comes from the new file.
+            execSQL(
+                "DELETE FROM programmes WHERE source_id = ? AND (stop < ? OR start >= COALESCE(" +
+                    "(SELECT MIN(n.start) FROM programmes_new n WHERE n.channel_id = programmes.channel_id), ?))",
+                arrayOf<Any>(sourceId, now - 7 * 86_400_000L, now - 3 * 3_600_000L),
+            )
+            execSQL("INSERT INTO programmes SELECT * FROM programmes_new")
+            execSQL("DELETE FROM programmes_new")
         }
     }
 
