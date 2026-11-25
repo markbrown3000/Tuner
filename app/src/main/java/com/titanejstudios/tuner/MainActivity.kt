@@ -296,7 +296,8 @@ private fun TunerApp(vm: TunerViewModel) {
             }
             if (vm.filmInfoOpen) FilmInfoDialog(vm)
             if (vm.stillWatchingAsk) StillWatchingDialog(vm)
-            vm.updateOffer?.let { UpdateDialog(vm, it) }
+            // Never while something's playing: pressing OK to pause would install it and close Flicker mid-show.
+            if (vm.screen != Screen.Player) vm.updateOffer?.let { UpdateDialog(vm, it) }
             // Joined a film part way and said yes: where to watch it from the beginning.
             vm.startOver?.takeIf { vm.startOverChoosing }?.let { o ->
                 MenuDialog(
