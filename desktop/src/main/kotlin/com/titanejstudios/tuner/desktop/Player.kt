@@ -111,8 +111,11 @@ class Player {
     fun play(url: String, startMs: Long = 0L) {
         lastUrl = url
         // Still warming up: start it as soon as the player's ready (rather than freezing the window).
-        if (!ready) {
+        // …or the picture isn't on screen yet (you clicked a channel on another page and Live TV is
+        // still opening): VLC can't draw into a window that isn't there, so wait for it.
+        if (!ready || component?.isDisplayable != true) {
             pending = url to startMs
+            if (ready) waitForScreen()
             return
         }
         val opts = mutableListOf(":network-caching=1500", ":http-reconnect")
@@ -124,8 +127,28 @@ class Player {
         if (nightMode) opts += listOf(":compressor-ratio=8", ":compressor-threshold=-24", ":compressor-makeup-gain=10")
         if (subtitleScale != 100) opts += ":sub-text-scale=$subtitleScale"
         if (startMs > 0) opts += ":start-time=${startMs / 1000}"
-        player()?.media()?.play(url, *opts.toTypedArray())
+        runCatching { player()?.media()?.play(url, *opts.toTypedArray()) }
+            .onFailure { com.titanejstudios.tuner.data.AppLog.warn("Couldn't start playing", it) }
         applySoundTweaks()
+    }
+
+    private var screenTimer: javax.swing.Timer? = null
+
+    /** Checks every tenth of a second until the picture's on screen, then starts what was asked for. */
+    private fun waitForScreen() {
+        if (screenTimer != null) return
+        screenTimer = javax.swing.Timer(100) {
+            val p = pending
+            if (p == null) {
+                screenTimer?.stop()
+                screenTimer = null
+            } else if (component?.isDisplayable == true) {
+                screenTimer?.stop()
+                screenTimer = null
+                pending = null
+                play(p.first, p.second)
+            }
+        }.apply { start() }
     }
 
     /** Night mode: quiet explosions and louder voices (a compressor). Takes effect on the next start. */
