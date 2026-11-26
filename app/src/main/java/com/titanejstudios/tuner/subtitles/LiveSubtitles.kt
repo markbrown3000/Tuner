@@ -47,7 +47,7 @@ object LiveSubtitles {
     @Volatile var listening = false; private set
 
     /** About how much is downloaded, for the Settings row. */
-    const val DOWNLOAD_MB = 60
+    const val DOWNLOAD_MB = 55
 
     private const val MODEL_NAME = "vosk-model-small-en-us-0.15"
     private const val ENGINE_VERSION = "0.3.47"
