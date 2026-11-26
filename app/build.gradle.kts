@@ -149,3 +149,8 @@ dependencies {
     // The real org.json, because Android's copy only exists on the TV.
     testImplementation("org.json:json:20240303")
 }
+
+// Show the full reason when a unit test fails, right in the build log.
+tasks.withType<Test>().configureEach {
+    testLogging { exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL }
+}
