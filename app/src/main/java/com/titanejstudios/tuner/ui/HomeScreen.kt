@@ -48,6 +48,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.Image
 import androidx.compose.ui.layout.ContentScale
@@ -128,6 +129,17 @@ private class HomeCard(
     val onClick: () -> Unit,
     val onLongClick: (() -> Unit)?,
     val hero: HeroInfo,
+    /** Mood tiles: a few posters fanned out, over the mood's own colour. */
+    val collage: List<String> = emptyList(),
+    val glow: Color? = null,
+    val emoji: String? = null,
+)
+
+/** Each mood's colour for its tile. */
+private val moodGlow = mapOf(
+    "funny" to Color(0xFFF59E0B), "feelgood" to Color(0xFFEC4899), "scary" to Color(0xFF7F1D1D), "edge" to Color(0xFF0F766E),
+    "action" to Color(0xFFEA580C), "think" to Color(0xFF4338CA), "cry" to Color(0xFF2563EB), "family" to Color(0xFF16A34A),
+    "short" to Color(0xFF9333EA), "scifi" to Color(0xFF0891B2),
 )
 
 private val TILE_W = 214.dp
@@ -529,7 +541,7 @@ fun HomeScreen(vm: TunerViewModel) {
     val minute = now / 60_000
     val cards: Map<HomeRow, List<HomeCard>> = remember(
         minute, recent, favourites, allChannels, vm.sportNow, vm.topPicks, vm.plexItems, vm.plexRecent, vm.started, vm.activeProfile.id,
-        vm.yourShows, vm.plexFeature.similar, vm.becauseFilms, vm.trending,
+        vm.yourShows, vm.plexFeature.similar, vm.becauseFilms, vm.trending, vm.moodPicks,
         vm.resume, vm.recordings, vm.followedSeries, vm.watchlist, vm.reminders,
         vm.missed, vm.unfinished, vm.youtube.feed, vm.youtube.history, vm.youtube.recommended,
         vm.familyPicks, vm.comingSoon, vm.collections, vm.bookmarks,
@@ -586,12 +598,21 @@ fun HomeScreen(vm: TunerViewModel) {
             if (vm.hasVod || vm.plexLinked) {
                 val moods = if (vm.activeProfile.kids) com.titanejstudios.tuner.data.Moods.all.filter { it.key == "family" } else com.titanejstudios.tuner.data.Moods.all
                 put(HomeRow.Moods, moods.map { m ->
+                    val picks = vm.moodPicks[m.key].orEmpty()
                     HomeCard(
-                        key = "mood" + m.key, tag = m.emoji, tagBg = TunerColors.AccentSoft, tagFg = Color.White,
-                        title = "${m.emoji}  ${m.label}", line1 = "Films that fit the mood", line2 = "From Plex and your provider",
+                        key = "mood" + m.key, tag = null, tagBg = TunerColors.AccentSoft, tagFg = Color.White,
+                        title = m.label,
+                        line1 = picks.firstOrNull()?.let { "Like ${it.first}" } ?: "Films that fit the mood",
+                        line2 = null,
                         image = null, poster = false, channel = null, progress = null, progressColor = TunerColors.Accent,
                         onClick = { vm.openMood(m.key) }, onLongClick = null,
-                        hero = HeroInfo(m.label, "Films picked by mood – Plex and your provider together", null, null, null, wide = false, label = "IN THE MOOD FOR"),
+                        hero = HeroInfo(
+                            m.label,
+                            if (picks.isEmpty()) "Films picked by mood – Plex and your provider together"
+                            else "Like " + picks.joinToString(", ") { it.first } + " – Plex and your provider together",
+                            picks.firstOrNull()?.second, null, null, wide = false, label = "IN THE MOOD FOR",
+                        ),
+                        collage = picks.map { it.second }, glow = moodGlow[m.key], emoji = m.emoji,
                     )
                 })
             }
@@ -979,6 +1000,10 @@ private fun HomeTile(c: HomeCard, modifier: Modifier, onFocus: (HeroInfo) -> Uni
         modifier = modifier.size(width = if (small) 172.dp else TILE_W, height = if (small) 120.dp else TILE_H),
     ) { focused ->
         val sub = if (focused) Color(0xEEFFFFFF) else Color(0xFFC3CDEA)
+        if (c.glow != null) {
+            MoodTileArt(c, focused, small)
+            return@FocusSurface
+        }
         if (c.poster && c.image != null) {
             // Posters are shown whole beside the text, never cropped to fill a wide tile.
             Row(Modifier.fillMaxSize()) {
@@ -1016,6 +1041,38 @@ private fun HomeTile(c: HomeCard, modifier: Modifier, onFocus: (HeroInfo) -> Uni
             c.line2?.let { Text(it, color = sub, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) }
             c.progress?.let { ProgressBar(it, Modifier.padding(top = 5.dp).fillMaxWidth(), color = if (focused) Color.White else c.progressColor) }
         }
+    }
+}
+
+/** A mood tile: the mood's colour glowing from one corner, a big emoji, and posters of films that fit fanned on the right. */
+@Composable
+private fun androidx.compose.foundation.layout.BoxScope.MoodTileArt(c: HomeCard, focused: Boolean, small: Boolean) {
+    val glow = c.glow ?: TunerColors.Accent
+    Box(
+        Modifier.fillMaxSize().background(
+            Brush.linearGradient(listOf(glow.copy(alpha = if (focused) 1f else 0.85f), Color(0xFF0B1030)), start = androidx.compose.ui.geometry.Offset.Zero),
+        ),
+    )
+    // Up to three posters, overlapping and slightly turned, like a hand of cards.
+    val posters = c.collage.take(3)
+    val pw = if (small) 46.dp else 62.dp
+    posters.forEachIndexed { i, url ->
+        val fromRight = posters.size - 1 - i
+        AsyncImage(
+            model = url, contentDescription = null, contentScale = ContentScale.Crop,
+            modifier = Modifier.align(Alignment.TopEnd)
+                .padding(top = (10 + i * 6).dp, end = (10 + fromRight * (if (small) 22 else 30)).dp)
+                .size(width = pw, height = pw * 1.5f)
+                .graphicsLayer { rotationZ = (i - (posters.size - 1) / 2f) * 7f }
+                .clip(RoundedCornerShape(6.dp))
+                .background(Color(0x33000000)),
+        )
+    }
+    Text(c.emoji ?: "", fontSize = if (small) 26.sp else 34.sp, modifier = Modifier.align(Alignment.TopStart).padding(10.dp))
+    Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0.5f to Color.Transparent, 1f to Color(0xCC050A1E))))
+    Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp)) {
+        Text(c.title, color = Color.White, fontSize = if (small) 14.sp else 17.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        c.line1?.let { Text(it, color = if (focused) Color.White else Color(0xFFD6DCF0), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) }
     }
 }
 

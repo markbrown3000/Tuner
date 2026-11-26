@@ -1453,7 +1453,10 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
                 trackCleanPlay()
                 checkStillWatching()
                 if (ticks % 2 == 0 && mode is PlayMode.Vod && playback.isPlaying) saveResume(syncHome = false)
-                if (ticks % 4 == 3) refreshHomeFeed()
+                if (ticks % 4 == 3) {
+                    refreshHomeFeed()
+                    refreshMoodPicks()
+                }
                 if (ticks % 4 == 1) keepGuideFresh()
                 // Every 5 minutes: offline channels with a match on come back (see matchDayCheck).
                 if (ticks % 20 == 2) matchDayCheck()
@@ -1809,6 +1812,46 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         store.mergeVersions = mergeVersions
         recomputeVisible()
         showNotice(if (mergeVersions) "HD and SD copies now show as one channel" else "Every copy of a channel is shown")
+    }
+
+    /** For Home's "In the mood for…" tiles: a few films (title, poster) that fit each mood, changing daily. */
+    var moodPicks by mutableStateOf<Map<String, List<Pair<String, String>>>>(emptyMap()); private set
+    private var moodPicksFrom = ""
+
+    private fun refreshMoodPicks() {
+        val films = if (hasVod) movies.orEmpty() else emptyList()
+        val plexFilms = (plexFeature.recent + plexFeature.sectionItems.values.flatten()).filter { it.type == "movie" }
+        val day = System.currentTimeMillis() / 86_400_000L
+        val from = "${films.size}|${plexFilms.size}|$day|${activeProfile.id}"
+        if (from == moodPicksFrom) return
+        moodPicksFrom = from
+        val looked = filmLookups
+        val kids = activeProfile.kids
+        viewModelScope.launch {
+            val picks = withContext(Dispatchers.Default) {
+                com.titanejstudios.tuner.data.Moods.all.associate { m ->
+                    val out = ArrayList<Pair<String, String>>()
+                    for (e in plexFilms) {
+                        if (out.size >= 30) break
+                        val img = e.image ?: continue
+                        if (kids && !plexFeature.isKidsEntry(e)) continue
+                        val mins = e.durationMs.takeIf { it > 0 }?.let { (it / 60_000).toInt() }
+                        if (com.titanejstudios.tuner.data.Moods.fits(m, e.genres, mins)) out += e.title to img
+                    }
+                    if (!kids) for (f in films) {
+                        if (out.size >= 30) break
+                        val img = f.poster ?: continue
+                        val l = looked[f.name.trim()]
+                        if (com.titanejstudios.tuner.data.Moods.fits(m, listOf(f.category) + l?.genres.orEmpty(), l?.runtimeMinutes)) {
+                            out += FilmName.parse(f.name).first to img
+                        }
+                    }
+                    // Different films each day.
+                    m.key to out.distinctBy { it.first.lowercase() }.shuffled(kotlin.random.Random(day * 31 + m.key.hashCode())).take(3)
+                }
+            }
+            moodPicks = picks
+        }
     }
 
     private fun refreshHomeFeed() {
