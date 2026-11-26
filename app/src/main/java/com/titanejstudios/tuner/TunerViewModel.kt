@@ -158,6 +158,8 @@ class TeamFixture(
     val programme: Programme?,
     /** The guide reaches that day, so "no channel" really means none of yours shows it. */
     val guideCoversIt: Boolean,
+    /** Every channel showing it, best first ([channel] is the first). */
+    val channels: List<Pair<Channel, Programme>> = listOfNotNull(if (channel != null && programme != null) channel to programme else null),
 ) {
     /** "Newcastle v Arsenal" (or the guide's title for games found only in the guide). */
     val title: String get() = if (match.away.isBlank()) match.home else "${match.home} v ${match.away}"
@@ -7623,8 +7625,17 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         if (f.channel != null && (f.match.live || f.match.kickoff - now <= 15 * 60_000L)) watchFixture(f) else navigate(Screen.Teams)
     }
 
+    /** On more than one channel: you choose which (the best match is first). */
     fun watchFixture(f: TeamFixture) {
         val ch = f.channel ?: return
+        if (f.channels.size > 1) fixtureChoice = f else play(ch, channelsFor(ALL))
+    }
+
+    /** The match whose channels are being chosen from. */
+    var fixtureChoice by mutableStateOf<TeamFixture?>(null)
+
+    fun watchFixtureOn(ch: Channel) {
+        fixtureChoice = null
         play(ch, channelsFor(ALL))
     }
 
@@ -7701,8 +7712,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
                 .take(15)
             // ESPN's fixtures, each with the channel showing it (both teams named, near kick-off).
             val fromEspn = list.map { m ->
-                var best: Pair<Channel, Programme>? = null
-                var bestScore = Int.MIN_VALUE
+                val found = ArrayList<Triple<Channel, Programme, Int>>()
                 for ((cid, progs) in week) {
                     val c = byId[cid] ?: continue
                     for (p in progs) {
@@ -7714,13 +7724,13 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
                         if (c.id in favs) score += 20
                         if (com.titanejstudios.tuner.data.Sports.looksLive(p)) score += 10
                         score -= (kotlin.math.abs(p.start - (m.kickoff - 30 * 60_000L)) / 60_000L).toInt().coerceAtMost(60) / 10
-                        if (score > bestScore) {
-                            bestScore = score
-                            best = c to p
-                        }
+                        found += Triple(c, p, score)
                     }
                 }
-                TeamFixture(m, best?.first, best?.second, m.kickoff < guideEnd)
+                // Every channel showing it (one entry per channel), best first – you choose which to watch.
+                val all = found.sortedByDescending { it.third }.distinctBy { it.first.id }.map { it.first to it.second }
+                val best = all.firstOrNull()
+                TeamFixture(m, best?.first, best?.second, m.kickoff < guideEnd, all)
             }
             // Games in the guide for teams ESPN doesn't cover (or when it didn't answer).
             val guideOnly = teams.filter { n -> espnTeams[n] == null || fromEspn.none { it.match.team == n } }.flatMap { n ->
@@ -7740,7 +7750,13 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
                     }
                 }
             }.sortedBy { it.match.kickoff }
-                .distinctBy { it.match.home.lowercase() + "@" + it.match.kickoff / 3_600_000L }
+                // The same game on several channels: one entry, with all of them to choose from (favourites first).
+                .groupBy { it.match.home.lowercase() + "@" + it.match.kickoff / 3_600_000L }.values
+                .map { same ->
+                    val ordered = same.sortedBy { if (it.channel?.id in favs) 0 else 1 }
+                    val first = ordered.first()
+                    TeamFixture(first.match, first.channel, first.programme, true, ordered.mapNotNull { f -> f.channel?.let { c -> f.programme?.let { c to it } } })
+                }
                 // A game already in ESPN's list isn't listed twice.
                 .filter { g -> fromEspn.none { it.programme?.start == g.match.kickoff && it.programme?.title == g.match.home } }
             (fromEspn + guideOnly).sortedBy { it.match.kickoff }.take(15)

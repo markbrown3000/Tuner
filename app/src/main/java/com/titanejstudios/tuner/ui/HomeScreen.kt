@@ -748,8 +748,8 @@ fun HomeScreen(vm: TunerViewModel) {
                 vm.usualOffer?.let { u -> item { PillButton("★  Your usual: ${u.name}", { vm.playUsual() }, compact = true, selected = true) } }
                 // Your team: match day (watch it), or the next fixture.
                 val md = vm.matchDay
-                if (md != null) item { PillButton(fixturePill(md, matchDay = true), { vm.openMatchDay(md) }, compact = true, selected = true) }
-                else vm.nextTeamFixture?.let { f -> item { PillButton(fixturePill(f), { vm.navigate(Screen.Teams) }, compact = true) } }
+                if (md != null) item { PillButton(fixturePill(md, matchDay = true, emoji = vm.football.sportOf(md.match.team).emoji), { vm.openMatchDay(md) }, compact = true, selected = true) }
+                else vm.nextTeamFixture?.let { f -> item { PillButton(fixturePill(f, emoji = vm.football.sportOf(f.match.team).emoji), { vm.navigate(Screen.Teams) }, compact = true) } }
                 vm.lastChannel?.takeIf { it.id != vm.usualOffer?.id }?.let { last -> item { PillButton("▶  ${last.name}", { vm.play(last, allChannels) }, compact = true) } }
                 item { PillButton("TV Guide", { vm.navigate(Screen.Channels) }, compact = true) }
                 item { PillButton("Sport", { vm.navigate(Screen.Sports) }, compact = true) }
@@ -963,8 +963,8 @@ private fun PhoneHomeBody(
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)) {
                 vm.usualOffer?.let { u -> item { PillButton("★  Your usual: ${u.name}", { vm.playUsual() }, compact = true, selected = true) } }
                 val md = vm.matchDay
-                if (md != null) item { PillButton(fixturePill(md, matchDay = true), { vm.openMatchDay(md) }, compact = true, selected = true) }
-                else vm.nextTeamFixture?.let { f -> item { PillButton(fixturePill(f), { vm.navigate(Screen.Teams) }, compact = true) } }
+                if (md != null) item { PillButton(fixturePill(md, matchDay = true, emoji = vm.football.sportOf(md.match.team).emoji), { vm.openMatchDay(md) }, compact = true, selected = true) }
+                else vm.nextTeamFixture?.let { f -> item { PillButton(fixturePill(f, emoji = vm.football.sportOf(f.match.team).emoji), { vm.navigate(Screen.Teams) }, compact = true) } }
                 if (vm.christmasSeason) item { PillButton("🎄 Christmas TV", { vm.navigate(Screen.Christmas) }, compact = true) }
                 if (vm.link.linked && !vm.activeProfile.kids) item { PillButton("📺 TV remote", { vm.navigate(Screen.Remote) }, compact = true) }
                 item { PillButton("▶ YouTube", { vm.navigate(Screen.YouTube) }, compact = true) }
@@ -1574,7 +1574,7 @@ private fun SkeletonRows(status: String) {
 
 
 /** "⚽ Newcastle v Arsenal · Sat 17:30 · Sky Sports Main Event" for Home's quick buttons. */
-private fun fixturePill(f: com.titanejstudios.tuner.TeamFixture, matchDay: Boolean = false): String {
+private fun fixturePill(f: com.titanejstudios.tuner.TeamFixture, matchDay: Boolean = false, emoji: String = "⚽"): String {
     val m = f.match
     val now = System.currentTimeMillis()
     val dayFmt = java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.UK)
@@ -1588,5 +1588,6 @@ private fun fixturePill(f: com.titanejstudios.tuner.TeamFixture, matchDay: Boole
         m.timeKnown -> "$day ${hhmm(m.kickoff)}"
         else -> day
     }
-    return (if (matchDay) "⚽  Match day: " else "⚽  ") + f.title + " · " + time + (f.channel?.let { " · ${it.name}" } ?: "")
+    val more = if (f.channels.size > 1) " +${f.channels.size - 1}" else ""
+    return (if (matchDay) "$emoji  Match day: " else "$emoji  ") + f.title + " · " + time + (f.channel?.let { " · ${it.name}$more" } ?: "")
 }
