@@ -61,6 +61,8 @@ class PhoneSetupServer(
         object SettingsChanged : Event()
         object Restored : Event()
         class VpnAdded(val name: String, val text: String) : Event()
+        /** A profile picture chosen on the phone (a JPEG). */
+        class ProfilePhoto(val profileId: String, val jpeg: ByteArray) : Event()
     }
 
     /** One-off code for the setup pages; null while the setup screen isn't open. */
@@ -313,6 +315,17 @@ class PhoneSetupServer(
                 post(Event.VpnAdded(form["name"].orEmpty(), text))
                 respond(out, 200, "text/html", page("Sent ✓", "<p>The VPN server is on the TV now – turn it on in <b>Settings › VPN</b>.</p>" + back()))
             }
+            "POST /photo" -> {
+                val id = form["profile"].orEmpty()
+                val data = form["photo"].orEmpty().substringAfter("base64,", "")
+                val bytes = runCatching { android.util.Base64.decode(data, android.util.Base64.DEFAULT) }.getOrNull()
+                val profile = store.profiles.firstOrNull { it.id == id }
+                if (profile == null || bytes == null || bytes.size < 100) {
+                    return respond(out, 200, "text/html", page("No photo", "<p>Choose a profile and a photo first.</p>" + back()))
+                }
+                post(Event.ProfilePhoto(id, bytes))
+                respond(out, 200, "text/html", page("Sent ✓", "<p><b>${esc(profile.name)}</b>'s photo is on the TV now.</p>" + back()))
+            }
             "POST /restore" -> {
                 val json = form["json"].orEmpty()
                 try {
@@ -480,6 +493,9 @@ label{font-size:14px;color:#9aa4b2}.card{background:#181d24;border-radius:12px;p
 a{color:#7ab0ff}.row{display:flex;gap:8px;align-items:center}.row input{width:auto;margin:0}
 </style></head><body><h1>$title</h1>$body</body></html>"""
 
+    private fun profileOptions(): String =
+        store.profiles.joinToString("") { "<option value=\"${esc(it.id)}\">${esc(it.name)}</option>" }
+
     private fun mainPage(): String {
         val webhook = esc(store.webhookUrl ?: "")
         val t = setupToken
@@ -521,6 +537,27 @@ a{color:#7ab0ff}.row{display:flex;gap:8px;align-items:center}.row input{width:au
 document.getElementById('vfile').addEventListener('change',function(e){
  var f=e.target.files[0]; if(!f) return; var r=new FileReader();
  r.onload=function(){document.getElementById('vconf').value=r.result}; r.readAsText(f);
+});
+</script>
+
+<h2>Profile photo</h2>
+<form class="card" method="post" action="/photo?t=$t" id="pf">
+<label>Profile</label>
+<select name="profile" style="width:100%;padding:12px;margin:6px 0 12px;border-radius:8px;background:#181d24;color:#fff;border:1px solid #2b3440;font-size:16px">${profileOptions()}</select>
+<input type="file" accept="image/*" id="pfile">
+<img id="pprev" style="display:none;width:96px;height:96px;border-radius:48px;object-fit:cover;margin:6px 0">
+<input type="hidden" name="photo" id="pdata">
+<button>Send to the TV</button></form>
+<script>
+document.getElementById('pfile').addEventListener('change',function(e){
+ var f=e.target.files[0]; if(!f) return; var img=new Image();
+ img.onload=function(){
+  var s=Math.min(img.width,img.height), c=document.createElement('canvas'); c.width=c.height=384;
+  c.getContext('2d').drawImage(img,(img.width-s)/2,(img.height-s)/2,s,s,0,0,384,384);
+  var d=c.toDataURL('image/jpeg',0.86); document.getElementById('pdata').value=d;
+  var p=document.getElementById('pprev'); p.src=d; p.style.display='block';
+ };
+ img.src=URL.createObjectURL(f);
 });
 </script>
 

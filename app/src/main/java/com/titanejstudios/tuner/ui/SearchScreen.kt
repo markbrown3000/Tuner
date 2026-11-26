@@ -96,8 +96,16 @@ fun SearchScreen(vm: TunerViewModel) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Search", fontSize = 30.sp, fontWeight = FontWeight.Bold, color = TunerColors.TextPrimary)
             Spacer(Modifier.weight(1f))
+            if (vm.searchQuery.trim().length >= 2) {
+                PillButton("📍 Where can I watch it?", { vm.whereToWatch(vm.searchQuery) }, compact = true)
+                Spacer(Modifier.width(10.dp))
+            }
             PillButton("🎤 Say it", { startVoice() }, compact = true)
         }
+        Text(
+            "Try saying: \"record EastEnders\", \"next episode\", \"what's on BBC One later\", \"where can I watch Dune\", \"something funny\"",
+            color = TunerColors.TextSecondary, fontSize = 13.sp,
+        )
         Spacer(Modifier.height(12.dp))
         OutlinedTextField(
             value = vm.searchQuery,

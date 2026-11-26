@@ -49,4 +49,7 @@ object KidsRules {
             else -> null
         }
     }
+
+    /** Ten minutes before bedtime: a gentle "time to find a good place to stop". */
+    fun bedtimeHeadsUp(toBedtime: Int?): Boolean = toBedtime != null && toBedtime in 9..10
 }

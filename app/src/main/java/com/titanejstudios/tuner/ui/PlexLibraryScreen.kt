@@ -411,6 +411,15 @@ fun PlexShowScreen(vm: TunerViewModel) {
                 CenterMessage("Couldn't load the episodes")
                 return@Column
             }
+            // How far through the whole show, and a way back to the very first episode.
+            val firstEp = remember(episodes) { episodes.filter { it.season > 0 }.minWithOrNull(compareBy({ it.season }, { it.episode })) ?: episodes.first() }
+            val carryOn: (() -> Unit)? = upTo?.let { u -> { vm.playPlexEntry(u, fromStart = u.watched) } }
+            SeriesProgress(
+                watched = episodes.count { it.watched }, total = episodes.size,
+                upToLabel = upTo?.let { "S${it.season} E${it.episode}" }, onCarryOn = carryOn,
+                onFromStart = { vm.playPlexEntry(firstEp, fromStart = true) },
+            )
+            Spacer(Modifier.height(12.dp))
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(seasons.size, key = { seasons[it] }) { i ->
                     val s = seasons[i]

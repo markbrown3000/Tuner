@@ -96,45 +96,89 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+/** Profile photos chosen on a phone (one small square JPEG per profile). */
+object ProfilePhotos {
+    @Volatile var dir: java.io.File? = null
+    /** Bumped when a photo changes, so every avatar redraws. */
+    var version by mutableStateOf(0); private set
+
+    fun file(profileId: String): java.io.File? = dir?.let { java.io.File(it, profileId.filter { c -> c.isLetterOrDigit() || c == '_' || c == '-' } + ".jpg") }
+
+    fun changed() {
+        version++
+    }
+}
+
 object TunerColors {
     // Sky-style palette by default: deep navy, bright blue focus, white text. Changeable in Settings › Look.
-    var Background by mutableStateOf(Color(0xFF0A1030)); private set
-    var BackgroundBottom by mutableStateOf(Color(0xFF04071A)); private set
-    var Panel by mutableStateOf(Color(0xFF141C45)); private set
-    var PanelLight by mutableStateOf(Color(0xFF1E2A5E)); private set
-    var Accent by mutableStateOf(Color(0xFF1F7BFF)); private set
-    var AccentSoft by mutableStateOf(Color(0xFF173A8A)); private set
+    var Background by mutableStateOf(Color(0xFF07123A)); private set
+    var BackgroundBottom by mutableStateOf(Color(0xFF030920)); private set
+    var Panel by mutableStateOf(Color(0xFF10204F)); private set
+    var PanelLight by mutableStateOf(Color(0xFF1A2A5E)); private set
+    var Accent by mutableStateOf(Color(0xFF4D9BFF)); private set
+    var AccentSoft by mutableStateOf(Color(0xFF1F3F8A)); private set
+    var TextSecondary by mutableStateOf(Color(0xFFAAB6DA)); private set
 
-    val accents = listOf("sky" to "Sky blue", "blue" to "Blue", "red" to "Red", "purple" to "Purple", "green" to "Green", "orange" to "Orange", "teal" to "Teal")
-    val backgrounds = listOf("ink" to "Evening", "navy" to "Navy", "black" to "Black", "charcoal" to "Charcoal", "plum" to "Plum")
+    /** A whole look: background, panels, highlight and the quieter text colour (the same as the PC app's). */
+    class Theme(val key: String, val name: String, val bg: Long, val bgBottom: Long, val panel: Long, val panelLight: Long, val accent: Long, val soft: Long)
 
-    fun apply(accent: String, background: String) {
-        val (a, soft) = when (accent) {
-            "red" -> Color(0xFFE5173F) to Color(0xFF7A1430)
-            "purple" -> Color(0xFF8A4FFF) to Color(0xFF3E2A85)
-            "green" -> Color(0xFF17B26A) to Color(0xFF0E5C3A)
-            "orange" -> Color(0xFFFF7A1A) to Color(0xFF8A3F0E)
-            "teal" -> Color(0xFF14B8C4) to Color(0xFF0D5A62)
-            "blue" -> Color(0xFF1F7BFF) to Color(0xFF173A8A)
-            else -> Color(0xFF4D9BFF) to Color(0xFF1F3F8A)
-        }
+    val themes = listOf(
+        Theme("evening", "Evening", 0xFF07123A, 0xFF030920, 0xFF10204F, 0xFF1A2A5E, 0xFF4D9BFF, 0xFFAAB6DA),
+        Theme("sky", "Sky", 0xFF0A1030, 0xFF04071A, 0xFF141C45, 0xFF1E2A5E, 0xFF1F7BFF, 0xFFAAB6DA),
+        Theme("midnight", "Midnight", 0xFF0B0B0F, 0xFF000000, 0xFF17171E, 0xFF24242E, 0xFF7C9CFF, 0xFFB4B4C4),
+        Theme("ocean", "Ocean", 0xFF042A36, 0xFF01141B, 0xFF0A3B4A, 0xFF135467, 0xFF2FD4C7, 0xFFA6D4DC),
+        Theme("plum", "Plum", 0xFF22103A, 0xFF10061E, 0xFF331A55, 0xFF472670, 0xFFC08BFF, 0xFFCDB8E6),
+        Theme("forest", "Forest", 0xFF0E2416, 0xFF06120A, 0xFF173823, 0xFF214D31, 0xFF5FD38A, 0xFFB5D6C0),
+        Theme("sunset", "Sunset", 0xFF2A1220, 0xFF140810, 0xFF3D1B2E, 0xFF55263F, 0xFFFF8A5B, 0xFFE2C1C9),
+        Theme("slate", "Slate", 0xFF1B2128, 0xFF0D1014, 0xFF262E37, 0xFF333D49, 0xFF64B5F6, 0xFFB9C3CE),
+        Theme("cinema", "Cinema", 0xFF140C0C, 0xFF060404, 0xFF241717, 0xFF332121, 0xFFE5173F, 0xFFD6C2C2),
+        Theme("festive", "Festive", 0xFF0E2A1B, 0xFF06150D, 0xFF173D29, 0xFF22533A, 0xFFE8414F, 0xFFC9DCCF),
+        Theme("contrast", "High contrast", 0xFF000000, 0xFF000000, 0xFF161616, 0xFF2A2A2A, 0xFF2E9BFF, 0xFFEDEDED),
+    )
+
+    /** A highlight colour of your own on top of the theme ("" = the theme's own). */
+    val accents = listOf(
+        "" to "The theme's own", "sky" to "Sky blue", "blue" to "Blue", "red" to "Red", "pink" to "Pink", "purple" to "Purple",
+        "green" to "Green", "orange" to "Orange", "gold" to "Gold", "teal" to "Teal",
+    )
+
+    fun themeOf(key: String): Theme = themes.firstOrNull { it.key == key } ?: themes[0]
+
+    /** Older versions saved a background and a highlight colour: the nearest theme. */
+    fun themeForOldBackground(background: String): String = when (background) {
+        "navy" -> "sky"
+        "black" -> "midnight"
+        "charcoal" -> "slate"
+        "plum" -> "plum"
+        else -> "evening"
+    }
+
+    private fun accentColour(accent: String): Color? = when (accent) {
+        "red" -> Color(0xFFE5173F)
+        "pink" -> Color(0xFFEC4899)
+        "purple" -> Color(0xFF8A4FFF)
+        "green" -> Color(0xFF17B26A)
+        "orange" -> Color(0xFFFF7A1A)
+        "gold" -> Color(0xFFE0A100)
+        "teal" -> Color(0xFF14B8C4)
+        "blue" -> Color(0xFF1F7BFF)
+        "sky" -> Color(0xFF4D9BFF)
+        else -> null
+    }
+
+    fun apply(theme: String, accent: String) {
+        val t = themeOf(theme)
+        Background = Color(t.bg)
+        BackgroundBottom = Color(t.bgBottom)
+        Panel = Color(t.panel)
+        PanelLight = Color(t.panelLight)
+        TextSecondary = Color(t.soft)
+        val a = accentColour(accent) ?: Color(t.accent)
         Accent = a
-        AccentSoft = soft
-        val bg = when (background) {
-            "black" -> listOf(Color(0xFF0E0E12), Color(0xFF000000), Color(0xFF1A1A20), Color(0xFF27272F))
-            "charcoal" -> listOf(Color(0xFF22262C), Color(0xFF121417), Color(0xFF2C3139), Color(0xFF3A404A))
-            "plum" -> listOf(Color(0xFF1C1035), Color(0xFF0A0618), Color(0xFF2B1B4E), Color(0xFF3A2766))
-            "navy" -> listOf(Color(0xFF0A1030), Color(0xFF04071A), Color(0xFF141C45), Color(0xFF1E2A5E))
-            // "Evening": deep ink-blue, so pictures and text stand out.
-            else -> listOf(Color(0xFF07123A), Color(0xFF030920), Color(0xFF10204F), Color(0xFF1A2A5E))
-        }
-        Background = bg[0]
-        BackgroundBottom = bg[1]
-        Panel = bg[2]
-        PanelLight = bg[3]
+        // The quieter version of the highlight: part-way from the panel to it.
+        AccentSoft = androidx.compose.ui.graphics.lerp(Panel, a, 0.42f)
     }
     val TextPrimary = Color(0xFFFFFFFF)
-    val TextSecondary = Color(0xFFAAB6DA)
     val Gold = Color(0xFFFFC94A)
     val Error = Color(0xFFFF6B6B)
     val NowLine = Color(0xFFFF3B5C)
@@ -270,11 +314,14 @@ fun FocusSurface(
     content: @Composable BoxScope.(focused: Boolean) -> Unit,
 ) {
     var focused by remember { mutableStateOf(false) }
-    val bg = when {
+    val target = when {
         focused -> TunerColors.Accent
         selected -> TunerColors.AccentSoft
         else -> baseColor
     }
+    // The highlight glides on and off rather than jumping (instant in lite mode).
+    val bg = if (com.titanejstudios.tuner.data.Lite.on) target
+    else androidx.compose.animation.animateColorAsState(target, tween(110), label = "focus").value
     val scale = if (zoom) animateFloatAsState(if (focused) 1.07f else 1f, tween(120), label = "zoom").value else 1f
     Box(
         modifier = modifier
@@ -992,6 +1039,16 @@ val AvatarIcons = listOf("", "🦊", "🐼", "🦁", "🐸", "🐶", "🐱", "�
 @Composable
 fun ProfileAvatar(p: com.titanejstudios.tuner.data.Profile, size: androidx.compose.ui.unit.Dp, index: Int = 0) {
     val colour = AvatarColours[(if (p.colour >= 0) p.colour else if (p.kids) 2 else index.coerceAtLeast(0)) % AvatarColours.size]
+    // A photo chosen from a phone, when there is one.
+    val version = ProfilePhotos.version
+    val photo = remember(p.id, version) { ProfilePhotos.file(p.id)?.takeIf { it.exists() } }
+    if (photo != null) {
+        AsyncImage(
+            model = photo, contentDescription = p.name, contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+            modifier = Modifier.size(size).clip(androidx.compose.foundation.shape.CircleShape).background(colour),
+        )
+        return
+    }
     Box(Modifier.size(size).clip(androidx.compose.foundation.shape.CircleShape).background(colour), contentAlignment = Alignment.Center) {
         Text(
             p.icon.ifEmpty { if (p.kids) "🧸" else p.name.take(1).uppercase() },
@@ -1050,7 +1107,8 @@ fun rememberPictureTint(image: String?, enabled: Boolean): Color {
     val context = androidx.compose.ui.platform.LocalContext.current
     var tint by remember { mutableStateOf<Color?>(null) }
     LaunchedEffect(image, enabled) {
-        if (!enabled || image == null) {
+        // Lite mode: no extra picture decoding just for the background colour.
+        if (!enabled || image == null || com.titanejstudios.tuner.data.Lite.on) {
             tint = null
             return@LaunchedEffect
         }

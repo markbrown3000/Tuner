@@ -30,17 +30,21 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-/** A colour theme (the TV app's themes). */
+/** A colour theme (the same themes as the TV app's Settings › Look › Colour theme). */
 class Theme(val name: String, val ink: Long, val inkBottom: Long, val panel: Long, val panelLight: Long, val sky: Long, val soft: Long)
 
 val Themes = listOf(
     Theme("Evening", 0xFF07123A, 0xFF030920, 0xFF10204F, 0xFF1A2A5E, 0xFF4D9BFF, 0xFFAAB6DA),
+    Theme("Sky", 0xFF0A1030, 0xFF04071A, 0xFF141C45, 0xFF1E2A5E, 0xFF1F7BFF, 0xFFAAB6DA),
     Theme("Midnight", 0xFF0B0B0F, 0xFF000000, 0xFF17171E, 0xFF24242E, 0xFF7C9CFF, 0xFFB4B4C4),
     Theme("Ocean", 0xFF042A36, 0xFF01141B, 0xFF0A3B4A, 0xFF135467, 0xFF2FD4C7, 0xFFA6D4DC),
     Theme("Plum", 0xFF22103A, 0xFF10061E, 0xFF331A55, 0xFF472670, 0xFFC08BFF, 0xFFCDB8E6),
     Theme("Forest", 0xFF0E2416, 0xFF06120A, 0xFF173823, 0xFF214D31, 0xFF5FD38A, 0xFFB5D6C0),
     Theme("Sunset", 0xFF2A1220, 0xFF140810, 0xFF3D1B2E, 0xFF55263F, 0xFFFF8A5B, 0xFFE2C1C9),
     Theme("Slate", 0xFF1B2128, 0xFF0D1014, 0xFF262E37, 0xFF333D49, 0xFF64B5F6, 0xFFB9C3CE),
+    Theme("Cinema", 0xFF140C0C, 0xFF060404, 0xFF241717, 0xFF332121, 0xFFE5173F, 0xFFD6C2C2),
+    Theme("Festive", 0xFF0E2A1B, 0xFF06150D, 0xFF173D29, 0xFF22533A, 0xFFE8414F, 0xFFC9DCCF),
+    Theme("High contrast", 0xFF000000, 0xFF000000, 0xFF161616, 0xFF2A2A2A, 0xFF2E9BFF, 0xFFEDEDED),
 )
 
 /** The theme in use (Settings › This PC); every screen redraws when it changes. */

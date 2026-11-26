@@ -112,6 +112,13 @@ fun GuideScreen(vm: TunerViewModel) {
         runCatching { initialFocus.requestFocus() }
     }
 
+    // A moment on a programme that's on now plays its channel in the corner; scrolling later reads more guide.
+    LaunchedEffect(focused) {
+        val f = focused ?: return@LaunchedEffect
+        vm.guideFocused(f.first, f.second)
+    }
+    LaunchedEffect(windowStart) { vm.guideNeeds(windowStart + WINDOW) }
+
     fun shift(channelId: String, toLast: Boolean, delta: Long) {
         val target = (windowStart + delta).coerceIn(minStart, maxStart)
         if (target != windowStart) {
@@ -123,7 +130,7 @@ fun GuideScreen(vm: TunerViewModel) {
     fun activate(ch: Channel, p: Programme?) {
         val t = System.currentTimeMillis()
         if (p == null || (p.start <= t && p.stop > t)) {
-            vm.play(ch, list)
+            vm.watchFromGuide(ch, list)
         } else if (p.stop <= t) {
             if (vm.canCatchup(ch, p)) {
                 vm.playCatchup(ch, p, list)
@@ -330,7 +337,21 @@ private fun GuideHeader(
                 Text(hhmm(vm.now), fontSize = 28.sp, color = TunerColors.TextPrimary)
             }
             Spacer(Modifier.height(6.dp))
-            MiniPreview(vm, Modifier.size(width = 210.dp, height = 118.dp))
+            if (vm.mode != null) MiniPreview(vm, Modifier.size(width = 210.dp, height = 118.dp))
+            else {
+                // Nothing playing yet: the programme's picture until its channel starts in the corner.
+                Box(
+                    Modifier.size(width = 210.dp, height = 118.dp).clip(RoundedCornerShape(10.dp)).background(TunerColors.Panel),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    val pic = focused?.second?.image
+                    if (pic != null) coil.compose.AsyncImage(model = pic, contentDescription = null, contentScale = androidx.compose.ui.layout.ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                    else Text(
+                        if (vm.guidePreview && !vm.liteOn) "Rest on a programme\nthat's on now to\npreview it here" else "📺",
+                        color = TunerColors.TextSecondary, fontSize = 12.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    )
+                }
+            }
         }
     }
 }

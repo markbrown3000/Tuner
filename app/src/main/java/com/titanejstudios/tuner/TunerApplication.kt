@@ -13,7 +13,10 @@ class TunerApplication : Application(), ImageLoaderFactory {
         // Safe mode must know about earlier crashes before anything else starts.
         com.titanejstudios.tuner.data.SafeMode.onAppStart(this)
         AppLog.init(this)
+        com.titanejstudios.tuner.data.Lite.init(this)
+        com.titanejstudios.tuner.ui.ProfilePhotos.dir = java.io.File(filesDir, "avatars")
         if (com.titanejstudios.tuner.data.SafeMode.active) AppLog.info("Started in safe mode")
+        if (com.titanejstudios.tuner.data.Lite.on) AppLog.info("Lite mode on (" + com.titanejstudios.tuner.data.Lite.label + ")")
         logHowItLastClosed()
         // Older Android (Fire OS 6/7) keeps no record of why: Flicker's own note tells us.
         com.titanejstudios.tuner.data.SafeMode.endedWhileOpen()?.let { what ->
@@ -92,7 +95,9 @@ class TunerApplication : Application(), ImageLoaderFactory {
 
     /** Logos and programme pictures are cached on disk so they appear instantly next time. */
     override fun newImageLoader(): ImageLoader = ImageLoader.Builder(this)
-        .memoryCache { MemoryCache.Builder(this).maxSizePercent(0.20).build() }
+        // Lite mode: half the pictures kept in memory, each at half the size (no see-through needed for posters).
+        .memoryCache { MemoryCache.Builder(this).maxSizePercent(if (com.titanejstudios.tuner.data.Lite.on) 0.10 else 0.20).build() }
+        .allowRgb565(com.titanejstudios.tuner.data.Lite.on)
         .diskCache {
             DiskCache.Builder()
                 .directory(cacheDir.resolve("images"))

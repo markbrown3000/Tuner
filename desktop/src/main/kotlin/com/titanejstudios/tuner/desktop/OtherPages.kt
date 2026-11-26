@@ -1,6 +1,7 @@
 package com.titanejstudios.tuner.desktop
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -469,8 +470,8 @@ fun SettingsPage(app: AppState) {
                     for (m in listOf(0, 5, 10, 30)) Pill(if (m == 0) "Off" else "After $m min", selected = app.config.screensaverMin == m && v >= 0) { app.setScreensaver(m); app.listsVersion = v + 1 }
                 }
                 Spacer(Modifier.height(10.dp))
-                Text("Colours", color = Color.White, fontSize = 14.sp)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 4.dp)) {
+                Text("Colour theme (the same themes as the TV)", color = Color.White, fontSize = 14.sp)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 4.dp).horizontalScroll(androidx.compose.foundation.rememberScrollState())) {
                     for (t in Themes) Pill(t.name, selected = currentTheme.name == t.name) {
                         currentTheme = t
                         app.config.theme = t.name

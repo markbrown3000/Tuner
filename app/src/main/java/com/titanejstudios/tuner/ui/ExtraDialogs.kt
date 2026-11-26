@@ -159,6 +159,7 @@ fun FilmInfoDialog(vm: TunerViewModel) {
                     val thumb = remember(vm.tasteVersion, info.title) { vm.thumbOf(info.title) }
                     PillButton("👍", { vm.thumb(info.title, info.genres.firstOrNull(), true) }, selected = thumb == 1)
                     PillButton("👎", { vm.thumb(info.title, info.genres.firstOrNull(), false) }, selected = thumb == -1)
+                    PillButton("📍 Where to watch", { vm.whereToWatch(info.title) })
                 }
                 Spacer(Modifier.height(4.dp))
                 Text("Film info from TMDB", color = TunerColors.TextSecondary, fontSize = 12.sp)
