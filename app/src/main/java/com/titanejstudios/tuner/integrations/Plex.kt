@@ -226,6 +226,8 @@ class Plex(private val clientId: String) {
         val showName: String? = null,
         /** Genres Plex knows ("Comedy", "Horror"…), for mood picks. */
         val genres: List<String> = emptyList(),
+        /** IMDb or TMDB score out of 10, for "Highest rated" (null when Plex only has Rotten Tomatoes or nothing). */
+        val score: Double? = null,
     ) {
         val isShow: Boolean get() = type == "show"
 
@@ -502,9 +504,7 @@ class Plex(private val clientId: String) {
             }
             val part = m.optJSONArray("Media")?.optJSONObject(0)?.optJSONArray("Part")?.optJSONObject(0)?.optString("key")
             val playUrl = part?.takeIf { it.isNotBlank() }?.let { "${s.uri}$it?X-Plex-Token=${s.token}" }
-            val rating = imdbRating(m)?.let { "IMDb " + String.format(java.util.Locale.UK, "%.1f", it) }
-                ?: m.optDouble("audienceRating", m.optDouble("rating", 0.0)).takeIf { it > 0.0 }
-                    ?.let { "★ " + String.format(java.util.Locale.UK, "%.1f", it) }
+            val (rating, score) = ratingOf(m)
             out += Entry(
                 ratingKey = m.optString("ratingKey"),
                 title = m.optString("title"),
@@ -531,6 +531,7 @@ class Plex(private val clientId: String) {
                 },
                 showKey = m.optString("grandparentRatingKey").takeIf { it.isNotBlank() },
                 showName = m.optString("grandparentTitle").takeIf { it.isNotBlank() },
+                score = score,
                 genres = m.optJSONArray("Genre")?.let { g -> (0 until g.length()).mapNotNull { g.optJSONObject(it)?.optString("tag")?.takeIf { t -> t.isNotBlank() } } } ?: emptyList(),
             )
         }
@@ -551,6 +552,36 @@ class Plex(private val clientId: String) {
         if (m.optString("audienceRatingImage").startsWith("imdb://")) return m.optDouble("audienceRating", 0.0).takeIf { it > 0.0 }
         if (m.optString("ratingImage").startsWith("imdb://")) return m.optDouble("rating", 0.0).takeIf { it > 0.0 }
         return null
+    }
+
+    /**
+     * The rating to show, and a score out of 10 to sort by. IMDb first, then TMDB; Rotten Tomatoes
+     * is a percentage of reviews that liked it (a small film with five good reviews is "100%"),
+     * so it's shown as 🍅 92% and never counted as a score out of 10. A rating from an unknown
+     * source isn't shown at all.
+     */
+    private fun ratingOf(m: JSONObject): Pair<String?, Double?> {
+        val uk = java.util.Locale.UK
+        imdbRating(m)?.let { return "IMDb " + String.format(uk, "%.1f", it) to it }
+        fun tmdb(): Double? {
+            m.optJSONArray("Rating")?.let { arr ->
+                for (i in 0 until arr.length()) {
+                    val r = arr.optJSONObject(i) ?: continue
+                    if (r.optString("image").startsWith("themoviedb://")) r.optDouble("value", 0.0).takeIf { it > 0.0 }?.let { return it }
+                }
+            }
+            if (m.optString("audienceRatingImage").startsWith("themoviedb://")) return m.optDouble("audienceRating", 0.0).takeIf { it > 0.0 }
+            if (m.optString("ratingImage").startsWith("themoviedb://")) return m.optDouble("rating", 0.0).takeIf { it > 0.0 }
+            return null
+        }
+        tmdb()?.let { return "TMDB " + String.format(uk, "%.1f", it) to it }
+        val rt = when {
+            m.optString("ratingImage").contains("rottentomatoes") -> m.optDouble("rating", 0.0)
+            m.optString("audienceRatingImage").contains("rottentomatoes") -> m.optDouble("audienceRating", 0.0)
+            else -> 0.0
+        }
+        if (rt > 0.0) return "🍅 " + Math.round(rt * 10) + "%" to null
+        return null to null
     }
 
     /** Tells Plex where you are, so Continue watching stays right in the Plex app too. */

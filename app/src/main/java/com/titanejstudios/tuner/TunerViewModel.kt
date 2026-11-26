@@ -575,7 +575,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     fun ratingLabelFor(name: String, isSeries: Boolean, providerRating: String?): String? {
         val key = ratingKey(name, isSeries)
         vodRatings[key]?.let { r ->
-            val score = if (r.value > 0.0) (if (r.source == "IMDb") "IMDb " else "★ ") + String.format(Locale.UK, "%.1f", r.value) else null
+            val score = if (r.value > 0.0) (if (r.source == "IMDb") "IMDb " else "TMDB ") + String.format(Locale.UK, "%.1f", r.value) else null
             val label = listOfNotNull(score, r.certificate).joinToString("  ·  ")
             if (label.isNotEmpty()) return label
         }
@@ -5021,7 +5021,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
                     if (p != null) used += p.ratingKey
                     out += LibraryTitle(
                         "i:" + (f?.id ?: s?.id), FilmName.parse(name).first, y ?: p?.year, p?.image ?: f?.poster ?: s?.cover,
-                        p?.rating ?: (f?.rating ?: s?.rating)?.let { "★ $it" }, f, s, p,
+                        p?.rating ?: ratingLabelFor(name, s != null, f?.rating ?: s?.rating), f, s, p,
                     )
                 }
                 for (p in plexList) {
