@@ -66,10 +66,23 @@ object AppLog {
     @Synchronized
     fun read(): String = try {
         val f = file
-        if (f == null || !f.exists()) "" else f.readLines().takeLast(600).reversed().joinToString("\n")
+        if (f == null || !f.exists()) "" else newestFirst(f.readLines().takeLast(600))
     } catch (e: Exception) {
         ""
     }
+
+    /** Whole entries newest first, each still reading top to bottom (crash details aren't upside down). */
+    fun newestFirst(lines: List<String>): String {
+        val entries = ArrayList<MutableList<String>>()
+        for (line in lines) {
+            if (entries.isEmpty() || entryStart.containsMatchIn(line)) entries.add(mutableListOf(line))
+            else entries.last().add(line)
+        }
+        return entries.asReversed().joinToString("\n") { it.joinToString("\n") }
+    }
+
+    /** "26 Nov 22:05:32  PROBLEM  …" */
+    private val entryStart = Regex("^\\d{2} \\w{3,4} \\d{2}:\\d{2}:\\d{2}  [A-Z]+  ")
 
     @Synchronized
     fun clear() {

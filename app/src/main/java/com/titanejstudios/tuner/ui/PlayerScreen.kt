@@ -82,6 +82,11 @@ fun PlayerScreen(vm: TunerViewModel) {
     val isLive = mode is PlayMode.Live
     val channel = vm.playing
     val context = LocalContext.current
+    // Live subtitles listen only while this full-screen player is open.
+    DisposableEffect(Unit) {
+        LiveSubtitles.setInPlayer(true)
+        onDispose { LiveSubtitles.setInPlayer(false) }
+    }
 
     var overlay by remember { mutableStateOf(Overlay.None) }
     var showStats by remember { mutableStateOf(false) }

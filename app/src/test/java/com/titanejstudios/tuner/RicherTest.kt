@@ -121,4 +121,20 @@ class RicherTest {
         assertEquals("short", l.tail("short", 20))
         assertEquals("over the lazy dog", l.tail("the quick brown fox jumps over the lazy dog", 18))
     }
+
+    @Test
+    fun problemLogShowsNewestEntriesFirstButEachTheRightWayUp() {
+        val lines = listOf(
+            "26 Nov 22:05:20  INFO  started",
+            "26 Nov 22:05:26  PROBLEM  Last closed: it froze",
+            "\"main\" prio=5 tid=1 Blocked",
+            "  at com.example.Thing.wait(Thing.kt:1)",
+            "26 Nov 22:05:32  PROBLEM  low on memory",
+        )
+        val shown = com.titanejstudios.tuner.data.AppLog.newestFirst(lines).lines()
+        assertEquals("26 Nov 22:05:32  PROBLEM  low on memory", shown[0])
+        assertEquals("26 Nov 22:05:26  PROBLEM  Last closed: it froze", shown[1])
+        assertEquals("\"main\" prio=5 tid=1 Blocked", shown[2])
+        assertEquals("26 Nov 22:05:20  INFO  started", shown[4])
+    }
 }

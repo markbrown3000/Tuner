@@ -67,7 +67,7 @@ class TunerApplication : Application(), ImageLoaderFactory {
             for (e in exits.sortedBy { it.timestamp }) {
                 // The first lines of Android's report say where it was stuck or crashed.
                 val trace = if (e.reason == android.app.ApplicationExitInfo.REASON_CRASH_NATIVE || e.reason == android.app.ApplicationExitInfo.REASON_ANR) {
-                    runCatching { e.traceInputStream?.bufferedReader()?.use { r -> r.lineSequence().take(40).joinToString("\n") } }.getOrNull()
+                    runCatching { e.traceInputStream?.bufferedReader()?.use { r -> usefulTrace(r.readLines(), e.reason == android.app.ApplicationExitInfo.REASON_ANR) } }.getOrNull()
                 } else null
                 val outOfMemory = trace != null && listOf("Out of memory", "OutOfMemory", "mark stack", "Failed anonymous mmap").any { it in trace }
                 val why = if (outOfMemory) "Flicker ran out of memory" else when (e.reason) {
@@ -96,6 +96,31 @@ class TunerApplication : Application(), ImageLoaderFactory {
                 } else AppLog.info(line)
             }
         }.onFailure { AppLog.warn("Couldn't read how Flicker last closed", it) }
+    }
+
+    /**
+     * The part of Android's report that says what Flicker was doing: for a freeze, the main
+     * thread's stack (not the memory statistics at the top); for a native crash, the signal and backtrace.
+     */
+    private fun usefulTrace(lines: List<String>, anr: Boolean): String {
+        val keep = ArrayList<String>()
+        if (anr) {
+            val start = lines.indexOfFirst { it.startsWith("\"main\"") }
+            if (start >= 0) {
+                for (l in lines.drop(start)) {
+                    if (l.isBlank()) break
+                    keep += l
+                    if (keep.size >= 30) break
+                }
+            }
+        } else {
+            lines.filter { it.startsWith("signal ") || it.startsWith("Abort message") || it.startsWith("Cause:") }.take(3).forEach { keep += it }
+            val bt = lines.indexOfFirst { it.trim() == "backtrace:" }
+            if (bt >= 0) keep += lines.drop(bt).take(20)
+        }
+        // Keep the out-of-memory signs the caller looks for.
+        lines.firstOrNull { l -> listOf("Out of memory", "OutOfMemory", "Failed anonymous mmap").any { it in l } }?.let { keep.add(0, it.trim()) }
+        return (if (keep.isEmpty()) lines.take(15) else keep).joinToString("\n")
     }
 
     /** Logos and programme pictures are cached on disk so they appear instantly next time. */
