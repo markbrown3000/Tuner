@@ -17,6 +17,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.wrapContentHeight
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -80,7 +84,10 @@ fun FilmInfoDialog(vm: TunerViewModel) {
     }
     ModalLayer(onDismiss = { vm.closeFilmInfo() }) {
         Column(
-            Modifier.fillMaxWidth(0.94f).widthIn(max = 900.dp).clip(RoundedCornerShape(16.dp)).background(TunerColors.Panel)
+            // Never taller than the screen: it scrolls instead of squashing the bottom rows.
+            Modifier.fillMaxWidth(0.94f).widthIn(max = 900.dp).fillMaxHeight(0.94f).wrapContentHeight(Alignment.CenterVertically)
+                .clip(RoundedCornerShape(16.dp)).background(TunerColors.Panel)
+                .verticalScroll(androidx.compose.foundation.rememberScrollState())
         ) {
             if (info == null) {
                 Column(Modifier.fillMaxWidth().padding(32.dp)) {
@@ -90,7 +97,7 @@ fun FilmInfoDialog(vm: TunerViewModel) {
                 }
                 return@Column
             }
-            Box(Modifier.fillMaxWidth().aspectRatio(2.4f)) {
+            Box(Modifier.fillMaxWidth().aspectRatio(2.4f).heightIn(max = 300.dp)) {
                 val pic = info.backdrop ?: info.poster
                 if (pic != null) AsyncImage(model = pic, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
                 // The trailer quietly takes over the picture after a moment (muted).
@@ -120,10 +127,21 @@ fun FilmInfoDialog(vm: TunerViewModel) {
                 }
             }
             Column(Modifier.fillMaxWidth().padding(horizontal = 28.dp, vertical = 16.dp)) {
-                info.overview?.let { Text(it, color = Color(0xFFD5DCF2), fontSize = 16.sp, maxLines = 6, overflow = TextOverflow.Ellipsis) }
+                info.overview?.let { Text(it, color = Color(0xFFD5DCF2), fontSize = 16.sp, maxLines = 4, overflow = TextOverflow.Ellipsis) }
                 if (info.cast.isNotEmpty()) {
                     Spacer(Modifier.height(10.dp))
                     Text("With " + info.cast.joinToString(", "), color = TunerColors.TextSecondary, fontSize = 15.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                }
+                Spacer(Modifier.height(18.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    val trailer = info.trailerKey
+                    if (trailer != null) PillButton("▶ Trailer", { vm.playTrailer(trailer, info.title) }, Modifier.focusRequester(first))
+                    PillButton("Close", { vm.closeFilmInfo() }, if (trailer == null) Modifier.focusRequester(first) else Modifier)
+                    // 👍 / 👎: more or fewer like it in recommendations and Surprise me.
+                    val thumb = remember(vm.tasteVersion, info.title) { vm.thumbOf(info.title) }
+                    PillButton("👍", { vm.thumb(info.title, info.genres.firstOrNull(), true) }, selected = thumb == 1)
+                    PillButton("👎", { vm.thumb(info.title, info.genres.firstOrNull(), false) }, selected = thumb == -1)
+                    PillButton("📍 Where to watch", { vm.whereToWatch(info.title) })
                 }
                 // Part of a series: the films in order, yours to play.
                 vm.filmCollection?.let { (name, parts) ->
@@ -137,7 +155,7 @@ fun FilmInfoDialog(vm: TunerViewModel) {
                             FocusSurface(
                                 onClick = { vm.playSeriesPart(p) },
                                 baseColor = if (here) TunerColors.Accent.copy(alpha = 0.35f) else TunerColors.PanelLight,
-                                modifier = Modifier.width(92.dp),
+                                modifier = Modifier.width(84.dp),
                             ) { _ ->
                                 Column {
                                     Box(Modifier.fillMaxWidth().aspectRatio(2f / 3f)) {
@@ -149,17 +167,6 @@ fun FilmInfoDialog(vm: TunerViewModel) {
                             }
                         }
                     }
-                }
-                Spacer(Modifier.height(18.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    val trailer = info.trailerKey
-                    if (trailer != null) PillButton("▶ Trailer", { vm.playTrailer(trailer, info.title) }, Modifier.focusRequester(first))
-                    PillButton("Close", { vm.closeFilmInfo() }, if (trailer == null) Modifier.focusRequester(first) else Modifier)
-                    // 👍 / 👎: more or fewer like it in recommendations and Surprise me.
-                    val thumb = remember(vm.tasteVersion, info.title) { vm.thumbOf(info.title) }
-                    PillButton("👍", { vm.thumb(info.title, info.genres.firstOrNull(), true) }, selected = thumb == 1)
-                    PillButton("👎", { vm.thumb(info.title, info.genres.firstOrNull(), false) }, selected = thumb == -1)
-                    PillButton("📍 Where to watch", { vm.whereToWatch(info.title) })
                 }
                 Spacer(Modifier.height(4.dp))
                 Text("Film info from TMDB", color = TunerColors.TextSecondary, fontSize = 12.sp)
