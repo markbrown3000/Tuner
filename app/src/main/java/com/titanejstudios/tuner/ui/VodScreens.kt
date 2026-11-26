@@ -875,7 +875,8 @@ fun LibraryScreen(vm: TunerViewModel) {
         },
         tintOn = vm.tintFromPicture,
         compact = compactLayout(vm),
-        phone = PhoneCatalogueInfo(vm, { it.key }, { t -> t.rating?.filter { it.isDigit() || it == '.' }?.toDoubleOrNull() ?: 0.0 }, { null }, isSeries = shows),
+        // Highest rated: IMDb/TMDB only (Plex's, or looked up) – never a Rotten Tomatoes percentage.
+        phone = PhoneCatalogueInfo(vm, { it.key }, { t -> t.plex?.score ?: vm.ratingValueFor(t.title, shows, t.film?.rating ?: t.series?.rating) }, { null }, isSeries = shows),
     )
 }
 

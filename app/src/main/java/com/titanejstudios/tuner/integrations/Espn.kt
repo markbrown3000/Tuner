@@ -9,11 +9,53 @@ import java.util.Locale
 import java.util.TimeZone
 
 /**
- * Football fixtures from ESPN's public site data (no key or account). It isn't an official API,
+ * Fixtures from ESPN's public site data (no key or account): football, rugby and US sports. It isn't an official API,
  * so everything here fails quietly – Flicker then falls back to finding games in the TV guide.
  */
 object Espn {
-    private const val BASE = "https://site.api.espn.com/apis/site/v2/sports/soccer"
+    private const val BASE = "https://site.api.espn.com/apis/site/v2/sports"
+
+    /** ESPN's path for a league: "eng.1" (saved by older versions) is football; others say their sport ("rugby/267979"). */
+    fun path(league: String): String = if ('/' in league) league else "soccer/$league"
+
+    /**
+     * Sports you can follow. Those with leagues get fixtures from ESPN; the rest (and any team ESPN
+     * doesn't list) are found by name in the TV guide. [guideType] is the guide's sport (Sports.TYPES),
+     * so a Newcastle rugby fan isn't shown Newcastle United.
+     */
+    class SportChoice(val key: String, val label: String, val emoji: String, val guideType: String, val leagues: List<Pair<String, String>>, val hint: String)
+
+    val SPORTS: List<SportChoice> by lazy {
+        listOf(
+            SportChoice("football", "Football", "⚽", "Football", LEAGUES, "Part of the name, e.g. Newcastle"),
+            SportChoice(
+                "rugby", "Rugby union", "🏉", "Rugby",
+                listOf(
+                    "rugby/267979" to "Premiership Rugby", "rugby/270557" to "United Rugby Championship",
+                    "rugby/270559" to "Top 14", "rugby/180659" to "Six Nations", "rugby/242041" to "Super Rugby",
+                ),
+                "A club or country, e.g. Newcastle Red Bulls or England",
+            ),
+            SportChoice("rugbyleague", "Rugby league", "🏉", "Rugby", listOf("rugby-league/3" to "Super League"), "e.g. Wigan Warriors"),
+            SportChoice("nfl", "American football", "🏈", "US sports", listOf("football/nfl" to "NFL"), "e.g. Patriots"),
+            SportChoice("nba", "Basketball", "🏀", "US sports", listOf("basketball/nba" to "NBA"), "e.g. Lakers"),
+            SportChoice("nhl", "Ice hockey", "🏒", "US sports", listOf("hockey/nhl" to "NHL"), "e.g. Maple Leafs"),
+            SportChoice("mlb", "Baseball", "⚾", "US sports", listOf("baseball/mlb" to "MLB"), "e.g. Yankees"),
+            SportChoice("cricket", "Cricket", "🏏", "Cricket", emptyList(), "A team or competition, e.g. England or The Hundred"),
+            SportChoice("motorsport", "F1 & motorsport", "🏎", "Motorsport", emptyList(), "As the guide says it, e.g. Formula 1 or MotoGP"),
+            SportChoice("darts", "Darts & snooker", "🎯", "Darts & Snooker", emptyList(), "A player or event, e.g. Luke Littler or Premier League Darts"),
+            SportChoice("tennis", "Tennis", "🎾", "Tennis", emptyList(), "A player or event, e.g. Draper or Wimbledon"),
+            SportChoice("golf", "Golf", "⛳", "Golf", emptyList(), "A player or event, e.g. Rory McIlroy or The Open"),
+            SportChoice("boxing", "Boxing & UFC", "🥊", "Boxing & UFC", emptyList(), "A fighter, e.g. Anthony Joshua"),
+            SportChoice("racing", "Horse racing", "🏇", "Racing", emptyList(), "A meeting, e.g. Cheltenham"),
+        )
+    }
+
+    fun sport(key: String?): SportChoice? = SPORTS.firstOrNull { it.key == key }
+
+    /** Which sport a saved ESPN league belongs to. */
+    fun sportOfLeague(league: String): SportChoice? = SPORTS.firstOrNull { s -> s.leagues.any { it.first == league } }
+        ?: if ('/' !in league) SPORTS.first() else null
 
     /** Leagues whose teams you can pick from (ESPN's codes). */
     val LEAGUES = listOf(
@@ -91,7 +133,7 @@ object Espn {
 
     /** Every team in one league (blocking). */
     fun teams(league: String, leagueName: String): List<Team> {
-        val leagues = get("$BASE/$league/teams").optJSONArray("sports")?.optJSONObject(0)?.optJSONArray("leagues") ?: return emptyList()
+        val leagues = get("$BASE/${path(league)}/teams").optJSONArray("sports")?.optJSONObject(0)?.optJSONArray("leagues") ?: return emptyList()
         val arr = leagues.optJSONObject(0)?.optJSONArray("teams") ?: return emptyList()
         return (0 until arr.length()).mapNotNull { i ->
             val t = arr.optJSONObject(i)?.optJSONObject("team") ?: return@mapNotNull null
@@ -103,7 +145,7 @@ object Espn {
 
     /** A team's coming matches (cups too), soonest first. Blocking. */
     fun fixtures(team: Team, followedName: String): List<Fixture> {
-        val o = get("$BASE/${team.league}/teams/${team.id}/schedule?fixture=true")
+        val o = get("$BASE/${path(team.league)}/teams/${team.id}/schedule" + if ('/' in team.league) "" else "?fixture=true")
         val events = o.optJSONArray("events") ?: JSONArray()
         val out = ArrayList<Fixture>()
         for (i in 0 until events.length()) {

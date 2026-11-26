@@ -37,6 +37,7 @@ import com.titanejstudios.tuner.data.Programme
 import com.titanejstudios.tuner.TeamFixture
 import com.titanejstudios.tuner.integrations.Espn
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -45,8 +46,10 @@ import java.util.Locale
 @Composable
 fun TeamsScreen(vm: TunerViewModel) {
     val football = vm.football
-    var searching by remember { mutableStateOf(false) }
-    var results by remember { mutableStateOf<Pair<String, List<Espn.Team>>?>(null) }
+    var pickingSport by remember { mutableStateOf(false) }
+    var searching by remember { mutableStateOf<Espn.SportChoice?>(null) }
+    var results by remember { mutableStateOf<Triple<String, Espn.SportChoice, List<Espn.Team>>?>(null) }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
     var teamMenu by remember { mutableStateOf<String?>(null) }
     var fixtureMenu by remember { mutableStateOf<TeamFixture?>(null) }
     val first = remember { FocusRequester() }
@@ -66,20 +69,20 @@ fun TeamsScreen(vm: TunerViewModel) {
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         item {
-            Text("⚽ My teams", fontSize = if (narrow) 26.sp else 32.sp, fontWeight = FontWeight.Bold, color = TunerColors.TextPrimary)
+            Text("★ My teams", fontSize = if (narrow) 26.sp else 32.sp, fontWeight = FontWeight.Bold, color = TunerColors.TextPrimary)
             Text(
-                "Your teams' fixtures (from ESPN) and which of your channels shows each one. Their games stand out in the guide, " +
-                    "and reminders pop up 5 minutes before kick-off.",
+                "Football, rugby, cricket, F1, darts and more: your teams' and players' games, which of your channels shows each one, " +
+                    "and recent ones you can still catch up on. Fixtures come from ESPN where it has them, otherwise from the TV guide.",
                 color = TunerColors.TextSecondary, fontSize = 14.sp,
             )
             Spacer(Modifier.height(10.dp))
         }
         item {
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                item { PillButton("+ Add a team", { searching = true }, Modifier.focusRequester(first), compact = true) }
+                item { PillButton("+ Add a team or player", { pickingSport = true }, Modifier.focusRequester(first), compact = true) }
                 items(teams.size) { i ->
                     val n = teams[i]
-                    PillButton((if (football.espnTeams[n] != null) "★ " else "☆ ") + n, { teamMenu = n }, compact = true)
+                    PillButton(football.sportOf(n).emoji + " " + n, { teamMenu = n }, compact = true)
                 }
                 if (teams.isNotEmpty()) item {
                     PillButton(if (football.loadingFixtures) "Updating…" else "↻ Update", { vm.refreshTeamFixtures(force = true) }, compact = true)
@@ -124,34 +127,97 @@ fun TeamsScreen(vm: TunerViewModel) {
                 }
             }
         }
+        // Catch up: your teams' recent games still on catch-up, and any you recorded.
+        if (teams.isNotEmpty()) {
+            val recorded = vm.recordings.filter { r ->
+                r.status == com.titanejstudios.tuner.data.RecStatus.DONE && teams.any { com.titanejstudios.tuner.data.SportFollow.mentions(r.title, it) }
+            }.sortedByDescending { it.start }.take(6)
+            val past = vm.teamCatchup
+            item {
+                Spacer(Modifier.height(14.dp))
+                Text("Catch up", color = TunerColors.TextPrimary, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+            }
+            if (past.isEmpty() && recorded.isEmpty()) item {
+                Text(
+                    "Nothing to catch up on – recent games show here when one of your channels has catch-up for them.",
+                    color = TunerColors.TextSecondary, fontSize = 14.sp,
+                )
+            }
+            items(recorded.size) { i ->
+                val r = recorded[i]
+                FocusSurface(memoryKey = "trec|${r.id}", onClick = { vm.playRecording(r) }, modifier = Modifier.fillMaxWidth()) { _ ->
+                    Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(day.format(Date(r.start)) + "  " + hhmm(r.start), color = TunerColors.Catchup, fontSize = 14.sp, modifier = Modifier.width(if (narrow) 110.dp else 150.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(r.title, color = Color.White, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text("⏺ Your recording", color = TunerColors.TextSecondary, fontSize = 13.sp)
+                        }
+                    }
+                }
+            }
+            items(past.size) { i ->
+                val (c, p) = past[i]
+                FocusSurface(memoryKey = "tcu|${c.id}|${p.start}", onClick = { vm.playCatchup(c, p, listOf(c)) }, modifier = Modifier.fillMaxWidth()) { _ ->
+                    Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(day.format(Date(p.start)) + "  " + hhmm(p.start), color = TunerColors.Catchup, fontSize = 14.sp, modifier = Modifier.width(if (narrow) 110.dp else 150.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(p.title, color = Color.White, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text("↺ Catch-up on ${c.name}", color = TunerColors.TextSecondary, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
+                }
+            }
+        }
         item { Spacer(Modifier.height(24.dp)) }
     }
 
-    if (searching) {
+    if (pickingSport) {
+        MenuDialog(
+            title = "Which sport?",
+            items = Espn.SPORTS.map { sp ->
+                MenuItem("${sp.emoji}  ${sp.label}", if (sp.leagues.isNotEmpty()) "fixtures from ESPN" else "games found in the TV guide") {
+                    searching = sp
+                }
+            },
+            onDismiss = { pickingSport = false },
+        )
+    }
+    searching?.let { sport ->
         TextInputDialog(
-            title = "Add a team",
-            hint = if (football.teamList.isEmpty()) "Loading the list of teams – if nothing comes up, the name's added as you typed it" else "Part of the name, e.g. Newcastle",
-            label = "Team",
-            onDismiss = { searching = false },
+            title = "${sport.emoji} Add a ${sport.label.lowercase()} " + if (sport.leagues.isEmpty()) "team, player or event" else "team",
+            hint = sport.hint,
+            label = "Name",
+            onDismiss = { searching = null },
         ) { q ->
-            searching = false
-            if (q.isNotBlank()) results = q.trim() to football.searchTeams(q)
+            searching = null
+            val typed = q.trim()
+            if (typed.isNotBlank()) {
+                if (sport.leagues.isEmpty()) {
+                    // Nothing to look up: found by name in the TV guide.
+                    if (typed !in football.teams) vm.toggleFollowTeam(typed, sport.key)
+                } else scope.launch {
+                    if (sport.key != "football") vm.showNotice("${sport.emoji} Looking up ${sport.label.lowercase()} teams…")
+                    val all = football.teamsFor(sport)
+                    results = Triple(typed, sport, football.searchIn(all, typed))
+                }
+            }
         }
     }
-    results?.let { (typed, list) ->
+    results?.let { (typed, sport, list) ->
         MenuDialog(
-            title = if (list.isEmpty()) "Not found in ESPN's leagues" else "Pick your team",
+            title = if (list.isEmpty()) "Not found in ESPN's ${sport.label.lowercase()} leagues" else "Pick your team",
             subtitle = if (list.isEmpty()) "Add it by name: its games are found in the TV guide instead." else null,
             items = list.map { t ->
                 MenuItem(t.shortName, t.leagueName + if (football.espnTeams[t.shortName]?.key == t.key) " · following" else "") { football.follow(t) }
-            } + MenuItem("Just add \"$typed\"", "games found in the TV guide") { if (typed !in football.teams) vm.toggleFollowTeam(typed) },
+            } + MenuItem("Just add \"$typed\"", "games found in the TV guide") { if (typed !in football.teams) vm.toggleFollowTeam(typed, sport.key) },
             onDismiss = { results = null },
         )
     }
     teamMenu?.let { name ->
         MenuDialog(
             title = name,
-            subtitle = football.espnTeams[name]?.let { "Fixtures from ESPN · ${it.leagueName}" } ?: "Games found in the TV guide",
+            subtitle = football.sportOf(name).let { sp -> sp.emoji + " " + sp.label + " · " } +
+                (football.espnTeams[name]?.let { "Fixtures from ESPN · ${it.leagueName}" } ?: "Games found in the TV guide"),
             items = listOf(MenuItem("Stop following $name") { vm.toggleFollowTeam(name) }),
             onDismiss = { teamMenu = null },
         )

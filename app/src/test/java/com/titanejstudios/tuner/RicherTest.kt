@@ -80,4 +80,15 @@ class RicherTest {
         assertFalse(KidsRules.bedtimeHeadsUp(5))
         assertFalse(KidsRules.bedtimeHeadsUp(null))
     }
+
+    @Test
+    fun teamsInOtherSports() {
+        val espn = com.titanejstudios.tuner.integrations.Espn
+        assertEquals("soccer/eng.1", espn.path("eng.1"))
+        assertEquals("rugby/267979", espn.path("rugby/267979"))
+        assertEquals("football", espn.sportOfLeague("eng.1")?.key)
+        assertEquals("nfl", espn.sportOfLeague("football/nfl")?.key)
+        assertEquals("Rugby", espn.sport("rugby")?.guideType)
+        assertTrue(espn.SPORTS.any { it.key == "darts" && it.leagues.isEmpty() })
+    }
 }

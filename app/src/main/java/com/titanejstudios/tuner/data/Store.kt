@@ -503,6 +503,11 @@ class Store(context: Context) {
         get() = prefs.getString("espn_teams", null)
         set(value) = prefs.edit().putString("espn_teams", value).apply()
     /** Teams you can pick from (cached for a fortnight). */
+    /** The sport of each team you follow by name ("Newcastle" → "rugby"), as JSON. */
+    var teamSports: String?
+        get() = prefs.getString("team_sports", null)
+        set(value) = prefs.edit().putString("team_sports", value).apply()
+
     var espnTeamList: String?
         get() = prefs.getString("espn_team_list", null)
         set(value) = prefs.edit().putString("espn_team_list", value).putLong("espn_team_list_at", System.currentTimeMillis()).apply()
