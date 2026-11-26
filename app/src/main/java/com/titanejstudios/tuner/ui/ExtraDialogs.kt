@@ -159,6 +159,7 @@ fun FilmInfoDialog(vm: TunerViewModel) {
                     val thumb = remember(vm.tasteVersion, info.title) { vm.thumbOf(info.title) }
                     PillButton("👍", { vm.thumb(info.title, info.genres.firstOrNull(), true) }, selected = thumb == 1)
                     PillButton("👎", { vm.thumb(info.title, info.genres.firstOrNull(), false) }, selected = thumb == -1)
+                    PillButton("📍 Where to watch", { vm.whereToWatch(info.title) })
                 }
                 Spacer(Modifier.height(4.dp))
                 Text("Film info from TMDB", color = TunerColors.TextSecondary, fontSize = 12.sp)
@@ -189,8 +190,9 @@ fun UpdateDialog(vm: TunerViewModel, release: com.titanejstudios.tuner.apps.Upda
             }
             Spacer(Modifier.height(22.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                PillButton("Install now", { vm.installUpdateNow() }, Modifier.focusRequester(first))
-                PillButton("Later", { vm.updateLater() })
+                // "Later" is picked first, so a stray OK press doesn't install (and close Flicker).
+                PillButton("Later", { vm.updateLater() }, Modifier.focusRequester(first))
+                PillButton("Install now", { vm.installUpdateNow() })
             }
             Spacer(Modifier.height(8.dp))
             Text("The TV will ask you to confirm. Your settings and recordings are kept.", color = TunerColors.TextSecondary, fontSize = 13.sp)

@@ -182,7 +182,7 @@ fun ProfileEditScreen(vm: TunerViewModel) {
             // Profile picture: a colour and an icon (or the first letter of the name).
             item {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ProfileAvatar(Profile("x", name.ifEmpty { "?" }, kids, colour = colour, icon = icon), 52.dp)
+                    ProfileAvatar(Profile(existing?.id ?: "x", name.ifEmpty { "?" }, kids, colour = colour, icon = icon), 52.dp)
                     Spacer(Modifier.width(6.dp))
                     AvatarColours.indices.forEach { c ->
                         FocusSurface(onClick = { colour = c }, shape = CircleShape, selected = colour == c, modifier = Modifier.size(38.dp)) { _ ->
@@ -199,6 +199,22 @@ fun ProfileEditScreen(vm: TunerViewModel) {
                     }
                 }
             }
+            // A real photo: picked on this phone, or sent from a phone to the TV.
+            item {
+                val pick = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.GetContent()) { uri ->
+                    if (uri != null && existing != null) vm.profilePhotoFromUri(existing.id, uri)
+                }
+                val hasPhoto = existing != null && remember(com.titanejstudios.tuner.ui.ProfilePhotos.version) { com.titanejstudios.tuner.ui.ProfilePhotos.file(existing.id)?.exists() == true }
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    if (existing == null) Text("📷 Save the profile first, then you can add a photo", color = TunerColors.TextSecondary, fontSize = 15.sp)
+                    else if (vm.isPhone) PillButton("📷 Choose a photo", { runCatching { pick.launch("image/*") } }, compact = true)
+                    else PillButton("📷 Photo from your phone", {
+                        vm.navigate(com.titanejstudios.tuner.Screen.PhoneSetup)
+                        vm.showNotice("Scan the code, then choose Profile photo on your phone")
+                    }, compact = true)
+                    if (hasPhoto && existing != null) PillButton("Remove photo", { vm.removeProfilePhoto(existing.id) }, compact = true)
+                }
+            }
             if (kids) {
                 item {
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -212,7 +228,7 @@ fun ProfileEditScreen(vm: TunerViewModel) {
                 }
                 item {
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text("Bedtime – no TV from this time until 6am (they get a 5-minute warning)", color = TunerColors.TextSecondary, fontSize = 16.sp)
+                        Text("Bedtime – no TV from this time until 6am (they get a gentle heads-up 10 minutes before, then 5 and 1)", color = TunerColors.TextSecondary, fontSize = 16.sp)
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             KidsRules.bedtimeChoices.forEach { b ->
                                 PillButton(KidsRules.label(b), { bedtime = b }, selected = bedtime == b, compact = true)

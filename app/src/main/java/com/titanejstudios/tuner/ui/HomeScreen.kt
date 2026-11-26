@@ -96,6 +96,7 @@ enum class HomeRow(val title: String) {
     YouTube("New on your YouTube"),
     YouTubeForYou("Recommended on YouTube"),
     Because("Because you watched"),
+    Moods("In the mood for…"),
     Favourites("Favourites"),
     Recordings("Recordings"),
     NewEpisodes("New episodes"),
@@ -580,7 +581,24 @@ fun HomeScreen(vm: TunerViewModel) {
                 })
                 put(HomeRow.ComingSoon, vm.comingSoonNow.take(20).map { comingCard(vm, it) })
             }
+            // In the mood for…: films picked by feel (Plex and your provider together).
+            if (vm.hasVod || vm.plexLinked) {
+                val moods = if (vm.activeProfile.kids) com.titanejstudios.tuner.data.Moods.all.filter { it.key == "family" } else com.titanejstudios.tuner.data.Moods.all
+                put(HomeRow.Moods, moods.map { m ->
+                    HomeCard(
+                        key = "mood" + m.key, tag = m.emoji, tagBg = TunerColors.AccentSoft, tagFg = Color.White,
+                        title = "${m.emoji}  ${m.label}", line1 = "Films that fit the mood", line2 = "From Plex and your provider",
+                        image = null, poster = false, channel = null, progress = null, progressColor = TunerColors.Accent,
+                        onClick = { vm.openMood(m.key) }, onLongClick = null,
+                        hero = HeroInfo(m.label, "Films picked by mood – Plex and your provider together", null, null, null, wide = false, label = "IN THE MOOD FOR"),
+                    )
+                })
+            }
             put(HomeRow.All, allChannels.take(40).map { channelCard(vm, it, allChannels, now, followed) })
+        }.let { all ->
+            // Lite mode: shorter rows, so fewer pictures are held at once.
+            val limit = com.titanejstudios.tuner.data.Lite.rowLimit
+            if (limit >= 40) all else all.mapValues { it.value.take(limit) }
         }
     }
 
@@ -639,7 +657,7 @@ fun HomeScreen(vm: TunerViewModel) {
             Box(Modifier.align(Alignment.TopEnd).fillMaxWidth(0.68f).height(heroHeight + 150.dp)) {
                 // Fades from one picture to the next rather than jumping.
                 AsyncImage(
-                    model = coil.request.ImageRequest.Builder(context).data(h.image).crossfade(500).build(),
+                    model = coil.request.ImageRequest.Builder(context).data(h.image).crossfade(if (com.titanejstudios.tuner.data.Lite.on) 0 else 500).build(),
                     contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize(),
                 )
                 Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(listOf(bgTop, bgTop.copy(alpha = 0.75f), Color.Transparent))))
@@ -967,7 +985,7 @@ fun HomeRowsScreen(vm: TunerViewModel) {
     }
     val paneA: @Composable (Modifier) -> Unit = { pane ->
         Column(pane) {
-            Text("Home rows", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.Bold)
+            Text("Home rows – ${vm.activeProfile.name}", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.Bold)
             Text("OK switches a row on or off. Hold OK to move it.", color = TunerColors.TextSecondary, fontSize = 15.sp)
             Spacer(Modifier.height(14.dp))
             LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {

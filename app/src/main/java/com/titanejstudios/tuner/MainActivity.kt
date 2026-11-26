@@ -28,6 +28,8 @@ import com.titanejstudios.tuner.ui.TunerColors
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import android.app.Activity
 import androidx.compose.ui.Alignment
@@ -130,11 +132,23 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         vm.onAppStarted()
+        heartbeat.run()
     }
 
     override fun onStop() {
         super.onStop()
         vm.onAppStopped()
+        heartbeatHandler.removeCallbacks(heartbeat)
+        com.titanejstudios.tuner.data.SafeMode.cleanStop()
+    }
+
+    /** Every 5 seconds on screen: "still running, doing this" (see SafeMode – how a silent close is noticed). */
+    private val heartbeatHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val heartbeat: Runnable = object : Runnable {
+        override fun run() {
+            runCatching { com.titanejstudios.tuner.data.SafeMode.heartbeat(this@MainActivity) }
+            heartbeatHandler.postDelayed(this, 5_000L)
+        }
     }
 
     /** Colour / Guide / DVR / TV buttons work from any screen (see TunerViewModel.handleShortcut). */
@@ -213,8 +227,18 @@ private fun TunerApp(vm: TunerViewModel) {
             } else bars.show(androidx.core.view.WindowInsetsCompat.Type.systemBars())
         }
 
+        // Smoother: each new screen fades in quickly (not the player – video doesn't like see-through – and not in lite mode).
+        val fade = remember { androidx.compose.animation.core.Animatable(1f) }
+        LaunchedEffect(vm.screen) {
+            if (watching || com.titanejstudios.tuner.data.Lite.on) fade.snapTo(1f)
+            else {
+                fade.snapTo(0.4f)
+                fade.animateTo(1f, androidx.compose.animation.core.tween(170))
+            }
+        }
+        val fadeIn = if (fade.value < 1f && !watching) Modifier.graphicsLayer { alpha = fade.value } else Modifier
         Column(Modifier.fillMaxSize().then(if (phone && !watching) Modifier.background(TunerColors.BackgroundBottom).safeDrawingPadding() else Modifier)) {
-        Box(Modifier.weight(1f).fillMaxWidth()) {
+        Box(Modifier.weight(1f).fillMaxWidth().then(fadeIn)) {
             // Phones: pull down to refresh on Home, the guide and Films & TV.
             com.titanejstudios.tuner.ui.PhonePullRefresh(vm, phone && !watching && vm.screen in PullScreens) {
             when (vm.screen) {
@@ -294,9 +318,14 @@ private fun TunerApp(vm: TunerViewModel) {
                     onDismiss = { vm.dismissCrashNotice(showLog = false) },
                 )
             }
+            if (vm.themePickerOpen) com.titanejstudios.tuner.ui.ThemePickerDialog(vm)
+            vm.channelSchedule?.let { (c, list) -> com.titanejstudios.tuner.ui.ChannelScheduleDialog(vm, c, list) }
             if (vm.filmInfoOpen) FilmInfoDialog(vm)
+            // (After film info, so "Where can I watch it?" opens on top of it.)
+            vm.whereTo?.let { com.titanejstudios.tuner.ui.WhereToWatchDialog(vm, it) }
             if (vm.stillWatchingAsk) StillWatchingDialog(vm)
-            vm.updateOffer?.let { UpdateDialog(vm, it) }
+            // Never while something's playing: pressing OK to pause would install it and close Flicker mid-show.
+            if (vm.screen != Screen.Player) vm.updateOffer?.let { UpdateDialog(vm, it) }
             // Joined a film part way and said yes: where to watch it from the beginning.
             vm.startOver?.takeIf { vm.startOverChoosing }?.let { o ->
                 MenuDialog(
@@ -380,6 +409,7 @@ private fun TunerApp(vm: TunerViewModel) {
                 )
             }
             vm.pinPrompt?.let { p -> PinDialog(p, onCancel = { vm.cancelPin() }) }
+            vm.bedtimeSoon?.let { com.titanejstudios.tuner.ui.BedtimeSoonCard(it, Modifier.align(Alignment.TopCenter)) }
             vm.notice?.let { NoticeToast(it, Modifier.align(Alignment.BottomCenter)) }
             if (vm.screen == Screen.Home && !vm.initialLoadDone && vm.channels.isEmpty() && vm.sources.isNotEmpty()) {
                 com.titanejstudios.tuner.ui.StartUpScreen(vm.status)

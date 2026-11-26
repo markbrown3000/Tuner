@@ -132,6 +132,14 @@
         <receiver
             android:name=".apps.InstallResultReceiver"
             android:exported="false" />
+        <!-- After an update: note it, and open Flicker again. -->
+        <receiver
+            android:name=".apps.UpdatedReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
         <receiver
             android:name=".integrations.ReminderAlarmReceiver"
             android:exported="false" />

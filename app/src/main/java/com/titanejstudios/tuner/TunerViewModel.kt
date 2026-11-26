@@ -291,6 +291,12 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
 
     /** Live TV keeps playing in the preview on Channels/Guide; anything else stops it. */
     private fun afterNavigation() {
+        // The guide's corner preview: kept if you went full screen, stopped if you left the guide another way.
+        if (guidePreviewing && screen != Screen.Guide) {
+            guidePreviewing = false
+            guidePreviewJob?.cancel()
+            if (screen != Screen.Player && mode is PlayMode.Live) stopPlayback()
+        }
         // (Phones keep playing in the mini player – except where something else plays.)
         val phoneMini = isPhone && screen !in setOf(Screen.MultiView, Screen.YouTubePlayer, Screen.Downloads)
         if (mode != null && !phoneMini && screen !in setOf(Screen.Player, Screen.Channels, Screen.Guide, Screen.Home, Screen.WhatsOn)) {
@@ -373,6 +379,8 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     var activeProfile by mutableStateOf(Profile(Store.MAIN_PROFILE, "Everyone")); private set
     var editingProfile by mutableStateOf<Profile?>(null); private set
     var timesUp by mutableStateOf(false); private set
+    /** The gentle "bedtime in 10 minutes" card on screen (kids' profiles with a bedtime). */
+    var bedtimeSoon by mutableStateOf<String?>(null)
 
     // ---------------- Playback state ----------------
 
@@ -922,8 +930,71 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     private var sleepJob: Job? = null
 
     // Look & sound
-    var themeAccent by mutableStateOf("sky"); private set
-    var themeBackground by mutableStateOf("ink"); private set
+    /** This profile's colour theme (TunerColors.themes) and highlight colour ("" = the theme's own). */
+    var themeName by mutableStateOf("evening"); private set
+    var themeAccent by mutableStateOf(""); private set
+    /** Settings › Look › Colour theme is open. */
+    var themePickerOpen by mutableStateOf(false)
+
+    /** Lite mode: "auto", "on" or "off" (data/Lite.kt). */
+    var liteChoice by mutableStateOf(com.titanejstudios.tuner.data.Lite.choice); private set
+    val liteOn: Boolean get() = com.titanejstudios.tuner.data.Lite.decide(liteChoice, com.titanejstudios.tuner.data.Lite.lowMemoryDevice)
+
+    fun cycleLite() {
+        val m = com.titanejstudios.tuner.data.Lite.next(liteChoice)
+        com.titanejstudios.tuner.data.Lite.set(app, m)
+        liteChoice = m
+        AppLog.info("Lite mode changed: " + com.titanejstudios.tuner.data.Lite.summary(m))
+        showNotice(if (liteOn) "🪶 Lite mode on – fully in place next time Flicker starts" else "Lite mode off – fully in place next time Flicker starts")
+    }
+
+    /** The TV guide plays the highlighted channel in its corner (off in lite mode). */
+    var guidePreview by mutableStateOf(store.guidePreview); private set
+
+    fun toggleGuidePreview() {
+        guidePreview = !guidePreview
+        store.guidePreview = guidePreview
+        if (!guidePreview) {
+            guidePreviewJob?.cancel()
+            if (screen == Screen.Guide && mode is PlayMode.Live) stopPlayback()
+        }
+    }
+    private var guidePreviewJob: Job? = null
+    /** The live picture in the guide's corner was started by the guide (not something already playing). */
+    private var guidePreviewing = false
+
+    /** The highlighted programme in the guide: after a moment on it, its channel plays in the corner (if it's on now). */
+    fun guideFocused(c: Channel, p: Programme?) {
+        guidePreviewJob?.cancel()
+        if (!guidePreview || liteOn || isPhone || screen != Screen.Guide) return
+        val t = System.currentTimeMillis()
+        if (p != null && (p.start > t || p.stop <= t)) return
+        if (!isAllowed(c) || timeLeftSeconds() <= 0 || isBedtimeNow()) return
+        val current = mode
+        if (current is PlayMode.Live && current.channel.id == c.id) return
+        if (current != null && current !is PlayMode.Live) return
+        val wasPlaying = current != null
+        guidePreviewJob = viewModelScope.launch {
+            delay(1_500)
+            if (screen != Screen.Guide) return@launch
+            startLive(c, preview = true)
+            // Only a preview the guide started is stopped when you leave it (not what you were already watching).
+            if (!wasPlaying) guidePreviewing = true
+        }
+    }
+
+    /** OK on a programme that's on now in the guide: full screen (straight away if it's already in the corner). */
+    fun watchFromGuide(c: Channel, list: List<Channel>) {
+        guidePreviewJob?.cancel()
+        guidePreviewing = false
+        val current = mode
+        if (current is PlayMode.Live && current.channel.id == c.id && isAllowed(c)) {
+            zapList = list.ifEmpty { listOf(c) }
+            addRecent(c.id)
+            store.setLastChannel(activeProfile.id, c.id)
+            navigate(Screen.Player)
+        } else play(c, list)
+    }
     var subtitleScale by mutableStateOf(1f); private set
     var subtitleBox by mutableStateOf(false); private set
     var nightMode by mutableStateOf(false); private set
@@ -1072,6 +1143,35 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
 
     /** When the guide in memory was read from the database (re-read every few hours). */
     private var epgLoadedAt = 0L
+    /** How far ahead the guide in memory goes. */
+    private var epgUntil = 0L
+    private var epgMoreJob: Job? = null
+
+    /**
+     * The guide is being looked at up to [until]: reads the next few hours if they aren't in memory
+     * yet (lite mode reads the guide bit by bit instead of a day and a half at once).
+     */
+    fun guideNeeds(until: Long) {
+        if (epgUntil == 0L || until + 3600_000L <= epgUntil || epgMoreJob?.isActive == true) return
+        val from = epgUntil
+        val to = maxOf(until, from) + com.titanejstudios.tuner.data.Lite.guideHours * 3600_000L
+        val ids = activeSources().map { it.id }
+        val chs = allChannels
+        epgMoreJob = viewModelScope.launch {
+            val more = runCatching { withContext(Dispatchers.IO) { shiftGuide(chs, db.loadEpg(ids, from, to, emptyMap())) } }
+                .onFailure { if (it !is kotlinx.coroutines.CancellationException) AppLog.warn("Couldn't read more of the guide", it) }
+                .getOrNull() ?: return@launch
+            if (epgUntil != from) return@launch // the whole guide was re-read meanwhile
+            val merged = HashMap(epg)
+            for ((id, list) in more) {
+                val have = merged[id].orEmpty()
+                val last = have.lastOrNull()?.start ?: Long.MIN_VALUE
+                merged[id] = have + list.filter { it.start > last }
+            }
+            epg = merged
+            epgUntil = to
+        }
+    }
     /** Background extras (Plex, scores, apps…) start a few seconds after the channels. */
     private var extrasStarted = false
 
@@ -1378,9 +1478,8 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         seriesLinks = store.seriesLinks
         hiddenApps = store.hiddenApps
         selectedGroupState = store.lastGroup(activeProfile.id) ?: ALL
-        themeAccent = store.themeAccent
-        themeBackground = store.themeBackground
-        TunerColors.apply(themeAccent, themeBackground)
+        loadTheme()
+        loadHomeRows()
         subtitleScale = store.subtitleScale
         subtitleBox = store.subtitleBox
         SubtitleLook.scale = subtitleScale
@@ -1506,12 +1605,14 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
             }
             for (c in chs) {
                 val days = if (c.hasCatchup) c.catchupDays else familyDays[c.group + "|" + ChannelMerge.key(c.name)] ?: 0
-                if (days > 0) catchupFrom[c.id] = t - days.coerceAtMost(7) * 86_400_000L
+                if (days > 0) catchupFrom[c.id] = t - days.coerceAtMost(com.titanejstudios.tuner.data.Lite.catchupDays) * 86_400_000L
             }
-            shiftGuide(chs, db.loadEpg(ids, t - 3 * 3600_000L, t + 36 * 3600_000L, catchupFrom))
+            // Lite mode reads 12 hours now; scrolling the guide further reads more (guideNeeds).
+            shiftGuide(chs, db.loadEpg(ids, t - 3 * 3600_000L, t + com.titanejstudios.tuner.data.Lite.guideHours * 3600_000L, catchupFrom))
         }
         epg = guide
         epgLoadedAt = t
+        epgUntil = t + com.titanejstudios.tuner.data.Lite.guideHours * 3600_000L
         applySeriesLinks()
         refreshHomeFeed()
         updateWidget()
@@ -1887,6 +1988,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     }
 
     private fun startLive(channel: Channel, force: Boolean = false, preview: Boolean = false) {
+        com.titanejstudios.tuner.data.SafeMode.doing = "Watching live TV: ${channel.name}"
         if (vpnBlocks()) return
         if (zapPreview != null) {
             zapJob?.cancel()
@@ -2056,6 +2158,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         playback.stop()
         mode = null
         if (wasPlaying) sendHa("stopped")
+        com.titanejstudios.tuner.data.SafeMode.doing = "Browsing"
     }
 
     fun onAppStopped() {
@@ -2308,6 +2411,19 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         // A heads-up at 5 minutes and 1 minute, so it doesn't stop mid-scene without warning.
         val t = System.currentTimeMillis()
         val toBed = if (t < bedtimeOverrideUntil) null else KidsRules.minutesToBedtime(p.bedtimeMinutes, KidsRules.minutesOfDay(t))
+        // Ten minutes before bedtime: a gentle heads-up, so there's time to finish the episode.
+        if (KidsRules.bedtimeHeadsUp(toBed)) {
+            val key = "${p.id}|${today()}|bed10"
+            if (key != lastKidsWarning) {
+                lastKidsWarning = key
+                bedtimeSoon = "🌙 Bedtime in 10 minutes, ${p.name} – time to find a good place to stop"
+                showNotice("🌙 Bedtime in 10 minutes")
+                viewModelScope.launch {
+                    delay(20_000)
+                    bedtimeSoon = null
+                }
+            }
+        }
         val warn = KidsRules.warningMinutes(timeLeftSeconds(), toBed) ?: return
         val key = "${p.id}|${today()}|$warn"
         if (key != lastKidsWarning) {
@@ -2376,6 +2492,8 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
             becauseFilmOf = null
             recents = store.recents(p.id)
             selectedGroupState = store.lastGroup(p.id) ?: ALL
+            loadTheme()
+            loadHomeRows()
             unlocked = false
             timesUp = false
             stopPlayback()
@@ -2427,6 +2545,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         }
         profiles = profiles.filter { it.id != p.id }
         store.profiles = profiles
+        com.titanejstudios.tuner.ui.ProfilePhotos.file(p.id)?.delete()
         store.profilesGone = store.profilesGone + (p.name.trim().lowercase() to System.currentTimeMillis())
         profilesChanged()
         if (activeProfile.id == p.id) switchProfile(profiles.first())
@@ -2848,11 +2967,21 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
 
     // ---------------- Home rows (5.5) ----------------
 
+    /** Each profile has its own Home rows (the main profile's are also everyone's starting point). */
     fun saveHomeRows(order: List<String>, hidden: Set<String>) {
         homeRowOrder = order
         homeRowsHidden = hidden
-        store.homeRowOrder = order
-        store.homeRowsHidden = hidden
+        store.setProfileHomeRows(activeProfile.id, order, hidden)
+        if (activeProfile.id == Store.MAIN_PROFILE) {
+            store.homeRowOrder = order
+            store.homeRowsHidden = hidden
+        }
+    }
+
+    private fun loadHomeRows() {
+        val mine = store.profileHomeRows(activeProfile.id)
+        homeRowOrder = mine?.first ?: store.homeRowOrder
+        homeRowsHidden = mine?.second ?: store.homeRowsHidden
     }
 
     fun toggleHomeSmart() {
@@ -3248,6 +3377,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     }
 
     private fun startVod(m: PlayMode.Vod, fromStart: Boolean, startAt: Long? = null) {
+        com.titanejstudios.tuner.data.SafeMode.doing = "Watching ${m.title}" + (m.subtitle?.let { " $it" } ?: "")
         // Downloads play from the phone itself, so the VPN kill switch doesn't apply.
         if (!m.url.startsWith("file:") && vpnBlocks()) {
             AppLog.info("Didn't play ${m.title}: the VPN kill switch is on and the VPN isn't connected")
@@ -3591,6 +3721,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
                         val err = vpn.add(event.name, event.text)
                         showNotice(err ?: "🔒 VPN server added – Settings › VPN")
                     }
+                    is PhoneSetupServer.Event.ProfilePhoto -> setProfilePhoto(event.profileId, event.jpeg)
                 }
             }
             phoneBase = runCatching { server.start() }.getOrNull()
@@ -3875,12 +4006,21 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
 
     // ---------------- Look & sound ----------------
 
-    fun setTheme(accent: String = themeAccent, background: String = themeBackground) {
+    /** Changes this profile's colours (each profile keeps its own). */
+    fun setTheme(theme: String = themeName, accent: String = themeAccent) {
+        themeName = theme
         themeAccent = accent
-        themeBackground = background
-        store.themeAccent = accent
-        store.themeBackground = background
-        TunerColors.apply(accent, background)
+        store.setProfileTheme(activeProfile.id, theme, accent)
+        TunerColors.apply(theme, accent)
+    }
+
+    /** The active profile's colours: its own, else the main profile's, else what older versions saved. */
+    private fun loadTheme() {
+        val saved = store.profileTheme(activeProfile.id) ?: store.profileTheme(Store.MAIN_PROFILE)
+        val (theme, accent) = saved ?: (TunerColors.themeForOldBackground(store.themeBackground) to store.themeAccent.let { if (it == "sky") "" else it })
+        themeName = theme
+        themeAccent = accent
+        TunerColors.apply(theme, accent)
     }
 
     fun cycleSubtitleSize() {
@@ -4206,6 +4346,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         val meta = MediaMetadata.Builder().setTitle(item.title).setArtist(item.subtitle)
         playback.play(url, live = false, startPositionMs = if (fromStart) 0L else item.viewOffsetMs, metadata = meta.build())
         (mode as? PlayMode.Vod)?.let { maybeRecap(it, if (fromStart) 0L else item.viewOffsetMs) }
+        com.titanejstudios.tuner.data.SafeMode.doing = "Watching ${item.title}" + (item.subtitle?.let { " $it" } ?: "") + " on Plex"
         lookUpPlexPlaying(item)
         sendHa("playing", mapOf("kind" to "plex", "title" to item.title, "subtitle" to item.subtitle))
         navigate(Screen.Player)
@@ -4744,12 +4885,14 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     fun openLibrary(shows: Boolean) {
         if (activeProfile.kids) return showNotice("Ask a grown-up – kids have their own films")
         libraryShows = shows
+        libraryMood = null
         library = null
         navigate(Screen.Library)
     }
 
     fun switchLibrary() {
         libraryShows = !libraryShows
+        libraryMood = null
         library = null
         loadLibrary()
     }
@@ -4791,8 +4934,16 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
                 }
                 out.sortedBy { it.title.lowercase() }
             }
-            library = merged
-            libraryStatus = if (merged.isEmpty()) "Nothing found – is Plex or your provider set up?" else null
+            // A mood: only the films that fit it.
+            val mood = libraryMood?.let { com.titanejstudios.tuner.data.Moods.byKey(it) }
+            val shown = if (mood == null || shows) merged else withContext(Dispatchers.Default) { merged.filter { fitsMood(it, mood) } }
+            library = shown
+            libraryStatus = when {
+                merged.isEmpty() -> "Nothing found – is Plex or your provider set up?"
+                shown.isEmpty() && (mood?.maxMinutes ?: 0) > 0 -> "Running times come from Plex – none of your Plex films are short enough"
+                shown.isEmpty() -> "Nothing found for \"${mood?.label}\" – your provider's categories may not say"
+                else -> null
+            }
         }
     }
 
@@ -4802,6 +4953,312 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
             t.series != null && (t.plex == null || !preferPlexFilms) -> openSeriesDetail(t.series)
             t.plex != null && t.plex.type == "show" -> openPlexShow(t.plex)
             t.plex != null -> playPlexEntry(t.plex)
+        }
+    }
+
+    // ---------------- Where can I watch…? ----------------
+
+    class WhereOption(val label: String, val detail: String?, val action: () -> Unit)
+    /** [options] is null while still looking. */
+    class WhereTo(val title: String, val options: List<WhereOption>?)
+    var whereTo by mutableStateOf<WhereTo?>(null); private set
+    private var whereJob: Job? = null
+
+    fun closeWhereTo() {
+        whereJob?.cancel()
+        whereTo = null
+    }
+
+    private fun whereKey(name: String): String =
+        FilmName.parse(name).first.lowercase().replace(Regex("^(the|a|an) "), "").filter { it.isLetterOrDigit() }
+
+    /** Everywhere a film or series can be watched: Plex, your provider, recordings, catch-up and the TV guide. */
+    fun whereToWatch(query: String) {
+        val q = FilmName.parse(query.trim()).first.trim()
+        if (q.length < 2) return
+        whereJob?.cancel()
+        whereTo = WhereTo(q, null)
+        if (hasVod) {
+            if (movies == null) loadMovies()
+            if (series == null) loadSeries()
+        }
+        val ids = activeSources().map { it.id }
+        val byId = channels.filter { isAllowed(it) }.associateBy { it.id }
+        val key = whereKey(q)
+        whereJob = viewModelScope.launch {
+            if (hasVod) withTimeoutOrNull(20_000) { while (movies == null || series == null) delay(300) }
+            val filmPool = if (hasVod) movies.orEmpty() else emptyList()
+            val showPool = if (hasVod) series.orEmpty() else emptyList()
+            val t = System.currentTimeMillis()
+            val found = runCatching {
+                withContext(Dispatchers.IO) {
+                    val f = filmPool.filter { whereKey(it.name) == key }.take(3)
+                    val s = showPool.filter { whereKey(it.name) == key }.take(3)
+                    val progs = db.searchProgrammes(ids, q, t - 7 * 86_400_000L, 400)
+                        .mapNotNull { (id, p) -> byId[id]?.let { it to p } }
+                        .filter { (_, p) -> whereKey(p.title) == key || whereKey(p.title).startsWith(key) }
+                        .distinctBy { (c, p) -> c.id + "@" + p.start }
+                    Triple(f, s, progs)
+                }
+            }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }.getOrNull()
+            val plex = if (plexLinked && (!activeProfile.kids || kidsHavePlex)) withContext(Dispatchers.IO) {
+                runCatching { Plex(store.plexClientId).search(plexFeature.servers, q) }.getOrDefault(emptyList())
+            }.filter { (it.type == "movie" || it.type == "show") && whereKey(it.title) == key }
+                .let { l -> if (activeProfile.kids) l.filter { plexFeature.isKidsEntry(it) } else l }
+            else emptyList()
+            val out = ArrayList<WhereOption>()
+            plex.forEach { e ->
+                val what = if (e.type == "show") "series" else "film"
+                out += WhereOption("▶ Plex – ${e.library ?: e.server.name}", listOfNotNull(what, e.year, e.rating).joinToString("  ·  ")) {
+                    closeWhereTo()
+                    if (e.type == "show") openPlexShow(e) else playPlexEntry(e)
+                }
+            }
+            found?.first?.forEach { f ->
+                out += WhereOption("▶ Your provider's films", listOfNotNull(FilmName.parse(f.name).second, f.category).joinToString("  ·  ")) {
+                    closeWhereTo()
+                    playMovie(f, fromStart = (resume[f.id]?.positionMs ?: 0L) == 0L)
+                }
+            }
+            found?.second?.forEach { s ->
+                out += WhereOption("▶ Your provider's series", s.category) {
+                    closeWhereTo()
+                    openSeriesDetail(s)
+                }
+            }
+            recordings.filter { it.status == RecStatus.DONE && whereKey(it.title) == key }.take(3).forEach { r ->
+                out += WhereOption("⏺ Your recording", "${dayLabelOf(r.start)} ${hhmmOf(r.start)}") {
+                    closeWhereTo()
+                    playRecording(r)
+                }
+            }
+            val progs = found?.third.orEmpty()
+            progs.filter { (_, p) -> p.start <= t && p.stop > t }.take(3).forEach { (c, _) ->
+                out += WhereOption("📺 On now – ${c.name}", "OK to watch") {
+                    closeWhereTo()
+                    play(c, listOf(c))
+                }
+            }
+            progs.filter { (c, p) -> p.stop <= t && Catchup.isAvailable(c, p, t) }.sortedByDescending { it.second.start }.take(3).forEach { (c, p) ->
+                out += WhereOption("↺ Catch-up – ${c.name}", "${dayLabelOf(p.start)} ${hhmmOf(p.start)}") {
+                    closeWhereTo()
+                    playCatchup(c, p, listOf(c))
+                }
+            }
+            progs.filter { (_, p) -> p.start > t }.sortedBy { it.second.start }.take(4).forEach { (c, p) ->
+                val set = recordingFor(c, p) != null
+                out += WhereOption(
+                    (if (set) "⏺ Recording – " else "🗓 Coming up – ") + c.name,
+                    "${dayLabelOf(p.start)} ${hhmmOf(p.start)}" + if (set) "" else "  ·  OK to record",
+                ) {
+                    closeWhereTo()
+                    if (!set) recordProgramme(c, p)
+                }
+            }
+            if (whereTo?.title != q) return@launch
+            whereTo = WhereTo(q, out)
+        }
+    }
+
+    private fun dayLabelOf(t: Long): String {
+        val cal = java.util.Calendar.getInstance()
+        val today = cal.get(java.util.Calendar.DAY_OF_YEAR)
+        cal.timeInMillis = t
+        return when (cal.get(java.util.Calendar.DAY_OF_YEAR) - today) {
+            0 -> "Today"
+            1 -> "Tomorrow"
+            -1 -> "Yesterday"
+            else -> java.text.SimpleDateFormat("EEE d MMM", java.util.Locale.UK).format(java.util.Date(t))
+        }
+    }
+    private fun hhmmOf(t: Long): String = java.text.SimpleDateFormat("HH:mm", java.util.Locale.UK).format(java.util.Date(t))
+
+    // ---------------- Mood picks ----------------
+
+    /** The mood "All my films" is showing (null = everything). */
+    var libraryMood by mutableStateOf<String?>(null); private set
+
+    fun openMood(key: String) {
+        if (activeProfile.kids && key != "family") return showNotice("Ask a grown-up – kids have their own films")
+        val mood = com.titanejstudios.tuner.data.Moods.byKey(key) ?: return
+        if (!hasVod && !plexLinked) return showNotice("Mood picks need films from your provider or Plex")
+        libraryMood = mood.key
+        libraryShows = false
+        library = null
+        navigate(Screen.Library)
+    }
+
+    fun clearMood() {
+        libraryMood = null
+        library = null
+        loadLibrary()
+    }
+
+    /** Whether a title fits the mood being shown (its category, Plex's genres, or TMDB's when looked up). */
+    private fun fitsMood(t: LibraryTitle, mood: com.titanejstudios.tuner.data.Moods.Mood): Boolean {
+        val looked = filmLookups[t.title.trim()]
+        val labels = listOfNotNull(t.film?.category) + t.plex?.genres.orEmpty() + looked?.genres.orEmpty()
+        val minutes = t.plex?.durationMs?.takeIf { it > 0 }?.let { (it / 60_000).toInt() } ?: looked?.runtimeMinutes
+        return com.titanejstudios.tuner.data.Moods.fits(mood, labels, minutes)
+    }
+
+    // ---------------- Voice commands ----------------
+
+    /** "Record EastEnders", "next episode", "what's on BBC One later"… true if it was one. */
+    private fun runVoiceCommand(text: String): Boolean {
+        val cmd = com.titanejstudios.tuner.data.VoiceCommand.parse(text) ?: return false
+        AppLog.info("Voice command: $text")
+        when (cmd) {
+            is com.titanejstudios.tuner.data.VoiceCommand.Record -> voiceFindProgramme(cmd.what) { c, p ->
+                if (recordingFor(c, p) != null) showNotice("⏺ ${p.title} is already set to record")
+                else {
+                    recordProgramme(c, p)
+                    showNotice("⏺ Recording ${p.title} – ${c.name}, ${dayLabelOf(p.start)} ${hhmmOf(p.start)}")
+                }
+            }
+            is com.titanejstudios.tuner.data.VoiceCommand.Remind -> voiceFindProgramme(cmd.what, upcomingOnly = true) { c, p ->
+                if (hasReminder(c, p)) showNotice("⏰ There's already a reminder for ${p.title}")
+                else toggleReminder(c, p)
+            }
+            com.titanejstudios.tuner.data.VoiceCommand.NextEpisode -> when {
+                nextEpisode != null -> playNextEpisodeNow()
+                mode is PlayMode.Vod -> showNotice("That's the last episode")
+                else -> carryOnWatching()
+            }
+            com.titanejstudios.tuner.data.VoiceCommand.CarryOn -> carryOnWatching()
+            com.titanejstudios.tuner.data.VoiceCommand.Stop -> {
+                stopPlayback()
+                resetTo(Screen.Home)
+            }
+            com.titanejstudios.tuner.data.VoiceCommand.Surprise -> {
+                resetTo(Screen.Home)
+                surpriseMe()
+            }
+            is com.titanejstudios.tuner.data.VoiceCommand.WhatsOn -> {
+                val all = channelsFor(ALL)
+                val ch = VoiceMatch.find(all, cmd.channel) ?: VoiceMatch.find(all, cmd.channel, strict = false)
+                if (ch == null || !isAllowed(ch)) showNotice("🎤 Couldn't find a channel called \"${cmd.channel}\"")
+                else showChannelSchedule(ch, cmd.later)
+            }
+            is com.titanejstudios.tuner.data.VoiceCommand.WhereToWatch -> whereToWatch(cmd.what)
+            is com.titanejstudios.tuner.data.VoiceCommand.Mood -> openMood(cmd.key)
+            is com.titanejstudios.tuner.data.VoiceCommand.Go -> when (cmd.place) {
+                "home" -> resetTo(Screen.Home)
+                "guide" -> navigate(Screen.Guide)
+                "channels" -> navigate(Screen.Channels)
+                "films" -> if (hasVod) navigate(Screen.Movies) else showNotice("No films from your provider")
+                "series" -> if (hasVod) navigate(Screen.Series) else showNotice("No series from your provider")
+                "recordings" -> navigate(Screen.Recordings)
+                "settings" -> navigate(Screen.Settings)
+                "sport" -> navigate(Screen.Sports)
+                "youtube" -> if (youTubeAllowed) navigate(Screen.YouTube) else showNotice("YouTube is off for this profile")
+                "plex" -> if (plexLinked) openPlexLibrary() else showNotice("Plex isn't set up")
+                "catchup" -> navigate(Screen.Catchup)
+                "whatson" -> openWhatsOn(whatsOnGenre)
+                else -> return false
+            }
+        }
+        return true
+    }
+
+    /** The most recent thing in Carry on watching. */
+    private fun carryOnWatching() {
+        val r = myResume.values.maxByOrNull { it.updatedAt }
+        if (r == null) showNotice("Nothing to carry on with yet")
+        else {
+            showNotice("▶ ${r.title}" + (r.subtitle?.let { " – $it" } ?: ""))
+            playResume(r)
+        }
+    }
+
+    /** The next showing of [what] in the TV guide (on now counts unless [upcomingOnly]). */
+    private fun voiceFindProgramme(what: String, upcomingOnly: Boolean = false, then: (Channel, Programme) -> Unit) {
+        val ids = activeSources().map { it.id }
+        val byId = channels.filter { isAllowed(it) }.associateBy { it.id }
+        val key = whereKey(what)
+        viewModelScope.launch {
+            val t = System.currentTimeMillis()
+            val hit = runCatching {
+                withContext(Dispatchers.IO) {
+                    db.searchProgrammes(ids, what, t, 300)
+                        .mapNotNull { (id, p) -> byId[id]?.let { it to p } }
+                        .filter { (_, p) -> (if (upcomingOnly) p.start > t else p.stop > t) && whereKey(p.title).let { it == key || it.startsWith(key) } }
+                        .minByOrNull { (_, p) -> p.start }
+                }
+            }.getOrNull()
+            if (hit == null) showNotice("🎤 Couldn't find \"$what\" in the TV guide") else then(hit.first, hit.second)
+        }
+    }
+
+    /** "What's on BBC One later": the channel's next few programmes. */
+    var channelSchedule by mutableStateOf<Pair<Channel, List<Programme>>?>(null); private set
+
+    fun showChannelSchedule(c: Channel, later: Boolean) {
+        val t = System.currentTimeMillis()
+        // "Later" / "tonight": from 6pm if it's still daytime, otherwise from now.
+        val from = if (later) {
+            val cal = java.util.Calendar.getInstance().apply { set(java.util.Calendar.HOUR_OF_DAY, 18); set(java.util.Calendar.MINUTE, 0) }
+            maxOf(t, cal.timeInMillis)
+        } else t
+        val list = programmesFor(c.id).filter { it.stop > from }.take(8)
+        if (list.isEmpty()) return showNotice("No guide for ${c.name} " + if (later) "later" else "right now")
+        channelSchedule = c to list
+    }
+
+    fun closeChannelSchedule() {
+        channelSchedule = null
+    }
+
+    // ---------------- Series: from the beginning, and how far through ----------------
+
+    /** Films and episodes you've finished (here or on a linked device). */
+    fun finishedIds(): Set<String> = store.resumeDone.keys
+
+    // ---------------- Profile pictures ----------------
+
+    /** A photo for a profile (from a phone, or the phone's own gallery): squared, shrunk and saved. */
+    fun setProfilePhoto(profileId: String, bytes: ByteArray) {
+        viewModelScope.launch {
+            val ok = withContext(Dispatchers.IO) {
+                runCatching {
+                    val opts = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                    android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
+                    if (opts.outWidth <= 0) return@runCatching false
+                    var sample = 1
+                    while (minOf(opts.outWidth, opts.outHeight) / (sample * 2) >= 256) sample *= 2
+                    val bmp = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, android.graphics.BitmapFactory.Options().apply { inSampleSize = sample })
+                        ?: return@runCatching false
+                    val side = minOf(bmp.width, bmp.height)
+                    val square = android.graphics.Bitmap.createBitmap(bmp, (bmp.width - side) / 2, (bmp.height - side) / 2, side, side)
+                    val small = android.graphics.Bitmap.createScaledBitmap(square, 256, 256, true)
+                    val f = com.titanejstudios.tuner.ui.ProfilePhotos.file(profileId) ?: return@runCatching false
+                    f.parentFile?.mkdirs()
+                    f.outputStream().use { small.compress(android.graphics.Bitmap.CompressFormat.JPEG, 88, it) }
+                    true
+                }.onFailure { AppLog.warn("Couldn't save the profile photo", it) }.getOrDefault(false)
+            }
+            if (ok) {
+                store.setProfilePhotoAt(profileId, System.currentTimeMillis())
+                com.titanejstudios.tuner.ui.ProfilePhotos.changed()
+                showNotice("📷 Profile photo saved for " + (profiles.firstOrNull { it.id == profileId }?.name ?: "the profile"))
+            } else showNotice("That picture couldn't be read – try a JPEG or PNG photo")
+        }
+    }
+
+    fun removeProfilePhoto(profileId: String) {
+        com.titanejstudios.tuner.ui.ProfilePhotos.file(profileId)?.delete()
+        store.setProfilePhotoAt(profileId, 0L)
+        com.titanejstudios.tuner.ui.ProfilePhotos.changed()
+        showNotice("Photo removed")
+    }
+
+    /** A photo picked on this phone. */
+    fun profilePhotoFromUri(profileId: String, uri: Uri) {
+        viewModelScope.launch {
+            val bytes = withContext(Dispatchers.IO) {
+                runCatching { app.contentResolver.openInputStream(uri)?.use { it.readBytes() } }.getOrNull()
+            }
+            if (bytes == null || bytes.size > 30_000_000) showNotice("That picture couldn't be read") else setProfilePhoto(profileId, bytes)
         }
     }
 
@@ -5226,6 +5683,11 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
      * "Sky Sports Main Event", "101"); anything else is searched for.
      */
     fun voiceHeard(text: String) {
+        // "Record…", "next episode", "what's on BBC One later", "something funny"…
+        if (runVoiceCommand(text)) {
+            updateSearch("")
+            return
+        }
         val all = channelsFor(ALL)
         val number = VoiceMatch.number(text)
         val ch = if (number != null) all.firstOrNull { it.number == number } ?: all.getOrNull(number - 1)
@@ -5299,6 +5761,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
             }
             "voice" -> {
                 val q = uri.getQueryParameter("q").orEmpty()
+                if (runVoiceCommand(q)) return
                 val all = channelsFor(ALL)
                 val number = VoiceMatch.number(q)
                 val ch = if (number != null) all.firstOrNull { it.number == number } ?: all.getOrNull(number - 1) else VoiceMatch.find(all, q)
@@ -5846,7 +6309,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         }
     }
 
-    var trailerAutoplay by mutableStateOf(store.trailerAutoplay); private set
+    var trailerAutoplay by mutableStateOf(store.trailerAutoplay && !com.titanejstudios.tuner.data.Lite.on); private set
 
     fun toggleTrailerAutoplay() {
         trailerAutoplay = !trailerAutoplay

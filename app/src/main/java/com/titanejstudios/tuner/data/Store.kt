@@ -538,6 +538,32 @@ class Store(context: Context) {
     var themeBackground: String
         get() = prefs.getString("theme_bg", "ink") ?: "ink"
         set(value) = prefs.edit().putString("theme_bg", value).apply()
+
+    /** Each profile's colour theme and highlight colour ("evening|" = Evening with its own highlight); null = not chosen. */
+    fun profileTheme(profileId: String): Pair<String, String>? =
+        prefs.getString(profileKey("prof_theme", profileId), null)?.let { it.substringBefore('|') to it.substringAfter('|', "") }
+    fun setProfileTheme(profileId: String, theme: String, accent: String) =
+        prefs.edit().putString(profileKey("prof_theme", profileId), "$theme|$accent").apply()
+
+    /** Each profile's own Home rows (order, and the ones switched off); null = the shared choice. */
+    fun profileHomeRows(profileId: String): Pair<List<String>, Set<String>>? {
+        val order = prefs.getString(profileKey("prof_rows_order", profileId), null) ?: return null
+        val hidden = prefs.getString(profileKey("prof_rows_hidden", profileId), "") ?: ""
+        return order.split(',').filter { it.isNotBlank() } to hidden.split(',').filter { it.isNotBlank() }.toSet()
+    }
+    fun setProfileHomeRows(profileId: String, order: List<String>, hidden: Set<String>) = prefs.edit()
+        .putString(profileKey("prof_rows_order", profileId), order.joinToString(","))
+        .putString(profileKey("prof_rows_hidden", profileId), hidden.joinToString(","))
+        .apply()
+
+    /** Whether the TV guide plays the highlighted channel in its corner. */
+    var guidePreview: Boolean
+        get() = prefs.getBoolean("guide_preview", true)
+        set(value) = prefs.edit().putBoolean("guide_preview", value).apply()
+
+    /** A profile picture's file (chosen on a phone), or null for the colour and emoji. */
+    fun profilePhotoAt(profileId: String): Long = prefs.getLong(profileKey("photo_at", profileId), 0L)
+    fun setProfilePhotoAt(profileId: String, at: Long) = prefs.edit().putLong(profileKey("photo_at", profileId), at).apply()
     var subtitleScale: Float
         get() = prefs.getFloat("subtitle_scale", 1f)
         set(value) = prefs.edit().putFloat("subtitle_scale", value).apply()

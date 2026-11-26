@@ -39,6 +39,54 @@ object SafeMode {
         lastCrashAt = p.getLong("last_crash_at", 0L)
     }
 
+    // ---------------- Closing while open (works on every Android, including Fire OS 6) ----------------
+    // Android can end Flicker without telling it (out of memory, a decoder crash). So while Flicker is
+    // on screen it notes, every few seconds, that it's still running and what it's doing; a clean
+    // close (going to the home screen) clears that. If the next start finds the note still there,
+    // Flicker was ended while you were using it – and the note says when, doing what, and how much
+    // memory was left.
+
+    /** What's happening now, e.g. "Watching South Park S29 E3 on Plex (0:15)". */
+    @Volatile var doing: String = "Browsing"
+
+    fun heartbeat(context: Context) {
+        val p = prefs ?: return
+        val am = context.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+        val mi = android.app.ActivityManager.MemoryInfo().also { am.getMemoryInfo(it) }
+        val rt = Runtime.getRuntime()
+        val javaMb = (rt.totalMemory() - rt.freeMemory()) / 1_048_576
+        val nativeMb = android.os.Debug.getNativeHeapAllocatedSize() / 1_048_576
+        val memory = "Flicker used ${javaMb} MB (+${nativeMb} MB native) of ${rt.maxMemory() / 1_048_576} MB; " +
+            "the TV had ${mi.availMem / 1_048_576} MB free" + if (mi.lowMemory) " (low on memory)" else ""
+        p.edit().putLong("hb_at", System.currentTimeMillis()).putString("hb_doing", doing).putString("hb_memory", memory).apply()
+    }
+
+    /** Left the screen normally (home button, another app): not a surprise if Android ends it later. */
+    fun cleanStop() {
+        prefs?.edit()?.remove("hb_at")?.apply()
+    }
+
+    /** At start: was Flicker ended while it was on screen last time? Returns a description, once. */
+    fun endedWhileOpen(): String? {
+        val p = prefs ?: return null
+        val at = p.getLong("hb_at", 0L)
+        if (at == 0L) return null
+        val doing = p.getString("hb_doing", null) ?: "using Flicker"
+        val memory = p.getString("hb_memory", null).orEmpty()
+        p.edit().remove("hb_at").apply()
+        val time = java.text.SimpleDateFormat("d MMM HH:mm:ss", java.util.Locale.UK).format(java.util.Date(at))
+        return "Flicker closed unexpectedly around $time while: $doing. Last memory check: $memory"
+    }
+
+    /** A closing Flicker couldn't catch itself (out of memory, frozen, decoder crash): shown once at start. */
+    fun noteExit(summary: String, at: Long) {
+        val p = prefs ?: return
+        if (at <= lastCrashAt) return
+        lastCrash = summary
+        lastCrashAt = at
+        p.edit().putString("last_crash", summary).putLong("last_crash_at", at).apply()
+    }
+
     /** Called by the crash handler (AppLog). */
     fun onCrash(error: Throwable) {
         val p = prefs ?: return

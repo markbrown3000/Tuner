@@ -224,6 +224,8 @@ class Plex(private val clientId: String) {
         /** Episodes: their show's key and name (to open the show from anywhere). */
         val showKey: String? = null,
         val showName: String? = null,
+        /** Genres Plex knows ("Comedy", "Horror"…), for mood picks. */
+        val genres: List<String> = emptyList(),
     ) {
         val isShow: Boolean get() = type == "show"
 
@@ -529,6 +531,7 @@ class Plex(private val clientId: String) {
                 },
                 showKey = m.optString("grandparentRatingKey").takeIf { it.isNotBlank() },
                 showName = m.optString("grandparentTitle").takeIf { it.isNotBlank() },
+                genres = m.optJSONArray("Genre")?.let { g -> (0 until g.length()).mapNotNull { g.optJSONObject(it)?.optString("tag")?.takeIf { t -> t.isNotBlank() } } } ?: emptyList(),
             )
         }
         return out

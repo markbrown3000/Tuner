@@ -496,6 +496,20 @@ val paneA: @Composable (Modifier) -> Unit = { pane ->
                 CenterMessage("No episodes found")
                 return@Column
             }
+            // How far through the whole series, and a way back to the very first episode.
+            val done = remember(eps, vm.resume) { vm.finishedIds() }
+            val unique = remember(eps) { eps.distinctBy { it.id } }
+            val watchedCount = remember(unique, vm.resume, done) {
+                unique.count { e -> e.id in done || vm.resume[e.id]?.let { r -> r.durationMs > 0 && r.positionMs >= r.durationMs * 0.9 } == true }
+            }
+            val firstEp = remember(unique) { unique.filter { it.season > 0 }.minWithOrNull(compareBy({ it.season }, { it.number })) ?: unique.first() }
+            val carryOn: (() -> Unit)? = upTo?.let { u -> { vm.playEpisode(u, eps, fromStart = vm.resume[u.id] == null) } }
+            SeriesProgress(
+                watched = watchedCount, total = unique.size,
+                upToLabel = upTo?.let { "S${it.season} E${it.number}" }, onCarryOn = carryOn,
+                onFromStart = { vm.playEpisode(firstEp, eps, fromStart = true) },
+            )
+            Spacer(Modifier.height(12.dp))
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(seasons, key = { it }) { n ->
                     PillButton(
@@ -809,8 +823,9 @@ private fun Modifier.clickableNoFocus(onClick: () -> Unit): Modifier = this.clic
 fun LibraryScreen(vm: TunerViewModel) {
     val shows = vm.libraryShows
     LaunchedEffect(shows) { vm.loadLibrary() }
+    val mood = vm.libraryMood?.let { com.titanejstudios.tuner.data.Moods.byKey(it) }
     CatalogueScreen(
-        title = if (shows) "All my series" else "All my films",
+        title = mood?.let { "${it.emoji} ${it.label}" } ?: if (shows) "All my series" else "All my films",
         items = vm.library,
         status = vm.libraryStatus,
         categoryOf = { it.where },
@@ -819,8 +834,8 @@ fun LibraryScreen(vm: TunerViewModel) {
         detailsOf = { t -> listOfNotNull(t.year, t.rating, t.where).joinToString("  ·  ") },
         continueEntries = emptyList(),
         onReload = { vm.loadLibrary(force = true) },
-        switchLabel = if (shows) "Films ›" else "Series ›",
-        onSwitch = { vm.switchLibrary() },
+        switchLabel = if (mood != null) "All films ›" else if (shows) "Films ›" else "Series ›",
+        onSwitch = { if (mood != null) vm.clearMood() else vm.switchLibrary() },
         onResume = {},
         tile = { t, mod ->
             PosterCard(

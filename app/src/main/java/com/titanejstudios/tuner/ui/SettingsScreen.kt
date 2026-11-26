@@ -285,7 +285,7 @@ fun SettingsScreen(vm: TunerViewModel) {
             item {
                 SettingRow(
                     "Home rows",
-                    subtitle = "Show, hide and reorder Home's rows – and whether they change with the time of day",
+                    subtitle = "Show, hide and reorder Home's rows for this profile – and whether they change with the time of day",
                     detail = if (vm.homeRowsHidden.isEmpty()) "All shown" else "${vm.homeRowsHidden.size} hidden",
                     onClick = { vm.navigate(Screen.HomeRows) },
                 )
@@ -382,14 +382,37 @@ fun SettingsScreen(vm: TunerViewModel) {
 
             item { SectionTitle("Look") }
             item {
-                val accents = TunerColors.accents
-                val i = accents.indexOfFirst { it.first == vm.themeAccent }
-                SettingRow("Highlight colour", detail = accents.getOrNull(i)?.second ?: "Sky blue", onClick = { vm.setTheme(accent = accents[(i + 1).mod(accents.size)].first) })
+                val theme = TunerColors.themeOf(vm.themeName)
+                val accent = TunerColors.accents.firstOrNull { it.first == vm.themeAccent && it.first.isNotEmpty() }?.second
+                SettingRow(
+                    "🎨 Colour theme",
+                    subtitle = "Evening, Ocean, Cinema, Festive, High contrast and more – each profile has its own",
+                    detail = theme.name + (accent?.let { " · $it" } ?: ""),
+                    onClick = { vm.themePickerOpen = true },
+                )
             }
             item {
-                val bgs = TunerColors.backgrounds
-                val i = bgs.indexOfFirst { it.first == vm.themeBackground }
-                SettingRow("Background", detail = bgs.getOrNull(i)?.second ?: "Evening", onClick = { vm.setTheme(background = bgs[(i + 1).mod(bgs.size)].first) })
+                SettingRow(
+                    "🪶 Lite mode",
+                    // On a TV the row has one line, so just what it found; phones also get the explanation.
+                    subtitle = com.titanejstudios.tuner.data.Lite.summary(vm.liteChoice) + if (vm.isPhone) "\nFor older sticks with little memory: fewer pictures held at once, the guide read a few hours at a time" else "",
+                    detail = run {
+                        when (vm.liteChoice) {
+                            "on" -> "On"
+                            "off" -> "Off"
+                            else -> if (com.titanejstudios.tuner.data.Lite.lowMemoryDevice) "Auto (on)" else "Auto (off)"
+                        }
+                    },
+                    onClick = { vm.cycleLite() },
+                )
+            }
+            if (!vm.isPhone) item {
+                SettingRow(
+                    "Live picture in the TV guide",
+                    subtitle = if (vm.liteOn) "Off while Lite mode is on" else "Rest on a programme that's on now and it plays in the guide's corner",
+                    detail = if (vm.guidePreview && !vm.liteOn) "On" else "Off",
+                    onClick = { vm.toggleGuidePreview() },
+                )
             }
             item {
                 SettingRow(
