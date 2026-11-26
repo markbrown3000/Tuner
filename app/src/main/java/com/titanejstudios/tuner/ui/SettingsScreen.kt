@@ -9,6 +9,7 @@ import com.titanejstudios.tuner.integrations.PhoneSetupServer
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -60,9 +61,12 @@ fun SettingsScreen(vm: TunerViewModel) {
     val restorer = rememberFocusRestorer()
     RestoreFocusWhenClosed(menuFor != null || confirmDelete != null || profileMenu != null, restorer)
     val first = remember { FocusRequester() }
+    val groupsFirst = remember { FocusRequester() }
+    val narrow = narrowScreen()
     LaunchedEffect(Unit) {
         delay(60)
-        runCatching { first.requestFocus() }
+        // The group menu on TVs; the first row on phones.
+        runCatching { if (narrow) first.requestFocus() else groupsFirst.requestFocus() }
     }
 
     Column(
@@ -73,8 +77,60 @@ fun SettingsScreen(vm: TunerViewModel) {
     ) {
         Text("Settings", fontSize = 32.sp, fontWeight = FontWeight.Bold, color = TunerColors.TextPrimary)
         Spacer(Modifier.height(16.dp))
-        LazyColumn(Modifier.widthIn(max = 980.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            item { SectionTitle("Playlists") }
+        // A menu of groups on the left (chips along the top on phones), that group's settings on the right.
+        var group by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(SettingsGroups.all.first().key) }
+        var query by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
+        var searching by remember { mutableStateOf(false) }
+        var advancedFor by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            PillButton(if (query.isBlank()) "🔍 Search settings" else "🔍 \"$query\"", { searching = true }, compact = true)
+            if (query.isNotBlank()) {
+                Spacer(Modifier.width(8.dp))
+                PillButton("✕ Clear", { query = "" }, compact = true)
+            }
+        }
+        if (searching) {
+            TextInputDialog(
+                title = "Search settings",
+                initial = query,
+                hint = "e.g. subtitles, lite, PIN, recordings",
+                label = "Search",
+                onDismiss = { searching = false },
+                onDone = { searching = false; query = it.trim() },
+            )
+        }
+        Spacer(Modifier.height(10.dp))
+        if (narrow && query.isBlank()) {
+            CategoryChips(SettingsGroups.all.map { it.key }, group, label = { k -> SettingsGroups.all.first { it.key == k }.label.substringAfter("  ") }) { group = it }
+            Spacer(Modifier.height(10.dp))
+        }
+        Row(Modifier.fillMaxSize()) {
+        if (!narrow && query.isBlank()) {
+            LazyColumn(Modifier.width(300.dp).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                items(SettingsGroups.all.size, key = { SettingsGroups.all[it].key }) { i ->
+                    val g = SettingsGroups.all[i]
+                    FocusSurface(
+                        memoryKey = "sgrp|${g.key}",
+                        onClick = { group = g.key },
+                        onFocused = { group = g.key },
+                        selected = g.key == group,
+                        baseColor = TunerColors.Panel,
+                        modifier = Modifier.fillMaxWidth().height(52.dp).then(if (i == 0) Modifier.focusRequester(groupsFirst) else Modifier),
+                    ) { f ->
+                        Text(
+                            g.label, modifier = Modifier.padding(horizontal = 14.dp),
+                            color = if (f || g.key == group) Color.White else TunerColors.TextSecondary,
+                            fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.width(20.dp))
+        }
+        androidx.compose.runtime.CompositionLocalProvider(LocalSettingsQuery provides query) {
+        LazyColumn(Modifier.widthIn(max = 980.dp), verticalArrangement = if (query.isBlank()) Arrangement.spacedBy(6.dp) else Arrangement.Top) {
+          with(SettingsScope(this, group, query, advancedFor == group) { advancedFor = group }) {
+            section("Playlists")
             if (vm.sources.size > 1) {
                 item {
                     SettingRow(
@@ -128,7 +184,7 @@ fun SettingsScreen(vm: TunerViewModel) {
                 )
             }
 
-            item { SectionTitle("Profiles") }
+            section("Profiles")
             items(vm.profiles, key = { "profile-" + it.id }) { p ->
                 SettingRow(
                     (if (p.kids) "🧸 " else "👤 ") + p.name,
@@ -144,6 +200,7 @@ fun SettingsScreen(vm: TunerViewModel) {
                 )
             }
             item { SettingRow("Add a profile", subtitle = "Each profile has its own favourites; kids profiles can have limits", onClick = { vm.startAddProfile() }) }
+            section("Start-up")
             item {
                 SettingRow(
                     "When Flicker opens",
@@ -162,6 +219,7 @@ fun SettingsScreen(vm: TunerViewModel) {
                 )
             }
 
+            section("Devices & sync")
             if (vm.isPhone) item {
                 SettingRow(
                     "📺 TV remote",
@@ -214,6 +272,7 @@ fun SettingsScreen(vm: TunerViewModel) {
                 )
             }
 
+            section("Easier to see and hear")
             item {
                 SettingRow(
                     "Text size",
@@ -232,6 +291,7 @@ fun SettingsScreen(vm: TunerViewModel) {
                 )
             }
 
+            section("Skipping & previews")
             item {
                 SettingRow(
                     "Preview pictures when skipping (IPTV)",
@@ -242,6 +302,7 @@ fun SettingsScreen(vm: TunerViewModel) {
                 )
             }
 
+            section("Your usual channel")
             item {
                 SettingRow(
                     "Offer my usual channel",
@@ -251,6 +312,7 @@ fun SettingsScreen(vm: TunerViewModel) {
                 )
             }
 
+            section("VPN")
             item {
                 SettingRow(
                     "VPN",
@@ -264,6 +326,7 @@ fun SettingsScreen(vm: TunerViewModel) {
                 )
             }
 
+            section("Home & recommendations")
             item {
                 SettingRow(
                     "Recommendations",
@@ -291,6 +354,7 @@ fun SettingsScreen(vm: TunerViewModel) {
                 )
             }
 
+            section("When the TV turns on")
             item {
                 SettingRow(
                     "Open Flicker when the TV turns on",
@@ -301,7 +365,7 @@ fun SettingsScreen(vm: TunerViewModel) {
                 )
             }
 
-            item { SectionTitle("Playback") }
+            section("Playback")
             item {
                 SettingRow(
                     "Combine HD / SD copies of a channel",
@@ -335,6 +399,7 @@ fun SettingsScreen(vm: TunerViewModel) {
                 )
             }
 
+            advanced()
             item {
                 SettingRow(
                     "Audio passthrough (Dolby to soundbar/amp)",
@@ -360,7 +425,7 @@ fun SettingsScreen(vm: TunerViewModel) {
                 )
             }
 
-            item { SectionTitle("Sound & subtitles") }
+            section("Sound & subtitles")
             item {
                 SettingRow(
                     "Night mode",
@@ -380,7 +445,7 @@ fun SettingsScreen(vm: TunerViewModel) {
             }
             item { SettingRow("Sleep timer", subtitle = "Also in the player's menu (hold OK)", detail = vm.sleepLabel, onClick = { vm.setSleepTimer(if (vm.sleepAt == 0L) 60 else 0) }) }
 
-            item { SectionTitle("Look") }
+            section("Look")
             item {
                 val theme = TunerColors.themeOf(vm.themeName)
                 val accent = TunerColors.accents.firstOrNull { it.first == vm.themeAccent && it.first.isNotEmpty() }?.second
@@ -431,6 +496,7 @@ fun SettingsScreen(vm: TunerViewModel) {
                 )
             }
 
+            section("Languages")
             item {
                 SettingRow("Sound language", subtitle = "Picked automatically when a channel or film has several (each profile has its own)", detail = vm.languageName(vm.audioLanguage), onClick = { vm.cycleAudioLanguage() })
             }
@@ -451,7 +517,7 @@ fun SettingsScreen(vm: TunerViewModel) {
                 )
             }
 
-            item { SectionTitle("Films & series") }
+            section("Films & series")
             item {
                 SettingRow(
                     "Film info (TMDB key)",
@@ -476,6 +542,7 @@ fun SettingsScreen(vm: TunerViewModel) {
                     onClick = { vm.toggleTrailerAutoplay() },
                 )
             }
+            advanced()
             item {
                 SettingRow(
                     "Subtitles online (OpenSubtitles key)",
@@ -485,7 +552,7 @@ fun SettingsScreen(vm: TunerViewModel) {
                 )
             }
 
-            item { SectionTitle("Plex, scores & updates") }
+            section("Plex, scores & updates")
             if (vm.traktAvailable) item {
                 SettingRow(
                     "Trakt",
@@ -545,7 +612,7 @@ fun SettingsScreen(vm: TunerViewModel) {
                 )
             }
 
-            item { SectionTitle("Google TV") }
+            section("Google TV")
             item {
                 SettingRow(
                     "Channels in the TV's Live tab",
@@ -570,7 +637,7 @@ fun SettingsScreen(vm: TunerViewModel) {
             }
 
             // A phone remote for a phone makes no sense, so these rows only show on a TV.
-            if (!vm.isPhone) item { SectionTitle("Phone remote") }
+            if (!vm.isPhone) section("Phone remote")
             if (!vm.isPhone) item {
                 SettingRow(
                     "Phone remote",
@@ -597,7 +664,7 @@ fun SettingsScreen(vm: TunerViewModel) {
                 }
             }
 
-            item { SectionTitle("Channel health") }
+            section("Channel health")
             item {
                 val progress = vm.healthProgress
                 SettingRow(
@@ -638,7 +705,7 @@ fun SettingsScreen(vm: TunerViewModel) {
                 item { SettingRow("Clear the offline list", onClick = { vm.clearDead() }) }
             }
 
-            item { SectionTitle("Channels") }
+            section("Channels")
             item {
                 SettingRow(
                     "Manage groups and channels",
@@ -647,7 +714,7 @@ fun SettingsScreen(vm: TunerViewModel) {
                 )
             }
 
-            item { SectionTitle("Parental controls") }
+            section("Parental controls")
             item {
                 SettingRow(
                     if (vm.pin == null) "Set a parental PIN" else "Change PIN",
@@ -659,7 +726,7 @@ fun SettingsScreen(vm: TunerViewModel) {
                 item { SettingRow("Remove PIN", subtitle = "Unlocks every group", onClick = { vm.removePin() }) }
             }
 
-            item { SectionTitle("Recordings") }
+            section("Recordings")
             item {
                 SettingRow(
                     "Recordings",
@@ -703,7 +770,7 @@ fun SettingsScreen(vm: TunerViewModel) {
                 )
             }
 
-            item { SectionTitle("Apps") }
+            section("Apps")
             item {
                 SettingRow(
                     "Apps on this TV",
@@ -712,12 +779,12 @@ fun SettingsScreen(vm: TunerViewModel) {
                 )
             }
 
-            item { SectionTitle("This TV") }
+            section("This TV")
             item { SettingRow("Watch time", subtitle = "What each profile watched this week", onClick = { vm.openStats() }) }
             item { SettingRow(if (vm.isPhone) "Copy to another device" else "Copy to another TV", subtitle = if (vm.isPhone) "Send playlists, favourites and settings to a TV or phone on the same Wi-Fi" else "Send playlists, favourites and settings to a TV on the same Wi-Fi", onClick = { vm.startShareSend() }) }
             item { SettingRow(if (vm.isPhone) "Copy from another device" else "Copy from another TV", subtitle = if (vm.isPhone) "Get everything from a TV or phone running Flicker" else "Get everything from another TV running Flicker", onClick = { vm.startShareReceive() }) }
 
-            item { SectionTitle("Help") }
+            section("Help")
             item {
                 SettingRow(
                     "Check everything",
@@ -757,7 +824,7 @@ fun SettingsScreen(vm: TunerViewModel) {
                 }
             }
 
-            item { SectionTitle("Home Assistant") }
+            section("Home Assistant")
             item {
                 SettingRow(
                     "Webhook",
@@ -775,7 +842,7 @@ fun SettingsScreen(vm: TunerViewModel) {
                 )
             }
 
-            item { SectionTitle("Backup") }
+            section("Backup")
             item {
                 SettingRow(
                     "Keep TVs in sync",
@@ -809,7 +876,7 @@ fun SettingsScreen(vm: TunerViewModel) {
             }
             item { SettingRow("Restore the saved backup", onClick = { vm.restoreFromStorage() }) }
 
-            item { SectionTitle("Reminders") }
+            section("Reminders")
             if (vm.reminders.isEmpty()) {
                 item { SettingRow("No reminders set", subtitle = "In the TV guide, press OK on an upcoming programme", onClick = {}) }
             } else {
@@ -827,7 +894,7 @@ fun SettingsScreen(vm: TunerViewModel) {
                 }
             }
 
-            item { SectionTitle("About") }
+            section("About")
             item {
                 SettingRow(
                     "Flicker ${vm.installedVersion}",
@@ -835,6 +902,9 @@ fun SettingsScreen(vm: TunerViewModel) {
                     onClick = {},
                 )
             }
+          }
+        }
+        }
         }
     }
 
@@ -945,12 +1015,15 @@ fun SettingRow(
     detail: String? = null,
     onClick: () -> Unit,
 ) {
+    // Searching Settings: rows that don't match aren't shown (and space themselves when they are).
+    val query = LocalSettingsQuery.current
+    if (query.isNotBlank() && !settingsMatch(query, title, subtitle, detail)) return
     FocusSurface(
         onClick = onClick,
         baseColor = TunerColors.Panel,
         memoryKey = "row|$title",
         // Phones: the row grows so long explanations wrap instead of being cut off.
-        modifier = modifier.fillMaxWidth().then(
+        modifier = modifier.then(if (query.isNotBlank()) Modifier.padding(bottom = 6.dp) else Modifier).fillMaxWidth().then(
             if (narrowScreen()) Modifier.heightIn(min = 58.dp) else Modifier.height(if (subtitle != null) 72.dp else 58.dp)
         ),
     ) { focused ->
