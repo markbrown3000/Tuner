@@ -31,6 +31,9 @@ class CloudSyncFeature(
     private val isPhone: () -> Boolean,
     private val isForeground: () -> Boolean,
     private val onSynced: (Set<String>) -> Unit,
+    /** Backup guide (remove with the module): its settings, to share with your other devices. */
+    private val backupGuideExport: () -> JSONObject? = { null },
+    private val backupGuideImport: (JSONObject) -> Boolean = { false },
 ) {
     /** Another device in the sync file. */
     class Device(val id: String, val name: String, val house: String, val phone: Boolean, val seenAt: Long, val profiles: List<String> = emptyList())
@@ -241,6 +244,10 @@ class CloudSyncFeature(
         val now = System.currentTimeMillis()
         val changed = HashSet<String>()
         val seen = ArrayList<Device>()
+        // The newest playlists and guide settings from your other devices (see after the loop).
+        var bestSources: org.json.JSONArray? = null
+        var bestSourcesAt = 0L
+        var bestGuide: JSONObject? = null
         for (id in all.keys().asSequence().toList()) {
             val d = all.optJSONObject(id) ?: continue
             val at = d.optLong("at")
@@ -250,6 +257,17 @@ class CloudSyncFeature(
                 continue
             }
             if (id == me) continue
+            d.optJSONArray("sources")?.let { arr ->
+                // Older versions sent no date: they only fill a device with no playlists yet.
+                val sAt = d.optLong("sources_at", 1L)
+                if (arr.length() > 0 && sAt > bestSourcesAt) {
+                    bestSources = arr
+                    bestSourcesAt = sAt
+                }
+            }
+            d.optJSONObject("guide")?.let { g -> if (g.optLong("at") > (bestGuide?.optLong("at") ?: 0L)) bestGuide = g }
+            // Backup guide (remove with the module): the newest settings win.
+            d.optJSONObject("guide")?.optJSONObject("backup")?.let { b -> if (backupGuideImport(b)) changed += Store.GUIDE_SETTINGS }
             val theirHouse = d.optString("house", "Home")
             val snap0 = d.optJSONObject("snapshot")
             val names = snap0?.optJSONObject("sections")?.optJSONObject(LinkSync.PROFILES)?.optJSONArray("list")
@@ -268,12 +286,45 @@ class CloudSyncFeature(
                 changed += "pin"
             }
         }
+        // Playlists: a device with none takes them (a new TV signs in and its channels appear);
+        // otherwise a newer change from another device is added in (playlists are never removed this way).
+        bestSources?.let { arr ->
+            val theirs = store.sourcesFromCloud(arr, store.gdriveEmail)
+            val mine = store.sources
+            val mineAt = store.syncStamp(Store.PLAYLISTS)
+            if (theirs.isNotEmpty() && (mine.isEmpty() || bestSourcesAt > mineAt)) {
+                val merged = mine.map { m -> theirs.firstOrNull { it.id == m.id } ?: m } + theirs.filter { t -> mine.none { it.id == t.id } }
+                if (merged != mine) {
+                    store.setSourcesFromSync(merged, maxOf(bestSourcesAt, mineAt))
+                    changed += Store.PLAYLISTS
+                    AppLog.info("Playlists from your Google account: " + merged.joinToString { it.name })
+                } else store.setSyncStamp(Store.PLAYLISTS, maxOf(bestSourcesAt, mineAt))
+            }
+        }
+        // TV guide settings (matches you fixed by hand, extra guides): the newest change wins.
+        bestGuide?.let { g ->
+            val at = g.optLong("at")
+            if (at > store.syncStamp(Store.GUIDE_SETTINGS)) {
+                g.optJSONObject("epg_overrides")?.let { o -> store.setEpgOverridesFromSync(o.keys().asSequence().associateWith { o.optString(it) }, at) }
+                store.setSyncStamp(Store.GUIDE_SETTINGS, at)
+                changed += Store.GUIDE_SETTINGS
+            }
+        }
+        val email = store.gdriveEmail ?: ""
         all.put(
             me,
             JSONObject().put("name", deviceName()).put("house", house).put("phone", isPhone()).put("at", now)
                 .put("snapshot", LinkSync.snapshot(store))
-                // Your playlists, so Flicker on a PC signs in once and has the same channels (same ids).
-                .put("sources", runCatching { org.json.JSONArray(store.sourcesJson) }.getOrDefault(org.json.JSONArray()))
+                // Your playlists (passwords encrypted with your Google account), so a new device or
+                // Flicker on a PC signs in once and has the same channels (same ids).
+                .put("sources", runCatching { store.cloudSourcesJson(email) }.getOrDefault(org.json.JSONArray()))
+                .put("sources_at", store.syncStamp(Store.PLAYLISTS))
+                .put(
+                    "guide",
+                    JSONObject().put("at", store.syncStamp(Store.GUIDE_SETTINGS))
+                        .put("epg_overrides", JSONObject(store.epgOverrides as Map<*, *>))
+                        .put("backup", runCatching { backupGuideExport() }.getOrNull() ?: JSONObject()),
+                )
                 // The linked-devices key, so Flicker on a PC joins the house (phone remote, Watch on…).
                 .put("link_key", store.linkKey ?: "")
                 // The parental PIN, so kids' limits work the same on a PC.

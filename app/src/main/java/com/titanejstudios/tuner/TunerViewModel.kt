@@ -887,6 +887,9 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         isPhone = { isPhone },
         isForeground = { inForeground },
         onSynced = { changed -> applyLinkChanges(changed) },
+        // Backup guide (remove with the module).
+        backupGuideExport = { com.titanejstudios.backupguide.BackupGuide.exportSettings(app) },
+        backupGuideImport = { o -> o.length() > 0 && com.titanejstudios.backupguide.BackupGuide.importSettings(app, o) },
     )
 
     /** YouTube sign-ins, history and Watch later go to the other devices as they change. */
@@ -1171,22 +1174,20 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     private var epgLoadedAt = 0L
     private val startedAt = System.currentTimeMillis()
 
-    /** Extra TV guides (XMLTV addresses) used after your provider's. */
-    var extraGuides by mutableStateOf(store.extraGuides); private set
-
-    fun addExtraGuide(url: String) {
-        if (!url.startsWith("http", ignoreCase = true)) return showNotice("That doesn't look like a web address")
-        if (url in extraGuides) return
-        extraGuides = extraGuides + url
-        store.extraGuides = extraGuides
-        showNotice("📅 Guide added – updating the TV guide in the background")
-        refresh(activeSources(), channels = false)
+    /** Backup guide (remove with the module): extra guide addresses from the last version move into it. */
+    private val backupGuideMigrated = run {
+        val old = store.extraGuides
+        if (old.isNotEmpty()) {
+            com.titanejstudios.backupguide.BackupGuide.setCustomUrls(app, old)
+            com.titanejstudios.backupguide.BackupGuide.setEnabled(app, true)
+            store.extraGuides = emptyList()
+        }
     }
 
-    fun removeExtraGuide(url: String) {
-        extraGuides = extraGuides - url
-        store.extraGuides = extraGuides
-        showNotice("Guide removed – it'll be gone after the next guide update")
+    /** The TV guide again in the background (after changing guide settings). */
+    fun updateGuideNow() {
+        refresh(activeSources(), channels = false)
+        showNotice("📅 Updating the TV guide in the background")
     }
     private var guideTriedAt = 0L
     /** How far ahead the guide in memory goes. */
@@ -7288,6 +7289,19 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
 
     private fun applyLinkChanges(changed: Set<String>) {
         if ("pin" in changed) pin = store.pin
+        // Playlists from your Google account (a new device just signed in): load their channels.
+        if (com.titanejstudios.tuner.data.Store.PLAYLISTS in changed) {
+            sources = store.sources
+            viewModelScope.launch {
+                val empty = withContext(Dispatchers.IO) { activeSources().filter { !db.hasChannels(it.id) } }
+                loadActive()
+                if (empty.isNotEmpty()) {
+                    showNotice("📺 Your playlist is here from your Google account – loading channels…")
+                    refresh(empty)
+                }
+            }
+        }
+        if (com.titanejstudios.tuner.data.Store.GUIDE_SETTINGS in changed) AppLog.info("TV guide settings synced from another device")
         if (com.titanejstudios.tuner.integrations.LinkSync.COLLECTIONS in changed) collections = Watchlist.decodeCollections(store.collectionsJson)
         if (com.titanejstudios.tuner.integrations.LinkSync.PROFILES in changed) {
             plexFeature.reloadKids()

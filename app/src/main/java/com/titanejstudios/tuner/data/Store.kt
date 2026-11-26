@@ -21,19 +21,56 @@ class Store(context: Context) {
 
     var sources: List<Source>
         get() = try {
-            val arr = JSONArray(prefs.getString("sources", "[]"))
-            (0 until arr.length()).mapNotNull { sourceFromJson(arr.getJSONObject(it)) }
+            val raw = prefs.getString("sources", "[]") ?: "[]"
+            val arr = JSONArray(raw)
+            val list = (0 until arr.length()).mapNotNull { sourceFromJson(arr.getJSONObject(it)) }
+            // Older versions kept passwords as they were typed: encrypt them now (once).
+            val plain = (0 until arr.length()).any { i ->
+                arr.getJSONObject(i).optString("pass").let { it.isNotEmpty() && !it.startsWith("ks1:") }
+            }
+            if (plain && list.isNotEmpty()) writeSources(list)
+            list
         } catch (e: Exception) {
             emptyList()
         }
         set(value) {
-            val arr = JSONArray()
-            value.forEach { arr.put(sourceToJson(it)) }
-            prefs.edit().putString("sources", arr.toString()).apply()
+            writeSources(value)
+            // Other devices signed in to your Google account pick up the change.
+            setSyncStamp(PLAYLISTS, System.currentTimeMillis())
         }
 
-    /** The playlists as saved (for Flicker on a PC, through your own Google Drive). */
-    val sourcesJson: String get() = prefs.getString("sources", "[]") ?: "[]"
+    private fun writeSources(value: List<Source>) {
+        val arr = JSONArray()
+        value.forEach { arr.put(sourceToJson(it, seal = true)) }
+        prefs.edit().putString("sources", arr.toString()).apply()
+    }
+
+    /** Playlists that came from another device: saved without counting as a change here. */
+    fun setSourcesFromSync(value: List<Source>, at: Long) {
+        writeSources(value)
+        setSyncStamp(PLAYLISTS, at)
+    }
+
+    /** The playlists with readable passwords (backups, which may be restored on another device). */
+    fun plainSourcesJson(): JSONArray = JSONArray().apply { sources.forEach { put(sourceToJson(it, seal = false)) } }
+
+    /** The playlists for your Google Drive sync file: passwords encrypted with the Google account. */
+    fun cloudSourcesJson(account: String): JSONArray = JSONArray().apply {
+        sources.forEach { s ->
+            val o = sourceToJson(s, seal = false)
+            if (s is Source.Xtream) o.put("pass", SyncCrypto.encrypt(s.password, account))
+            put(o)
+        }
+    }
+
+    /** Playlists from the sync file (passwords decrypted with the account), or empty if they can't be read. */
+    fun sourcesFromCloud(arr: JSONArray, account: String?): List<Source> = (0 until arr.length()).mapNotNull { i ->
+        val o = JSONObject(arr.getJSONObject(i).toString())
+        val pass = o.optString("pass")
+        // Encrypted with the account's email (or with none, if the email wasn't known when it was sent).
+        if (pass.isNotEmpty()) o.put("pass", SyncCrypto.decrypt(pass, account) ?: SyncCrypto.decrypt(pass, "") ?: return@mapNotNull null)
+        sourceFromJson(o)
+    }
 
     /** A playlist id, or "all" to combine every playlist. */
     var activeSourceId: String
@@ -54,11 +91,11 @@ class Store(context: Context) {
         get() = getList("extra_guides")
         set(value) = putList("extra_guides", value)
 
-    private fun sourceToJson(s: Source): JSONObject = when (s) {
+    private fun sourceToJson(s: Source, seal: Boolean): JSONObject = when (s) {
         is Source.M3u -> JSONObject().put("type", "m3u").put("id", s.id).put("name", s.name)
             .put("url", s.playlistUrl).put("epg", s.epgUrl)
         is Source.Xtream -> JSONObject().put("type", "xtream").put("id", s.id).put("name", s.name)
-            .put("server", s.server).put("user", s.username).put("pass", s.password)
+            .put("server", s.server).put("user", s.username).put("pass", if (seal) LocalCrypto.seal(s.password) else s.password)
             .put("hls", s.useHls).put("epg", s.epgUrl)
     }
 
@@ -68,7 +105,7 @@ class Store(context: Context) {
             "m3u" -> Source.M3u(o.getString("id"), o.optString("name"), o.optString("url"), epg)
             "xtream" -> Source.Xtream(
                 o.getString("id"), o.optString("name"), o.optString("server"),
-                o.optString("user"), o.optString("pass"), o.optBoolean("hls"), epg,
+                o.optString("user"), LocalCrypto.open(o.optString("pass")), o.optBoolean("hls"), epg,
             )
             else -> null
         }
@@ -321,7 +358,16 @@ class Store(context: Context) {
         } catch (e: Exception) {
             emptyMap()
         }
-        set(value) = prefs.edit().putString("epg_overrides", JSONObject(value as Map<*, *>).toString()).apply()
+        set(value) {
+            prefs.edit().putString("epg_overrides", JSONObject(value as Map<*, *>).toString()).apply()
+            setSyncStamp(GUIDE_SETTINGS, System.currentTimeMillis())
+        }
+
+    /** TV guide matches that came from another device (not counted as a change here). */
+    fun setEpgOverridesFromSync(value: Map<String, String>, at: Long) {
+        prefs.edit().putString("epg_overrides", JSONObject(value as Map<*, *>).toString()).apply()
+        setSyncStamp(GUIDE_SETTINGS, at)
+    }
 
     var recordingDir: String?
         get() = prefs.getString("recording_dir", null)
@@ -1005,6 +1051,12 @@ class Store(context: Context) {
         val values = JSONObject()
         for ((key, value) in prefs.all) {
             if (notBackedUp.any { key.startsWith(it) }) continue
+            // Passwords here are encrypted with this device's own key: the backup gets them readable,
+            // so it can be restored on another device (as before).
+            if (key == "sources") {
+                values.put(key, JSONObject().put("t", "s").put("v", plainSourcesJson().toString()))
+                continue
+            }
             val entry = when (value) {
                 is String -> JSONObject().put("t", "s").put("v", value)
                 is Boolean -> JSONObject().put("t", "b").put("v", value)
@@ -1070,6 +1122,10 @@ class Store(context: Context) {
     }
 
     companion object {
+        /** Sync sections kept by Store: your playlists, and TV guide settings. */
+        const val PLAYLISTS = "playlists"
+        const val GUIDE_SETTINGS = "guide_settings"
+
         const val MAIN_PROFILE = "main"
 
         fun profilesToJson(list: List<Profile>): JSONArray {

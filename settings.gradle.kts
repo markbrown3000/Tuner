@@ -16,3 +16,5 @@ dependencyResolutionManagement {
 
 rootProject.name = "Tuner"
 include(":app")
+// Backup TV guide (personal use only – remove this line and the folder before a public release).
+include(":backupguide")

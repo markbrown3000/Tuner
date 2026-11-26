@@ -226,6 +226,16 @@ class Database private constructor(context: Context) :
         return out
     }
 
+    /** A channel's saved programmes between [from] and [to], as start/stop pairs in order. */
+    fun intervals(sourceId: String, channelId: String, from: Long, to: Long): LongArray {
+        val out = ArrayList<Long>()
+        readableDatabase.rawQuery(
+            "SELECT start, stop FROM programmes WHERE source_id = ? AND channel_id = ? AND stop > ? AND start < ? ORDER BY start",
+            arrayOf(sourceId, channelId, from.toString(), to.toString()),
+        ).use { c -> while (c.moveToNext()) { out += c.getLong(0); out += c.getLong(1) } }
+        return out.toLongArray()
+    }
+
     /** Adds programmes from an extra guide (nothing is replaced). */
     fun addProgrammes(sourceId: String, fill: (addProgramme: (String, Programme) -> Unit) -> Unit): Int {
         var n = 0
