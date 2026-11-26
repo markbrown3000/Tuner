@@ -66,8 +66,10 @@ class SettingsScope(
     /** The rows after this in the section are tucked behind "⚙ Advanced". */
     fun advanced() {
         if (!searching && !showAdvanced && SettingsGroups.groupOf(current) == group) {
-            inner.item(key = "advanced|$current") {
-                SettingRow("⚙ Advanced", subtitle = "More $current settings you'll rarely need", onClick = onShowAdvanced)
+            val name = current
+            val show = onShowAdvanced
+            inner.item(key = "advanced|$name") {
+                SettingRow("⚙ Advanced", subtitle = "More $name settings you'll rarely need", onClick = show)
             }
         }
         inAdvanced = true
