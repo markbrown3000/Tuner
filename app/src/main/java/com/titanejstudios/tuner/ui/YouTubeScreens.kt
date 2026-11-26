@@ -780,6 +780,7 @@ private fun Header(text: String, narrow: Boolean) {
 internal fun VideoCard(vm: TunerViewModel, v: YouTube.Video, narrow: Boolean, queue: List<YouTube.Video> = emptyList(), recommended: Boolean = false) {
     val watched = vm.youtube.history.firstOrNull { it.video.id == v.id }
     FocusSurface(
+        memoryKey = "yt|${v.id}",
         onClick = { vm.playYouTube(v, queue) },
         onLongClick = { vm.openYouTubeMenu(v, recommended) },
         baseColor = TunerColors.Panel,
@@ -822,6 +823,7 @@ internal fun VideoCard(vm: TunerViewModel, v: YouTube.Video, narrow: Boolean, qu
 @Composable
 private fun PlaylistCard(vm: TunerViewModel, p: YouTube.Playlist, narrow: Boolean) {
     FocusSurface(
+        memoryKey = "ytpl|${p.id}",
         onClick = { vm.openYouTubePlaylist(p) },
         baseColor = TunerColors.Panel,
         modifier = Modifier.padding(horizontal = if (narrow) 4.dp else 0.dp),

@@ -241,6 +241,19 @@ private fun TunerApp(vm: TunerViewModel) {
         Box(Modifier.weight(1f).fillMaxWidth().then(fadeIn)) {
             // Phones: pull down to refresh on Home, the guide and Films & TV.
             com.titanejstudios.tuner.ui.PhonePullRefresh(vm, phone && !watching && vm.screen in PullScreens) {
+            // Each screen in the back stack keeps its scroll position and choices (category, channel…)
+            // so Back returns you to exactly where you were; screens you've left are forgotten.
+            val saved = androidx.compose.runtime.saveable.rememberSaveableStateHolder()
+            val keys = vm.stackKeys
+            val shown = remember { mutableSetOf<String>() }
+            androidx.compose.runtime.SideEffect {
+                val gone = shown - keys.toSet()
+                gone.forEach { saved.removeState(it) }
+                shown.removeAll(gone)
+                shown.add(vm.screenKey)
+            }
+            androidx.compose.runtime.CompositionLocalProvider(com.titanejstudios.tuner.ui.LocalPlaceMemory provides vm.places) {
+            saved.SaveableStateProvider(vm.screenKey) {
             when (vm.screen) {
                 Screen.Home -> HomeScreen(vm)
                 Screen.Channels -> ChannelsScreen(vm)
@@ -288,6 +301,8 @@ private fun TunerApp(vm: TunerViewModel) {
                 Screen.More -> com.titanejstudios.tuner.ui.PhoneMoreScreen(vm)
                 Screen.Library -> com.titanejstudios.tuner.ui.LibraryScreen(vm)
                 Screen.Collections -> com.titanejstudios.tuner.ui.CollectionsScreen(vm)
+            }
+            }
             }
             }
         }

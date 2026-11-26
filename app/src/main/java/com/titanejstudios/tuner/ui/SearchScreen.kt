@@ -222,6 +222,7 @@ fun SearchScreen(vm: TunerViewModel) {
                         else -> "Earlier"
                     }
                     FocusSurface(
+                        memoryKey = "sr|$key",
                         onClick = {
                             when {
                                 live -> vm.play(ch, all)

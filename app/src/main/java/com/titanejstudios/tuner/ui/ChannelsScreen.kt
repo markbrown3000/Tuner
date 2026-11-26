@@ -175,6 +175,7 @@ fun ChannelsScreen(vm: TunerViewModel) {
             items(vm.groupNames, key = { it }) { g ->
                 val isTab = g == tab
                 FocusSurface(
+                    memoryKey = "grp|$g",
                     onClick = {
                         tab = g
                         vm.selectedGroup = g
@@ -439,6 +440,13 @@ fun ChannelMenu(
         }
         if (!vm.activeProfile.kids) add(MenuItem("➕ Add to my category…") { vm.categoryPickFor = ch })
         if (vm.isCustomGroup(group)) add(MenuItem("Remove from $group") { vm.toggleInCustomGroup(group, ch) })
+        add(
+            MenuItem(
+                if (ch.id in vm.matchDayChannels) "⚽ Not a match-day channel" else "⚽ Match-day channel",
+                "only live when there's a match – never hidden, just \"off air\" in between",
+            ) { vm.toggleMatchDay(ch.id) },
+        )
+        if (ch.id in vm.deadChannels) add(MenuItem("✓ It's working – clear offline") { vm.clearDead(ch.id) })
         add(MenuItem("Hide this channel") {
             vm.toggleHiddenChannel(ch.id)
             vm.showNotice("${ch.name} hidden – unhide it in Settings › Manage channels")
@@ -462,6 +470,7 @@ fun ChannelRow(
     val (current, next) = vm.nowNext(channel.id, vm.now)
     val isFavourite = channel.id in vm.favouriteSet
     FocusSurface(
+        memoryKey = "ch|${channel.id}",
         onClick = onClick,
         onLongClick = onLongClick ?: { vm.toggleFavourite(channel.id) },
         onFocused = onFocused,
@@ -500,7 +509,12 @@ fun ChannelRow(
                     if (vm.hasAnyCatchup(channel)) Text("  ↺", color = if (focused) Color.White else TunerColors.Catchup, fontSize = 16.sp)
                     val versions = vm.versionsFor(channel).size
                     if (versions > 1) Text("  ⧉ $versions", color = if (focused) Color.White else TunerColors.TextSecondary, fontSize = 14.sp)
-                    if (channel.id in vm.deadChannels) Text("  ⚠ offline", color = if (focused) Color.White else TunerColors.Error, fontSize = 14.sp)
+                    when {
+                        // Offline earlier, but the guide has a match on: probably live again.
+                        channel.id in vm.onAirSoon -> Text("  🔴 On today", color = if (focused) Color.White else TunerColors.NowLine, fontSize = 14.sp)
+                        channel.id in vm.deadChannels && channel.id in vm.matchDayChannels -> Text("  ⚽ off air", color = if (focused) Color.White else TunerColors.TextSecondary, fontSize = 14.sp)
+                        channel.id in vm.deadChannels -> Text("  ⚠ offline", color = if (focused) Color.White else TunerColors.Error, fontSize = 14.sp)
+                    }
                 }
                 if (current != null) {
                     Text(

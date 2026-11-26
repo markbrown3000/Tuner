@@ -339,6 +339,7 @@ private fun WhatsOnTile(
     val film = vm.filmLookups[p.title.trim()]
     val width = if (narrow) 160.dp else TILE_WIDE
     FocusSurface(
+        memoryKey = "wo|$key",
         onClick = onClick,
         onLongClick = onLongClick,
         onFocused = onFocused,
@@ -434,6 +435,7 @@ private fun WhatsOnTimeline(
                             val w = barW * ((e2 - s).toFloat() / span)
                             val entry = WhatsOn.Entry(c, p, null, null, null, false, c.id in vm.favouriteSet)
                             FocusSurface(
+                                memoryKey = "wo|${c.id}|${p.start}",
                                 onClick = { onClick(entry) },
                                 onLongClick = { onMenu(entry) },
                                 onFocused = { onFocus(entry) },

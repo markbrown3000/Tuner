@@ -368,6 +368,11 @@ class Store(context: Context) {
         get() = getList("dead_channels").toSet()
         set(value) = putList("dead_channels", value)
 
+    /** Channels that only show something on match days: never hidden, just "off air" in between. */
+    var matchDayChannels: Set<String>
+        get() = getList("match_day_channels").toSet()
+        set(value) = putList("match_day_channels", value)
+
     var healthCheckedAt: Long
         get() = prefs.getLong("health_checked_at", 0L)
         set(value) = prefs.edit().putLong("health_checked_at", value).apply()

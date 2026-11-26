@@ -167,6 +167,7 @@ fun PlexLibraryScreen(vm: TunerViewModel) {
                     val selected = c == category
                     val s = sections.firstOrNull { it.id == c }
                     FocusSurface(
+                        memoryKey = "plexcat|$c",
                         onClick = { plex.libraryCategory = c },
                         onFocused = { plex.libraryCategory = c },
                         // Grown-ups: hold OK on a library to let kids' profiles see it.
@@ -436,6 +437,7 @@ fun PlexShowScreen(vm: TunerViewModel) {
                 items(shown.size, key = { shown[it].ratingKey }) { i ->
                     val e = shown[i]
                     FocusSurface(
+                        memoryKey = "pep|${e.ratingKey}",
                         onClick = { vm.playPlexEntry(e, fromStart = e.watched) },
                         onLongClick = { vm.setPlexWatched(e, !e.watched) },
                         baseColor = TunerColors.Panel,

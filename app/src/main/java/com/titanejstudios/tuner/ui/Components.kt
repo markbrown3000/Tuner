@@ -311,9 +311,23 @@ fun FocusSurface(
     baseColor: Color = Color.Transparent,
     shape: Shape = RoundedCornerShape(10.dp),
     zoom: Boolean = false,
+    /** Names this item so Back can put the highlight back on it (see PlaceMemory). */
+    memoryKey: String? = null,
     content: @Composable BoxScope.(focused: Boolean) -> Unit,
 ) {
     var focused by remember { mutableStateOf(false) }
+    val place = if (memoryKey != null) LocalPlaceMemory.current else null
+    val restore = remember { FocusRequester() }
+    if (place != null && memoryKey != null && place.shouldRestore(memoryKey)) {
+        LaunchedEffect(memoryKey) {
+            // After the screen's own "highlight the first item".
+            kotlinx.coroutines.delay(220)
+            if (place.shouldRestore(memoryKey)) {
+                place.restored()
+                runCatching { restore.requestFocus() }
+            }
+        }
+    }
     val target = when {
         focused -> TunerColors.Accent
         selected -> TunerColors.AccentSoft
@@ -329,9 +343,11 @@ fun FocusSurface(
                 scaleX = scale
                 scaleY = scale
             }
+            .then(if (place != null) Modifier.focusRequester(restore) else Modifier)
             .onFocusChanged {
                 val f = it.isFocused
                 if (f && !focused) onFocused?.invoke()
+                if (f && memoryKey != null) place?.note(memoryKey)
                 focused = f
             }
             .tvClickable(onClick, onLongClick)
@@ -355,6 +371,7 @@ fun PillButton(
         onClick = onClick,
         modifier = modifier.height(if (compact) 42.dp else 48.dp),
         selected = selected,
+        memoryKey = "pill|$text",
         // Frosted, so the picture behind shows through.
         baseColor = Color(0x24FFFFFF),
         shape = RoundedCornerShape(24.dp),
@@ -939,6 +956,7 @@ fun ChannelTile(
 ) {
     val (current, _) = vm.nowNext(channel.id, vm.now)
     FocusSurface(
+        memoryKey = "ch|${channel.id}",
         onClick = onClick,
         onFocused = onFocused,
         baseColor = TunerColors.Panel,
