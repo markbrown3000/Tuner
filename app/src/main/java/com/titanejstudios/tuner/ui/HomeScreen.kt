@@ -693,10 +693,16 @@ fun HomeScreen(vm: TunerViewModel) {
                         )
                     }
                     Spacer(Modifier.height(6.dp))
+                    // An update in the background no longer takes over this line: everything works meanwhile,
+                    // so it's a quiet note underneath (it only takes the line when there are no channels yet).
+                    val updating = vm.status
                     Text(
-                        vm.status?.let { "⟳ $it" } ?: h?.subtitle ?: "${allChannels.size} channels",
+                        if (updating != null && allChannels.isEmpty()) "⟳ $updating" else h?.subtitle ?: "${allChannels.size} channels",
                         color = Color(0xFFD4DDF5), fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     )
+                    if (updating != null && allChannels.isNotEmpty()) {
+                        Text("⟳ $updating", color = TunerColors.TextSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
                     Spacer(Modifier.height(8.dp))
                     AutoScrollText(h?.description ?: "", Modifier.weight(1f).fillMaxWidth(), fontSize = 15.sp)
                 }
@@ -842,6 +848,14 @@ private fun HomeCardRail(cards: List<HomeCard>, firstModifier: Modifier, small: 
             runCatching { startOfRow.requestFocus() }
         }
     }
+    // On the first or second tile, the row always shows from its start. Otherwise a row that had
+    // tiles added in front (or came back scrolled) is left with the first tile half cut off.
+    var focusedIndex by remember { mutableStateOf(-1) }
+    LaunchedEffect(focusedIndex, firstKey) {
+        if (focusedIndex !in 0..1) return@LaunchedEffect
+        delay(150) // after the highlight's own scroll
+        if (state.firstVisibleItemIndex != 0 || state.firstVisibleItemScrollOffset != 0) runCatching { state.animateScrollToItem(0) }
+    }
     LazyRow(
         state = state,
         horizontalArrangement = Arrangement.spacedBy(if (small) 10.dp else 14.dp),
@@ -852,6 +866,7 @@ private fun HomeCardRail(cards: List<HomeCard>, firstModifier: Modifier, small: 
             val card = cards[i]
             HomeTile(card, if (i == 0) firstModifier.focusRequester(startOfRow) else Modifier, { h ->
                 focusedKey = card.key
+                focusedIndex = cards.indexOfFirst { it.key == card.key }
                 onFocus(h)
             }, small)
         }

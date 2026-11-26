@@ -76,6 +76,9 @@ private val adultWords = Regex("(?i)\\b(xxx|porn|erotic|erotica|adult|18\\+|sex|
 /** Adult titles (by name or category) – hidden on phones unless you turn it off, always for kids. */
 internal fun isAdultTitle(name: String, category: String): Boolean = adultWords.containsMatchIn(name) || adultWords.containsMatchIn(category)
 
+/** Sort choices on the film and series pages (the ⇅ button cycles through them). */
+internal val VOD_SORTS = listOf("default" to "Usual order", "new" to "Recently added", "rating" to "Highest rated", "year" to "Newest", "az" to "A–Z")
+
 private const val CONTINUE = "▶ Continue watching"
 private const val MY_LIST = "★ My list"
 private const val ALL_ITEMS = "All"
@@ -170,7 +173,10 @@ private fun <T> CatalogueScreen(
         return
     }
     var focusedItem by remember { mutableStateOf<T?>(null) }
-    var category by remember { mutableStateOf(if (continueEntries.isNotEmpty()) CONTINUE else ALL_ITEMS) }
+    // Saved with the screen, so Back from a film lands on the same category.
+    var category by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(if (continueEntries.isNotEmpty()) CONTINUE else ALL_ITEMS) }
+    val vm = phone?.vm
+    val sort = vm?.vodSort ?: "default"
     val categories = remember(items, continueEntries.isNotEmpty(), myList.isNotEmpty()) {
         buildList {
             if (continueEntries.isNotEmpty()) add(CONTINUE)
@@ -179,12 +185,20 @@ private fun <T> CatalogueScreen(
             items?.map(categoryOf)?.distinct()?.filter { it != CONTINUE && it != ALL_ITEMS && it != MY_LIST }?.sorted()?.let { addAll(it) }
         }
     }
-    val shown = remember(items, category, myList) {
-        when (category) {
+    val shown = remember(items, category, myList, sort) {
+        val list = when (category) {
             ALL_ITEMS -> items.orEmpty().sortedBy { nameOf(it).lowercase() }
             CONTINUE -> emptyList()
             MY_LIST -> myList
             else -> items.orEmpty().filter { categoryOf(it) == category }
+        }
+        // ⇅ Sort: newest added, best rated, newest year or A–Z (the provider's order otherwise).
+        when (sort) {
+            "new" -> if (phone != null) list.sortedByDescending { addedOrder(phone.idOf(it)) } else list
+            "rating" -> if (phone != null) byKey(list) { phone.ratingValue(it) } else list
+            "year" -> list.sortedByDescending { com.titanejstudios.tuner.integrations.Tmdb.cleanTitle(nameOf(it)).second ?: 0 }
+            "az" -> list.sortedBy { com.titanejstudios.tuner.integrations.Tmdb.cleanTitle(nameOf(it)).first.lowercase() }
+            else -> list
         }
     }
     val firstCategory = remember { FocusRequester() }
@@ -224,6 +238,10 @@ private fun <T> CatalogueScreen(
             }
             if (onEverything != null) {
                 PillButton("Plex + provider ›", onEverything, compact = true)
+                Spacer(Modifier.width(8.dp))
+            }
+            if (vm != null) {
+                PillButton("⇅ " + (VOD_SORTS.firstOrNull { it.first == sort }?.second ?: "Sort"), { vm.nextVodSort() }, compact = true)
                 Spacer(Modifier.width(8.dp))
             }
             PillButton(switchLabel, onSwitch, compact = true)
@@ -885,14 +903,25 @@ fun CollectionPicker(vm: TunerViewModel, item: com.titanejstudios.tuner.data.Wat
 @Composable
 fun CollectionsScreen(vm: TunerViewModel) {
     val names = vm.collections.keys.toList()
-    var current by remember { mutableStateOf(vm.openCollection ?: names.firstOrNull()) }
+    var current by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(vm.openCollection ?: names.firstOrNull()) }
     var menuFor by remember { mutableStateOf<com.titanejstudios.tuner.data.WatchItem?>(null) }
-    val list = current?.let { vm.collections[it] }.orEmpty()
+    val raw = current?.let { vm.collections[it] }.orEmpty()
+    // ⇅ the same sort as the film and series pages ("Usual order" = the order you added them).
+    val list = remember(raw, vm.vodSort) {
+        when (vm.vodSort) {
+            "new" -> raw.sortedByDescending { it.added }
+            "year" -> raw.sortedByDescending { com.titanejstudios.tuner.integrations.Tmdb.cleanTitle(it.name).second ?: 0 }
+            "az" -> raw.sortedBy { com.titanejstudios.tuner.integrations.Tmdb.cleanTitle(it.name).first.lowercase() }
+            "rating" -> byKey(raw) { vm.ratingValueFor(it.name, it.isSeries, it.rating) }
+            else -> raw
+        }
+    }
     Column(Modifier.fillMaxSize().background(TunerColors.BackgroundBottom).padding(horizontal = 32.dp, vertical = 20.dp)) {
         Text("Your collections", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = Color.White)
         Spacer(Modifier.height(10.dp))
         Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             names.forEach { n -> PillButton(n, { current = n }, selected = n == current, compact = true) }
+            PillButton("⇅ " + (VOD_SORTS.firstOrNull { it.first == vm.vodSort }?.second ?: "Sort"), { vm.nextVodSort() }, compact = true)
             current?.let { c -> PillButton("🗑 Delete \"$c\"", { vm.deleteCollection(c) }, compact = true) }
         }
         Spacer(Modifier.height(14.dp))

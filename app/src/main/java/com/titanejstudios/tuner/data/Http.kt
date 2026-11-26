@@ -10,6 +10,15 @@ import java.util.zip.GZIPInputStream
 object Http {
     const val USER_AGENT = "Tuner/1.0 (Linux; Android TV)"
 
+    /** Bytes received by every download so far (the app shows "12 MB so far" while updating). */
+    val received = java.util.concurrent.atomic.AtomicLong(0)
+
+    /** Counts what's read, so a long download can show it's still moving. */
+    private class Counting(input: InputStream) : java.io.FilterInputStream(input) {
+        override fun read(): Int = super.read().also { if (it >= 0) received.incrementAndGet() }
+        override fun read(b: ByteArray, off: Int, len: Int): Int = super.read(b, off, len).also { if (it > 0) received.addAndGet(it.toLong()) }
+    }
+
     /** Opens a URL, following redirects (including http <-> https) and un-gzipping .gz files. */
     fun open(url: String): InputStream = openFinal(url).first
 
@@ -35,7 +44,7 @@ object Http {
                 conn.disconnect()
                 throw IOException("HTTP $code from ${URL(current).host}")
             }
-            return maybeGunzip(BufferedInputStream(conn.inputStream, 64 * 1024)) to current
+            return maybeGunzip(BufferedInputStream(Counting(conn.inputStream), 64 * 1024)) to current
         }
         throw IOException("Too many redirects")
     }

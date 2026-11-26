@@ -26,6 +26,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -43,14 +47,21 @@ import java.util.Locale
 @Composable
 fun ThemePickerDialog(vm: TunerViewModel) {
     val first = remember { FocusRequester() }
+    // Whether the highlight is inside the picker. Until it is, the remote would move the Settings
+    // list behind it, so keep asking for a moment (the grid can take a frame or two to lay out).
+    var inside by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
-        delay(60)
-        runCatching { first.requestFocus() }
+        repeat(15) {
+            delay(80)
+            if (inside) return@LaunchedEffect
+            runCatching { first.requestFocus() }
+        }
     }
     val close = { vm.themePickerOpen = false }
     ModalLayer(onDismiss = close) {
         Column(
-            Modifier.fillMaxWidth(0.94f).widthIn(max = 980.dp).clip(RoundedCornerShape(16.dp)).background(TunerColors.Panel).padding(26.dp),
+            Modifier.fillMaxWidth(0.94f).widthIn(max = 980.dp).clip(RoundedCornerShape(16.dp)).background(TunerColors.Panel)
+                .onFocusChanged { inside = it.hasFocus }.padding(26.dp),
         ) {
             Text("Colour theme", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Bold)
             Text(
@@ -70,6 +81,8 @@ fun ThemePickerDialog(vm: TunerViewModel) {
                     val t = themes[i]
                     FocusSurface(
                         onClick = { vm.setTheme(theme = t.key) },
+                        // Moving onto a theme tries it straight away; Done (or Back) keeps it.
+                        onFocused = { if (t.key != vm.themeName) vm.setTheme(theme = t.key) },
                         selected = t.key == vm.themeName,
                         baseColor = Color(t.panel),
                         modifier = Modifier.height(96.dp).then(if (i == current) Modifier.focusRequester(first) else Modifier),
@@ -84,7 +97,7 @@ fun ThemePickerDialog(vm: TunerViewModel) {
                                 }
                                 Spacer(Modifier.height(8.dp))
                                 Text(t.name, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-                                Text(if (t.key == vm.themeName) "✓ In use" else "OK to try it", color = Color(t.soft), fontSize = 12.sp)
+                                Text(if (t.key == vm.themeName) "✓ In use" else "Move here to try it", color = Color(t.soft), fontSize = 12.sp)
                             }
                         }
                     }

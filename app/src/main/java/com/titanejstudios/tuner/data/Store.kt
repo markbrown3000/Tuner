@@ -561,6 +561,11 @@ class Store(context: Context) {
         .putString(profileKey("prof_rows_hidden", profileId), hidden.joinToString(","))
         .apply()
 
+    /** How film and series pages are sorted (VOD_SORTS). */
+    var vodSort: String
+        get() = prefs.getString("vod_sort", "default") ?: "default"
+        set(value) = prefs.edit().putString("vod_sort", value).apply()
+
     /** Whether the TV guide plays the highlighted channel in its corner. */
     var guidePreview: Boolean
         get() = prefs.getBoolean("guide_preview", true)
