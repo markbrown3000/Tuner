@@ -45,6 +45,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -807,9 +808,39 @@ fun HomeScreen(vm: TunerViewModel) {
 
 @Composable
 private fun HomeCardRail(cards: List<HomeCard>, firstModifier: Modifier, small: Boolean = false, onFocus: (HeroInfo) -> Unit) {
-    LazyRow(horizontalArrangement = Arrangement.spacedBy(if (small) 10.dp else 14.dp), contentPadding = PaddingValues(horizontal = 6.dp, vertical = 8.dp)) {
+    val state = androidx.compose.foundation.lazy.rememberLazyListState()
+    // Which tile you're on, and whether this row has the highlight at all.
+    var focusedKey by remember { mutableStateOf<String?>(null) }
+    var rowHasFocus by remember { mutableStateOf(false) }
+    val startOfRow = remember { FocusRequester() }
+    val firstKey = cards.firstOrNull()?.key
+    var lastFirst by remember { mutableStateOf(firstKey) }
+    // Tiles that load later (Plex, your provider) can arrive in front of ones already showing
+    // (YouTube). The row would otherwise stay on the tile you were on and slide right; if you
+    // hadn't moved along the row yet, go back to its start and highlight the new first tile.
+    LaunchedEffect(firstKey) {
+        val old = lastFirst
+        lastFirst = firstKey
+        if (old == null || old == firstKey || firstKey == null) return@LaunchedEffect
+        if (focusedKey != null && focusedKey != old) return@LaunchedEffect
+        runCatching { state.scrollToItem(0) }
+        if (rowHasFocus) {
+            delay(40)
+            runCatching { startOfRow.requestFocus() }
+        }
+    }
+    LazyRow(
+        state = state,
+        horizontalArrangement = Arrangement.spacedBy(if (small) 10.dp else 14.dp),
+        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 8.dp),
+        modifier = Modifier.onFocusChanged { rowHasFocus = it.hasFocus },
+    ) {
         items(cards.size, key = { cards[it].key }) { i ->
-            HomeTile(cards[i], if (i == 0) firstModifier else Modifier, onFocus, small)
+            val card = cards[i]
+            HomeTile(card, if (i == 0) firstModifier.focusRequester(startOfRow) else Modifier, { h ->
+                focusedKey = card.key
+                onFocus(h)
+            }, small)
         }
     }
 }
