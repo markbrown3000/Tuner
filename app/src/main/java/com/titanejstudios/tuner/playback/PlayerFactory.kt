@@ -28,7 +28,7 @@ import com.titanejstudios.tuner.data.Store
  * up" – the picture freezes while the sound carries on. Decoding audio to PCM avoids that.
  */
 @OptIn(UnstableApi::class)
-private class TunerRenderersFactory(context: Context, private val passthrough: Boolean) :
+private class TunerRenderersFactory(context: Context, private val passthrough: Boolean, private val liveSubtitles: Boolean) :
     DefaultRenderersFactory(context) {
 
     init {
@@ -48,6 +48,8 @@ private class TunerRenderersFactory(context: Context, private val passthrough: B
             .setEnableFloatOutput(enableFloatOutput)
             .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
         if (!passthrough) builder.setAudioCapabilities(AudioCapabilities.DEFAULT_AUDIO_CAPABILITIES)
+        // Live subtitles listen to the main player's sound (not multi-view's).
+        if (liveSubtitles) builder.setAudioProcessors(arrayOf<androidx.media3.common.audio.AudioProcessor>(LiveSubtitleTap()))
         return LipSyncAudioSink(builder.build())
     }
 }
@@ -95,7 +97,7 @@ object PlayerFactory {
             .setPrioritizeTimeOverSizeThresholds(false)
             .setBackBuffer(if (longPause) 30_000 else 0, true)
             .build()
-        val player = ExoPlayer.Builder(context, TunerRenderersFactory(context, store.audioPassthrough && !SafeMode.active))
+        val player = ExoPlayer.Builder(context, TunerRenderersFactory(context, store.audioPassthrough && !SafeMode.active, liveSubtitles = !multiView && com.titanejstudios.tuner.subtitles.LiveSubtitles.supported))
             .setMediaSourceFactory(
                 DefaultMediaSourceFactory(DefaultDataSource.Factory(context, http), extractors(store.streamCompatibility && !SafeMode.active))
             )

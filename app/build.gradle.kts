@@ -127,6 +127,9 @@ dependencies {
     // FFmpeg audio decoding for sound the TV's own decoders can't play (MP2 on Freeview-style
     // channels, AC-3/E-AC-3/DTS on some sticks). Used only when the TV can't decode the track.
     implementation("org.jellyfin.media3:media3-ffmpeg-decoder:1.5.0+1")
+    // Live subtitles: JNA lets Flicker call the Vosk speech engine, which is downloaded only when
+    // someone turns live subtitles on (so it isn't in the APK).
+    implementation("net.java.dev.jna:jna:5.13.0@aar")
 
     implementation("io.coil-kt:coil-compose:2.7.0")
 
