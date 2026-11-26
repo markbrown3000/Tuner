@@ -16,7 +16,7 @@ class TunerApplication : Application(), ImageLoaderFactory {
         com.titanejstudios.tuner.data.Lite.init(this)
         com.titanejstudios.tuner.ui.ProfilePhotos.dir = java.io.File(filesDir, "avatars")
         if (com.titanejstudios.tuner.data.SafeMode.active) AppLog.info("Started in safe mode")
-        if (com.titanejstudios.tuner.data.Lite.on) AppLog.info("Lite mode on (" + com.titanejstudios.tuner.data.Lite.label + ")")
+        AppLog.info("Device: " + com.titanejstudios.tuner.data.Lite.summary())
         logHowItLastClosed()
         // Older Android (Fire OS 6/7) keeps no record of why: Flicker's own note tells us.
         com.titanejstudios.tuner.data.SafeMode.endedWhileOpen()?.let { what ->

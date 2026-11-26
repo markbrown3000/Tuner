@@ -394,7 +394,8 @@ fun SettingsScreen(vm: TunerViewModel) {
             item {
                 SettingRow(
                     "🪶 Lite mode",
-                    subtitle = "For older sticks with little memory: fewer pictures held at once, the guide read a few hours at a time, no extras that use memory",
+                    // On a TV the row has one line, so just what it found; phones also get the explanation.
+                    subtitle = com.titanejstudios.tuner.data.Lite.summary(vm.liteChoice) + if (vm.isPhone) "\nFor older sticks with little memory: fewer pictures held at once, the guide read a few hours at a time" else "",
                     detail = run {
                         when (vm.liteChoice) {
                             "on" -> "On"

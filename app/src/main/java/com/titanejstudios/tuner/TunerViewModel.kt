@@ -944,7 +944,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         val m = com.titanejstudios.tuner.data.Lite.next(liteChoice)
         com.titanejstudios.tuner.data.Lite.set(app, m)
         liteChoice = m
-        AppLog.info("Lite mode: " + com.titanejstudios.tuner.data.Lite.label)
+        AppLog.info("Lite mode changed: " + com.titanejstudios.tuner.data.Lite.summary(m))
         showNotice(if (liteOn) "🪶 Lite mode on – fully in place next time Flicker starts" else "Lite mode off – fully in place next time Flicker starts")
     }
 

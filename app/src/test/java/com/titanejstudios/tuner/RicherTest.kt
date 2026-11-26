@@ -62,6 +62,18 @@ class RicherTest {
     }
 
     @Test
+    fun liteModeKnowsTheDevice() {
+        assertEquals("Fire TV Stick 4K (1st gen)", Lite.niceName("Amazon", "AFTMM"))
+        assertEquals("Amazon Fire TV (AFTXYZ)", Lite.niceName("Amazon", "AFTXYZ"))
+        assertEquals("Google Chromecast", Lite.niceName("Google", "Chromecast"))
+        assertEquals("SHIELD Android TV", Lite.niceName("NVIDIA", "SHIELD Android TV"))
+        assertEquals(1.5, Lite.roundedGb(1_430_000_000L), 0.001)
+        assertEquals(2.0, Lite.roundedGb(1_950_000_000L), 0.001)
+        assertEquals("under 2 GB of memory", Lite.why(false, 196, 1_430_000_000L))
+        assertEquals("enough memory", Lite.why(false, 192, 1_950_000_000L))
+    }
+
+    @Test
     fun bedtimeHeadsUpAtTenMinutes() {
         assertTrue(KidsRules.bedtimeHeadsUp(10))
         assertTrue(KidsRules.bedtimeHeadsUp(9))
