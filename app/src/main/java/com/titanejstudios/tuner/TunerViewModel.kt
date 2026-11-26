@@ -1137,6 +1137,8 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     val football = FootballFeature(store, viewModelScope) { showNotice(it) }
     /** Your teams' coming matches with their channels (My teams, Home). */
     var teamFixtures by mutableStateOf<List<TeamFixture>>(emptyList()); private set
+    /** Your teams' recent games you can still watch on catch-up (newest first). */
+    var teamCatchup by mutableStateOf<List<Pair<Channel, Programme>>>(emptyList()); private set
     private var teamFixturesJob: Job? = null
     val footballTeams: Set<String> get() = football.teams
 
@@ -5369,7 +5371,10 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     // ---------------- Your football teams (see features/FootballFeature) ----------------
 
 
-    fun toggleFollowTeam(team: String) = football.toggleTeam(team)
+    fun toggleFollowTeam(team: String, sport: String? = null) {
+        football.toggleTeam(team, sport)
+        refreshTeamFixtures(force = true)
+    }
 
 
     // ---------------- App updates (see features/UpdateFeature) ----------------
@@ -7492,6 +7497,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     fun refreshTeamFixtures(force: Boolean = false) {
         if (football.teams.isEmpty() || activeProfile.kids) {
             teamFixtures = emptyList()
+            teamCatchup = emptyList()
             return
         }
         if (teamFixturesJob?.isActive == true && !force) return
@@ -7515,13 +7521,32 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         val teams = football.teams.toList()
         val espnTeams = football.espnTeams
         val list = football.fixtures.filter { !it.finished && it.kickoff > t - 3 * 3_600_000L }.take(12)
+        // Each team's sport, so a Newcastle rugby fan isn't shown Newcastle United.
+        val sportOf = teams.associateWith { football.sportOf(it).guideType }
+        // Catch-up channels: their last few days too, for "Catch up on your teams".
+        val catchupFrom = HashMap<String, Long>()
+        for (c in chans) if (c.hasCatchup) catchupFrom[c.id] = t - c.catchupDays.coerceAtMost(com.titanejstudios.tuner.data.Lite.catchupDays) * 86_400_000L
+        var pastGames: List<Pair<Channel, Programme>> = emptyList()
         val result = withContext(Dispatchers.IO) {
-            val week = runCatching { shiftGuide(chans, db.loadEpg(ids, t - 3 * 3_600_000L, t + 8 * 86_400_000L, emptyMap())) }.getOrDefault(emptyMap())
+            val week = runCatching { shiftGuide(chans, db.loadEpg(ids, t - 3 * 3_600_000L, t + 8 * 86_400_000L, catchupFrom)) }.getOrDefault(emptyMap())
             val guideEnd = week.values.maxOfOrNull { l -> l.maxOfOrNull { it.stop } ?: 0L } ?: 0L
             val byId = chans.associateBy { it.id }
             fun names(n: String): List<String> = listOfNotNull(n, espnTeams.values.firstOrNull { it.shortName == n || it.name == n }?.name)
                 .flatMap { listOf(it, it.removeSuffix(" FC").removeSuffix(" AFC").removePrefix("AFC ")) }.distinct()
             fun mentions(title: String, team: String) = names(team).any { com.titanejstudios.tuner.data.SportFollow.mentions(title, it) }
+            fun sportOk(team: String, p: Programme, c: Channel): Boolean {
+                val type = com.titanejstudios.tuner.data.Sports.classify(p, c.group) ?: return false
+                return sportOf[team]?.let { it == type } ?: true
+            }
+            pastGames = week.flatMap { (cid, progs) ->
+                val c = byId[cid] ?: return@flatMap emptyList()
+                progs.filter { p ->
+                    p.stop <= t && p.start > t - 7 * 86_400_000L && teams.any { n -> mentions(p.title, n) && sportOk(n, p, c) } &&
+                        com.titanejstudios.tuner.data.Catchup.isAvailable(c, p, t)
+                }.map { c to it }
+            }.sortedWith(compareByDescending<Pair<Channel, Programme>> { it.second.start }.thenBy { if (it.first.id in favs) 0 else 1 })
+                .distinctBy { it.second.title.lowercase() + "@" + it.second.start / 600_000L }
+                .take(15)
             // ESPN's fixtures, each with the channel showing it (both teams named, near kick-off).
             val fromEspn = list.map { m ->
                 var best: Pair<Channel, Programme>? = null
@@ -7531,7 +7556,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
                     for (p in progs) {
                         if (p.stop < m.kickoff - 30 * 60_000L || p.start > m.kickoff + 30 * 60_000L) continue
                         val both = mentions(p.title, m.home) && mentions(p.title, m.away)
-                        val one = !both && (mentions(p.title, m.home) || mentions(p.title, m.away)) && com.titanejstudios.tuner.data.Sports.classify(p, c.group) != null
+                        val one = !both && (mentions(p.title, m.home) || mentions(p.title, m.away)) && sportOk(m.team, p, c)
                         if (!both && !one) continue
                         var score = if (both) 100 else 50
                         if (c.id in favs) score += 20
@@ -7550,7 +7575,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
                 week.flatMap { (cid, progs) ->
                     val c = byId[cid] ?: return@flatMap emptyList()
                     progs.filter { p ->
-                        p.stop > t && mentions(p.title, n) && com.titanejstudios.tuner.data.Sports.classify(p, c.group) != null &&
+                        p.stop > t && mentions(p.title, n) && sportOk(n, p, c) &&
                             com.titanejstudios.tuner.data.Sports.looksLive(p)
                     }.map { p ->
                         TeamFixture(
@@ -7569,6 +7594,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
             (fromEspn + guideOnly).sortedBy { it.match.kickoff }.take(15)
         }
         teamFixtures = result
+        teamCatchup = pastGames
         // "Newcastle v Arsenal today at 17:30 on Sky Sports Main Event" – once per match.
         val today = result.firstOrNull { it.channel != null && it.match.kickoff in t..(t + 14 * 3_600_000L) }
         if (today != null && today.match.id !in store.teamAnnounced) {

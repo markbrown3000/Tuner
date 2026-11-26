@@ -31,6 +31,57 @@ class FootballFeature(
     /** Set when ESPN couldn't be reached (the guide is used instead). */
     var fixturesStatus by mutableStateOf<String?>(null); private set
     var teamList by mutableStateOf(readTeamList()); private set
+    /** Followed name → sport key (Espn.SPORTS); teams from before default to football. */
+    var teamSports by mutableStateOf(readTeamSports()); private set
+    /** Other sports' teams, fetched when you pick that sport. */
+    private val otherTeams = HashMap<String, List<Espn.Team>>()
+    var loadingSport by mutableStateOf<String?>(null); private set
+
+    private fun readTeamSports(): Map<String, String> = runCatching {
+        val o = JSONObject(store.teamSports ?: "{}")
+        o.keys().asSequence().associateWith { o.optString(it) }
+    }.getOrDefault(emptyMap())
+
+    private fun saveTeamSports(m: Map<String, String>) {
+        teamSports = m
+        store.teamSports = JSONObject().apply { m.forEach { (k, v) -> put(k, v) } }.toString()
+    }
+
+    /** The sport a followed team plays (from ESPN's league, what you picked, else football). */
+    fun sportOf(name: String): Espn.SportChoice =
+        Espn.sport(teamSports[name]) ?: espnTeams[name]?.let { Espn.sportOfLeague(it.league) } ?: Espn.SPORTS.first()
+
+    /** A sport's teams to pick from (football's are cached; others are fetched the first time). */
+    suspend fun teamsFor(sport: Espn.SportChoice): List<Espn.Team> {
+        if (sport.leagues.isEmpty()) return emptyList()
+        if (sport.key == "football") {
+            loadTeamList()
+            return teamList
+        }
+        otherTeams[sport.key]?.let { return it }
+        loadingSport = sport.key
+        try {
+            val all = withContext(Dispatchers.IO) {
+                sport.leagues.flatMap { (code, name) ->
+                    runCatching { Espn.teams(code, name) }.onFailure { AppLog.warn("ESPN: couldn't load $name teams", it) }.getOrDefault(emptyList())
+                }
+            }.distinctBy { it.key }
+            if (all.isNotEmpty()) otherTeams[sport.key] = all
+            return all
+        } finally {
+            loadingSport = null
+        }
+    }
+
+    /** Teams in [list] whose name has [q] in it, best matches first. */
+    fun searchIn(list: List<Espn.Team>, q: String): List<Espn.Team> {
+        val t = q.trim().lowercase()
+        if (t.isEmpty()) return emptyList()
+        return list.filter { it.name.lowercase().contains(t) || it.shortName.lowercase().contains(t) }
+            .sortedBy { if (it.shortName.lowercase().startsWith(t) || it.name.lowercase().startsWith(t)) 0 else 1 }
+            .distinctBy { it.name }
+            .take(20)
+    }
 
     private fun readTeams(): Map<String, Espn.Team> = runCatching {
         val o = JSONObject(store.espnTeams ?: "{}")
@@ -80,17 +131,19 @@ class FootballFeature(
         val name = team.shortName
         espnTeams = espnTeams + (name to team)
         saveTeams()
+        Espn.sportOfLeague(team.league)?.let { saveTeamSports(teamSports + (name to it.key)) }
         if (name !in teams) saveTeamNames(teams + name)
         notify("Following $name – their fixtures are on My teams")
         scope.launch { loadFixtures(force = true) }
     }
 
     /** Follow (or stop following) a team by name. */
-    fun toggleTeam(team: String) {
+    fun toggleTeam(team: String, sport: String? = null) {
         val name = team.trim()
         if (name.isEmpty()) return
         if (name in teams) {
             saveTeamNames(teams - name)
+            saveTeamSports(teamSports - name)
             espnTeams = espnTeams - name
             saveTeams()
             fixtures = fixtures.filter { it.team != name }
@@ -98,6 +151,7 @@ class FootballFeature(
             notify("Stopped following $name")
         } else {
             saveTeamNames(teams + name)
+            if (sport != null) saveTeamSports(teamSports + (name to sport))
             notify("Following $name – their games will stand out in the guide")
         }
     }
