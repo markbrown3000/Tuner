@@ -217,6 +217,15 @@ class Database private constructor(context: Context) :
     }
 
     /** Programme title search across the stored guide. */
+    /** How far ahead the saved guide goes (the latest programme end), or 0. */
+    fun guideEnd(sourceIds: List<String>): Long {
+        if (sourceIds.isEmpty()) return 0L
+        readableDatabase.rawQuery(
+            "SELECT MAX(stop) FROM programmes WHERE source_id IN (${placeholders(sourceIds.size)})",
+            sourceIds.toTypedArray(),
+        ).use { c -> return if (c.moveToFirst()) c.getLong(0) else 0L }
+    }
+
     fun searchProgrammes(sourceIds: List<String>, query: String, after: Long, limit: Int): List<Pair<String, Programme>> {
         if (sourceIds.isEmpty()) return emptyList()
         val like = "%" + query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"

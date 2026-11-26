@@ -5414,6 +5414,12 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     // ---------------- Your football teams (see features/FootballFeature) ----------------
 
 
+    /** Follow a team from ESPN's list, then fetch its fixtures and redraw My teams. */
+    fun followEspnTeam(team: com.titanejstudios.tuner.integrations.Espn.Team) {
+        football.follow(team, fetch = false)
+        refreshTeamFixtures(force = true)
+    }
+
     fun toggleFollowTeam(team: String, sport: String? = null) {
         football.toggleTeam(team, sport)
         refreshTeamFixtures(force = true)
@@ -5716,7 +5722,11 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         val byId = allChannels.associateBy { it.id }
         val soon = dead.filterTo(HashSet()) { id ->
             val ch = byId[id] ?: return@filterTo false
-            programmesFor(id).any { p -> p.stop > t && p.start < t + 3_600_000L && isRealProgramme(p.title, ch.name) }
+            // Only live sport counts: ordinary programmes in the guide don't mean a dead channel works.
+            programmesFor(id).any { p ->
+                p.stop > t && p.start < t + 3_600_000L && isRealProgramme(p.title, ch.name) &&
+                    com.titanejstudios.tuner.data.Sports.classify(p, ch.group) != null && com.titanejstudios.tuner.data.Sports.looksLive(p)
+            }
         }
         if (soon != onAirSoon) {
             val newlyOn = soon - onAirSoon
@@ -7566,16 +7576,28 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         val list = football.fixtures.filter { !it.finished && it.kickoff > t - 3 * 3_600_000L }.take(12)
         // Each team's sport, so a Newcastle rugby fan isn't shown Newcastle United.
         val sportOf = teams.associateWith { football.sportOf(it).guideType }
-        // Catch-up channels: their last few days too, for "Catch up on your teams".
-        val catchupFrom = HashMap<String, Long>()
-        for (c in chans) if (c.hasCatchup) catchupFrom[c.id] = t - c.catchupDays.coerceAtMost(com.titanejstudios.tuner.data.Lite.catchupDays) * 86_400_000L
         var pastGames: List<Pair<Channel, Programme>> = emptyList()
         val result = withContext(Dispatchers.IO) {
-            val week = runCatching { shiftGuide(chans, db.loadEpg(ids, t - 3 * 3_600_000L, t + 8 * 86_400_000L, catchupFrom)) }.getOrDefault(emptyMap())
-            val guideEnd = week.values.maxOfOrNull { l -> l.maxOfOrNull { it.stop } ?: 0L } ?: 0L
             val byId = chans.associateBy { it.id }
             fun names(n: String): List<String> = listOfNotNull(n, espnTeams.values.firstOrNull { it.shortName == n || it.name == n }?.name)
                 .flatMap { listOf(it, it.removeSuffix(" FC").removeSuffix(" AFC").removePrefix("AFC ")) }.distinct()
+            // Only the programmes that mention your teams, straight from the saved guide: reading
+            // every channel's whole week into memory ran big playlists out of memory.
+            val week: Map<String, List<Programme>> = runCatching {
+                val terms = teams.flatMap { names(it) }.map { it.trim() }.filter { it.length >= 3 }.distinct()
+                val hits = HashMap<String, MutableList<Programme>>()
+                val seen = HashSet<String>()
+                for (term in terms) {
+                    val found = db.searchProgrammes(ids, term, t - 7 * 86_400_000L, 150) +
+                        db.searchProgrammes(ids, term, t - 3 * 3_600_000L, 300)
+                    for ((cid, p) in found) {
+                        if (cid !in byId || p.start > t + 8 * 86_400_000L) continue
+                        if (seen.add(cid + "@" + p.start)) hits.getOrPut(cid) { ArrayList() } += p
+                    }
+                }
+                shiftGuide(chans, hits.mapValues { (_, l) -> l.sortedBy { it.start } })
+            }.onFailure { AppLog.warn("My teams: couldn't search the guide", it) }.getOrDefault(emptyMap())
+            val guideEnd = runCatching { db.guideEnd(ids) }.getOrDefault(0L)
             fun mentions(title: String, team: String) = names(team).any { com.titanejstudios.tuner.data.SportFollow.mentions(title, it) }
             fun sportOk(team: String, p: Programme, c: Channel): Boolean {
                 val type = com.titanejstudios.tuner.data.Sports.classify(p, c.group) ?: return false

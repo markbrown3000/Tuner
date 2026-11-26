@@ -63,10 +63,15 @@ class TunerApplication : Application(), ImageLoaderFactory {
             prefs.edit().putLong("seen_at", exits.maxOf { it.timestamp }).apply()
             val fmt = java.text.SimpleDateFormat("d MMM HH:mm:ss", java.util.Locale.UK)
             for (e in exits.sortedBy { it.timestamp }) {
-                val why = when (e.reason) {
+                // The first lines of Android's report say where it was stuck or crashed.
+                val trace = if (e.reason == android.app.ApplicationExitInfo.REASON_CRASH_NATIVE || e.reason == android.app.ApplicationExitInfo.REASON_ANR) {
+                    runCatching { e.traceInputStream?.bufferedReader()?.use { r -> r.lineSequence().take(40).joinToString("\n") } }.getOrNull()
+                } else null
+                val outOfMemory = trace != null && listOf("Out of memory", "OutOfMemory", "mark stack", "Failed anonymous mmap").any { it in trace }
+                val why = if (outOfMemory) "Flicker ran out of memory" else when (e.reason) {
                     android.app.ApplicationExitInfo.REASON_LOW_MEMORY -> "the TV ran out of memory"
                     android.app.ApplicationExitInfo.REASON_ANR -> "it froze (Android said \"not responding\")"
-                    android.app.ApplicationExitInfo.REASON_CRASH_NATIVE -> "a crash inside the video or sound decoder"
+                    android.app.ApplicationExitInfo.REASON_CRASH_NATIVE -> "a crash in the TV's own code (often the video or sound decoder)"
                     android.app.ApplicationExitInfo.REASON_CRASH -> "a crash"
                     android.app.ApplicationExitInfo.REASON_SIGNALED -> "Android stopped it (signal ${e.status})"
                     android.app.ApplicationExitInfo.REASON_EXCESSIVE_RESOURCE_USAGE -> "it used too much of the TV's power"
@@ -84,8 +89,6 @@ class TunerApplication : Application(), ImageLoaderFactory {
                 )
                 val line = "Last closed ${fmt.format(java.util.Date(e.timestamp))}: $why$memory" + (e.description?.let { " ($it)" } ?: "")
                 if (unexpected) {
-                    // The first lines of Android's report say where it was stuck or crashed.
-                    val trace = runCatching { e.traceInputStream?.bufferedReader()?.use { r -> r.lineSequence().take(40).joinToString("\n") } }.getOrNull()
                     AppLog.warn(line + (trace?.let { "\n$it" } ?: ""))
                     com.titanejstudios.tuner.data.SafeMode.noteExit("${why.replaceFirstChar { it.uppercase() }}$memory", e.timestamp)
                 } else AppLog.info(line)
