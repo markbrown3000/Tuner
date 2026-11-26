@@ -963,6 +963,15 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         showNotice(if (liteOn) "🪶 Lite mode on – fully in place next time Flicker starts" else "Lite mode off – fully in place next time Flicker starts")
     }
 
+    /** How film and series pages are sorted (remembered). */
+    var vodSort by mutableStateOf(store.vodSort); private set
+
+    fun nextVodSort() {
+        val keys = com.titanejstudios.tuner.ui.VOD_SORTS.map { it.first }
+        vodSort = keys[(keys.indexOf(vodSort) + 1).mod(keys.size)]
+        store.vodSort = vodSort
+    }
+
     /** The TV guide plays the highlighted channel in its corner (off in lite mode). */
     var guidePreview by mutableStateOf(store.guidePreview); private set
 
@@ -1670,15 +1679,34 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
             for ((i, s) in targets.withIndex()) {
                 val which = if (targets.size > 1) " – ${s.name} (${i + 1} of ${targets.size})" else ""
                 try {
-                    status = "Loading channels$which…"
-                    val (list, playlistEpg) = withContext(Dispatchers.IO) { inBackgroundPriority { repo.refreshChannels(s) } }
+                    status = "Updating channels$which…"
+                    val started = System.currentTimeMillis()
+                    val startBytes = com.titanejstudios.tuner.data.Http.received.get()
+                    // Show it's still moving: how much has come down so far.
+                    val ticker = launch {
+                        while (true) {
+                            delay(1_000)
+                            val mb = (com.titanejstudios.tuner.data.Http.received.get() - startBytes) / 1_000_000.0
+                            val secs = (System.currentTimeMillis() - started) / 1000
+                            status = "Updating channels$which · " + String.format(java.util.Locale.UK, "%.1f MB", mb) + " · ${secs}s"
+                        }
+                    }
+                    val (list, playlistEpg) = try {
+                        withContext(Dispatchers.IO) { inBackgroundPriority { repo.refreshChannels(s) } }
+                    } finally {
+                        ticker.cancel()
+                    }
+                    AppLog.info("Channels updated: ${list.size} from ${s.name} in ${(System.currentTimeMillis() - started) / 1000}s")
                     // Show the channels straight away; the guide fills in when it's ready.
                     loadActive()
-                    status = "Loading TV guide$which… (channels can be watched now)"
+                    status = "Updating the TV guide$which… (everything works meanwhile)"
                     val guideError = withContext(Dispatchers.IO) { inBackgroundPriority { repo.refreshGuide(s, list, playlistEpg) } }
                     guideError?.let { problems += "${s.name}: TV guide failed ($it)" }
                 } catch (e: Exception) {
-                    problems += "${s.name}: ${e.message ?: e.javaClass.simpleName}"
+                    if (e is kotlinx.coroutines.CancellationException) throw e
+                    // The provider stopped answering (a minute with nothing) or sent nonsense: keep the channels you had.
+                    AppLog.warn("Couldn't update ${s.name} – kept the channels from last time", e)
+                    problems += "${s.name}: ${e.message ?: e.javaClass.simpleName} – using the channels from last time"
                 }
             }
             loadActive()
