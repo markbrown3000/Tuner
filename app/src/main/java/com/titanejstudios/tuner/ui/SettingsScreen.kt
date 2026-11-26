@@ -438,6 +438,7 @@ fun SettingsScreen(vm: TunerViewModel) {
                 )
             }
             item { SettingRow("Subtitle size", detail = vm.subtitleSizeLabel, onClick = { vm.cycleSubtitleSize() }) }
+            item { LiveSubtitlesSetting(vm) }
             item {
                 SettingRow(
                     "Subtitle background",
@@ -1070,6 +1071,7 @@ private fun KidsSettingsScreen(vm: TunerViewModel) {
                 )
             }
             item { SettingRow("Subtitle size", detail = vm.subtitleSizeLabel, onClick = { vm.cycleSubtitleSize() }) }
+            item { LiveSubtitlesSetting(vm) }
             item { SettingRow("Text size", detail = vm.textScaleLabel, onClick = { vm.cycleTextScale() }) }
             item { SettingRow("Clearer speech", subtitle = "Makes voices easier to hear", detail = if (vm.clearSpeech) "On" else "Off", onClick = { vm.toggleClearSpeech() }) }
             item { Spacer(Modifier.height(10.dp)) }

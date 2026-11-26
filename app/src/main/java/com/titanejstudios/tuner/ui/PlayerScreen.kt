@@ -55,6 +55,7 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
+import com.titanejstudios.tuner.subtitles.LiveSubtitles
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -470,6 +471,7 @@ fun PlayerScreen(vm: TunerViewModel) {
             .then(phoneGestures)
     ) {
         VideoSurface(playback.player, Modifier.fillMaxSize(), resizeMode = vm.pictureMode, keepLastFrame = isLive)
+        LiveCaptionOverlay()
 
         if (vm.isPhone && !vm.inPip) {
             gestureLabel?.let {
@@ -820,18 +822,51 @@ fun PlayerScreen(vm: TunerViewModel) {
                 Overlay.Subtitles -> {
                     val tracks = remember { playback.tracks(C.TRACK_TYPE_TEXT) }
                     val off = playback.subtitlesDisabled
+                    val ctx = LocalContext.current
+                    val live = LiveSubtitles.on
                     MenuDialog(
                         title = "Subtitles",
-                        items = listOf(MenuItem("Off", if (off) "✓" else null) { playback.subtitlesOff() }) +
+                        items = listOf(MenuItem("Off", if (off && !live) "✓" else null) { playback.subtitlesOff(); LiveSubtitles.setOn(ctx, false) }) +
                             tracks.map { t ->
-                                MenuItem(t.label, if (t.selected && !off) "✓" else null) { playback.selectTrack(t, C.TRACK_TYPE_TEXT) }
-                            },
+                                MenuItem(t.label, if (t.selected && !off && !live) "✓" else null) {
+                                    LiveSubtitles.setOn(ctx, false)
+                                    playback.selectTrack(t, C.TRACK_TYPE_TEXT)
+                                }
+                            } +
+                            liveSubtitlesItem(vm, ctx, live) { playback.subtitlesOff() },
                         onDismiss = { overlay = Overlay.None },
                     )
                 }
             }
             SubtitleResults(vm)
         }
+    }
+}
+
+/** "Live subtitles (made as you watch)" in the player's Subtitles menu, if this device can run them. */
+private fun liveSubtitlesItem(vm: TunerViewModel, ctx: android.content.Context, live: Boolean, hideOthers: () -> Unit): List<MenuItem> {
+    val s = LiveSubtitles.status
+    return when {
+        s is LiveSubtitles.Status.NotAvailable -> emptyList()
+        s == LiveSubtitles.Status.Ready -> listOf(
+            MenuItem(
+                "💬 Live subtitles (made as you watch)",
+                if (live) "✓" else if (vm.audioPassthrough) "English · not for sound sent straight to a soundbar" else "English · about 1–2 s behind",
+            ) {
+                if (live) LiveSubtitles.setOn(ctx, false)
+                else {
+                    hideOthers()
+                    LiveSubtitles.setOn(ctx, true)
+                }
+            }
+        )
+        s is LiveSubtitles.Status.Downloading -> listOf(MenuItem("💬 Live subtitles", "downloading – ${s.percent}%") {})
+        else -> listOf(
+            MenuItem("💬 Live subtitles (made as you watch)", "download – about ${LiveSubtitles.DOWNLOAD_MB} MB") {
+                LiveSubtitles.download(ctx) { vm.showNotice(it) }
+                vm.showNotice("Downloading live subtitles – they'll switch on when ready")
+            }
+        )
     }
 }
 
@@ -945,8 +980,8 @@ private fun OptionsMenu(
         if (audio.size > 1 || (audio.isNotEmpty() && mode !is PlayMode.Live)) {
             add(MenuItem("🔈 Audio", audio.firstOrNull { it.selected }?.label ?: "${audio.size} tracks") { onOverlay(Overlay.Audio) })
         }
-        if (text.isNotEmpty()) {
-            val detail = if (playback.subtitlesDisabled) "Off" else text.firstOrNull { it.selected }?.label ?: "Auto"
+        if (text.isNotEmpty() || LiveSubtitles.supported) {
+            val detail = if (LiveSubtitles.on) "Live" else if (playback.subtitlesDisabled || text.isEmpty()) "Off" else text.firstOrNull { it.selected }?.label ?: "Auto"
             add(MenuItem("Subtitles", detail) { onOverlay(Overlay.Subtitles) })
         }
         if (mode is PlayMode.Vod && !mode.contentId.startsWith("plex:")) {
@@ -1626,7 +1661,7 @@ private fun LiveControls(vm: TunerViewModel, channel: Channel, onOverlay: (Overl
         item { PillButton("☰  Guide", { onOverlay(Overlay.MiniGuide) }, compact = true) }
         item { PillButton("📺  Channels", { onOverlay(Overlay.Channels) }, compact = true) }
         item { PillButton(if (fav) "★  Favourite" else "☆  Favourite", { vm.toggleFavourite(channel.id) }, compact = true, selected = fav) }
-        if (text.isNotEmpty()) item { PillButton("CC  Subtitles", { onOverlay(Overlay.Subtitles) }, compact = true) }
+        if (text.isNotEmpty() || LiveSubtitles.supported) item { PillButton("CC  Subtitles", { onOverlay(Overlay.Subtitles) }, compact = true) }
         if (audio.size > 1) item { PillButton("🔈  Audio", { onOverlay(Overlay.Audio) }, compact = true) }
         item { PillButton("⋮  More", { onOverlay(Overlay.Options) }, compact = true) }
     }

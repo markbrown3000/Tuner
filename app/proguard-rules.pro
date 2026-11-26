@@ -28,3 +28,9 @@
 -keep class com.pierfrancescosoffritti.androidyoutubeplayer.** { *; }
 -keepattributes JavascriptInterface
 -keepclassmembers class * { @android.webkit.JavascriptInterface <methods>; }
+
+# Live subtitles: JNA calls the downloaded Vosk engine through this interface, by name.
+-keep class com.sun.jna.** { *; }
+-keepclassmembers class * extends com.sun.jna.** { public *; }
+-keep interface com.titanejstudios.tuner.subtitles.VoskLib { *; }
+-dontwarn java.awt.**

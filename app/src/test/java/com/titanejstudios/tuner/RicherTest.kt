@@ -6,6 +6,7 @@ import com.titanejstudios.tuner.data.Moods
 import com.titanejstudios.tuner.data.VoiceCommand
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -101,5 +102,23 @@ class RicherTest {
         assertEquals("s3cret-pass", c.decrypt(enc, "mark@example.com"))
         assertNull(c.decrypt(enc, "someone.else@example.com"))
         assertEquals("plain", c.decrypt("plain", null))
+    }
+
+    @Test
+    fun liveSubtitlesOnlyOnCapableDevices() {
+        val l = com.titanejstudios.tuner.subtitles.LiveSubtitles
+        // Fire TV Stick 4K (1st gen): 32-bit, 1.5 GB.
+        assertNotNull(l.whyNot(false, true, 1_500_000_000L, 4))
+        // Google TV Streamer: 64-bit, 4 GB, 4 cores.
+        assertNull(l.whyNot(true, false, 4_000_000_000L, 4))
+        assertNotNull(l.whyNot(true, false, 1_500_000_000L, 8))
+        assertNotNull(l.whyNot(true, false, 4_000_000_000L, 2))
+    }
+
+    @Test
+    fun liveSubtitleCaptionsKeepTheLastWholeWords() {
+        val l = com.titanejstudios.tuner.subtitles.LiveSubtitles
+        assertEquals("short", l.tail("short", 20))
+        assertEquals("over the lazy dog", l.tail("the quick brown fox jumps over the lazy dog", 18))
     }
 }
