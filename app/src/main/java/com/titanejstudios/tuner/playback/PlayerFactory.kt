@@ -34,6 +34,9 @@ private class TunerRenderersFactory(context: Context, private val passthrough: B
     init {
         // If the TV's preferred decoder fails to start, try the next one instead of giving up.
         setEnableDecoderFallback(true)
+        // Sound the TV can't decode itself (MP2 on channels like Rewind TV, or Dolby/DTS on some
+        // sticks) is decoded by FFmpeg instead of playing silently – the TV's own decoders still come first.
+        setExtensionRendererMode(EXTENSION_RENDERER_MODE_ON)
     }
 
     override fun buildAudioSink(

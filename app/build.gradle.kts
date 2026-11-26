@@ -122,6 +122,9 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer-hls:1.5.1")
     implementation("androidx.media3:media3-ui:1.5.1")
     implementation("androidx.media3:media3-session:1.5.1")
+    // FFmpeg audio decoding for sound the TV's own decoders can't play (MP2 on Freeview-style
+    // channels, AC-3/E-AC-3/DTS on some sticks). Used only when the TV can't decode the track.
+    implementation("org.jellyfin.media3:media3-ffmpeg-decoder:1.5.0+1")
 
     implementation("io.coil-kt:coil-compose:2.7.0")
 

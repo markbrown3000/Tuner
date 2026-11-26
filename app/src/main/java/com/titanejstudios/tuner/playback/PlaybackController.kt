@@ -248,7 +248,10 @@ class PlaybackController(private val context: Context) {
                 initializedTimestampMs: Long,
                 initializationDurationMs: Long,
             ) {
-                if (p === player) audioDecoder = decoderName
+                if (p === player) {
+                    audioDecoder = decoderName
+                    if (decoderName.contains("ffmpeg", ignoreCase = true)) AppLog.info("Sound decoded by FFmpeg (the TV can't decode this audio itself)")
+                }
             }
 
             override fun onVideoInputFormatChanged(
@@ -260,6 +263,16 @@ class PlaybackController(private val context: Context) {
             }
         })
         p.addListener(object : Player.Listener {
+            override fun onTracksChanged(tracks: Tracks) {
+                // No sound: there's audio in the stream but nothing here can play any of it.
+                if (p !== player) return
+                val audio = tracks.groups.filter { it.type == C.TRACK_TYPE_AUDIO }
+                if (audio.isNotEmpty() && audio.none { g -> (0 until g.length).any { g.isTrackSupported(it) } }) {
+                    val formats = audio.flatMap { g -> (0 until g.length).map { g.getTrackFormat(it).sampleMimeType ?: "?" } }.distinct()
+                    AppLog.warn("No playable sound in this stream – audio is " + formats.joinToString(", "))
+                }
+            }
+
             override fun onAudioSessionIdChanged(audioSessionId: Int) {
                 if (p === player) {
                     nightMode.apply(audioSessionId, nightModeOn, speechOn)
