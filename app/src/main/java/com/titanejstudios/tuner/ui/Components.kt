@@ -11,6 +11,7 @@ import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.BringIntoViewSpec
 import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
 import androidx.compose.runtime.CompositionLocalProvider
@@ -352,7 +353,9 @@ fun FocusSurface(
             }
             .tvClickable(onClick, onLongClick)
             .clip(shape)
-            .background(bg),
+            .background(bg)
+            // A white outline on whatever's highlighted, so it shows even when a picture covers the whole tile.
+            .then(if (focused) Modifier.border(3.dp, Color.White, shape) else Modifier),
         contentAlignment = Alignment.CenterStart,
     ) {
         content(focused)

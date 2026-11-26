@@ -85,6 +85,7 @@ fun ThemePickerDialog(vm: TunerViewModel) {
                         onFocused = { if (t.key != vm.themeName) vm.setTheme(theme = t.key) },
                         selected = t.key == vm.themeName,
                         baseColor = Color(t.panel),
+                        zoom = true,
                         modifier = Modifier.height(96.dp).then(if (i == current) Modifier.focusRequester(first) else Modifier),
                     ) { _ ->
                         Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(t.bg), Color(t.bgBottom))))) {
