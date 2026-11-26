@@ -755,7 +755,11 @@ fun HomeScreen(vm: TunerViewModel) {
                                 CompositionLocalProvider(LocalBringIntoViewSpec provides outerSpec) {
                                     Column {
                                         val because = vm.plexFeature.similarTo ?: vm.becauseFilmOf
-                                        Text(if (row == HomeRow.Because && because != null) "Because you watched $because" else row.title, color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 2.dp))
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text(if (row == HomeRow.Because && because != null) "Because you watched $because" else row.title, color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 2.dp))
+                                            // Plex answers after YouTube and your own films: say more are on the way.
+                                            if (row == HomeRow.Continue && vm.plexLinked && vm.plexFeature.firstLoad) LoadingMore("Loading Plex…")
+                                        }
                                         val m = if (i == 0) Modifier.focusRequester(firstTile) else Modifier
                                         if (row == HomeRow.Apps) {
                                             AppRail(vm, apps, m) { a ->
@@ -804,6 +808,15 @@ fun HomeScreen(vm: TunerViewModel) {
             onDismiss = { plexMenu = null },
         )
     }
+}
+
+/** A small "Loading Plex…" with a spinner beside a row's title. */
+@Composable
+private fun LoadingMore(text: String) {
+    Spacer(Modifier.width(14.dp))
+    androidx.compose.material3.CircularProgressIndicator(Modifier.size(14.dp), color = TunerColors.TextSecondary, strokeWidth = 2.dp)
+    Spacer(Modifier.width(8.dp))
+    Text(text, color = TunerColors.TextSecondary, fontSize = 14.sp)
 }
 
 @Composable
@@ -922,10 +935,13 @@ private fun PhoneHomeBody(
             item(key = "row" + row.name) {
                 Column {
                     val because = vm.plexFeature.similarTo ?: vm.becauseFilmOf
-                    Text(
-                        if (row == HomeRow.Because && because != null) "Because you watched $because" else row.title,
-                        color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 14.dp, top = 6.dp),
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            if (row == HomeRow.Because && because != null) "Because you watched $because" else row.title,
+                            color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 14.dp, top = 6.dp),
+                        )
+                        if (row == HomeRow.Continue && vm.plexLinked && vm.plexFeature.firstLoad) Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) { LoadingMore("Loading Plex…") }
+                    }
                     val m = if (i == 0) Modifier.focusRequester(firstTile) else Modifier
                     if (row == HomeRow.Apps) AppRail(vm, apps, m) { }
                     else HomeCardRail(cards[row].orEmpty(), m, small = true) { }

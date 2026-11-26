@@ -25,6 +25,8 @@ class PlexFeature(private val store: Store, private val scope: CoroutineScope) {
     var items by mutableStateOf<List<Plex.Item>>(emptyList()); private set
     /** Newest films and shows on Plex (Home's "New on Plex" row). */
     var recent by mutableStateOf<List<Plex.Entry>>(emptyList()); private set
+    /** Plex's Continue watching hasn't come back yet since Flicker started (for "Loading Plex…" on Home). */
+    var firstLoad by mutableStateOf(store.plexToken != null); private set
     var servers: List<Plex.Server> = emptyList(); private set
     private var job: Job? = null
 
@@ -97,6 +99,7 @@ class PlexFeature(private val store: Store, private val scope: CoroutineScope) {
 
     fun unlink() {
         job?.cancel()
+        firstLoad = false
         store.plexToken = null
         linked = false
         code = null
@@ -107,7 +110,10 @@ class PlexFeature(private val store: Store, private val scope: CoroutineScope) {
 
     /** Re-reads Continue watching from each server. */
     fun refresh(force: Boolean = false) {
-        val token = activeToken() ?: return
+        val token = activeToken() ?: run {
+            firstLoad = false
+            return
+        }
         if (!force && job?.isActive == true) return
         job = scope.launch {
             val plex = client()
@@ -119,6 +125,8 @@ class PlexFeature(private val store: Store, private val scope: CoroutineScope) {
                     Triple(srv, deck, runCatching { plex.recentlyAdded(srv) }.getOrNull())
                 }.onFailure { AppLog.warn("Plex: couldn't load Continue watching", it) }.getOrNull()
             }
+            // Plex answered (or couldn't be reached): either way, stop saying it's loading.
+            firstLoad = false
             // Switched Plex user meanwhile: this answer is for someone else.
             if (token != activeToken()) return@launch
             if (result != null) {
