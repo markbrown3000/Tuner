@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -764,7 +765,22 @@ fun HomeScreen(vm: TunerViewModel) {
                 when {
                     status != null || !vm.initialLoadDone -> SkeletonRows(status ?: "Loading your channels…")
                     vm.error != null -> CenterMessage(vm.error ?: "")
-                    vm.sources.isEmpty() -> CenterMessage("No channels yet – add a playlist in Settings")
+                    vm.sources.isEmpty() -> Column(Modifier.fillMaxWidth().padding(top = 30.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        // A new device: sign in to Google and the playlist from your other devices loads itself.
+                        Text("No channels yet", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            "Already use Flicker on another device? Sign in with the same Google account and your playlist, " +
+                                "favourites and guide settings come across by themselves.",
+                            color = TunerColors.TextSecondary, fontSize = 15.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                            modifier = Modifier.widthIn(max = 640.dp),
+                        )
+                        Spacer(Modifier.height(14.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            PillButton("🔑 Sign in with Google", { vm.navigate(Screen.Cloud) })
+                            PillButton("+ Add a playlist", { vm.navigate(Screen.Settings) })
+                        }
+                    }
                     else -> CenterMessage("No channels to show – check Settings › Playlists")
                 }
             } else {

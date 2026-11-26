@@ -4,7 +4,7 @@ import android.content.Context
 import java.io.IOException
 
 /** Downloads playlists and guides into the database. Shared by the app and the overnight refresh. */
-class Repository(context: Context, private val store: Store) {
+class Repository(private val context: Context, private val store: Store) {
     private val db = Database.get(context)
 
     class Refreshed(val channels: List<Channel>, val epgError: String?)
@@ -42,13 +42,8 @@ class Repository(context: Context, private val store: Store) {
                 epgError = e.message ?: e.javaClass.simpleName
             }
         }
-        // Extra guides fill what your provider's guide doesn't have (more days, missing channels).
-        for (extra in store.extraGuides) {
-            val started = System.currentTimeMillis()
-            runCatching { addExtraEpg(src.id, extra, list) }
-                .onSuccess { n -> AppLog.info("Extra TV guide: added $n programmes for ${src.name} in ${(System.currentTimeMillis() - started) / 1000}s") }
-                .onFailure { AppLog.warn("Extra TV guide failed ($extra)", it) }
-        }
+        // Backup guide (remove with the module): free sources fill channels and gaps your provider's guide leaves.
+        runCatching { fillFromBackupGuide(src, list) }.onFailure { AppLog.warn("Backup guide failed for ${src.name}", it) }
         val t = System.currentTimeMillis()
         store.setLastGuide(src.id, t)
         store.setLastRefresh(src.id, t)
@@ -74,26 +69,32 @@ class Repository(context: Context, private val store: Store) {
         return byId to byName
     }
 
-    /**
-     * An extra guide: for each channel, only programmes after what's already saved (so your
-     * provider's own guide wins where it has listings). Returns how many were added.
-     */
-    private fun addExtraEpg(sourceId: String, url: String, list: List<Channel>): Int {
-        val (byId, byName) = matchers(list)
+    /** Backup guide (remove with the module): fills gaps from free guide sources when it's turned on. */
+    private fun fillFromBackupGuide(src: Source, list: List<Channel>) {
+        if (!com.titanejstudios.backupguide.BackupGuide.enabled(context)) return
         val now = System.currentTimeMillis()
-        val have = db.lastStops(sourceId)
-        return Http.open(url.trim()).use { input ->
-            db.addProgrammes(sourceId) { add ->
-                XmltvParser.parse(
-                    input, byId, byName,
-                    from = now - 3 * 3600_000L,
-                    to = now + guideDays * 86_400_000L,
-                    onProgramme = { channelId, p ->
-                        if (p.start >= (have[channelId] ?: 0L)) add(channelId, p)
-                    },
-                )
-            }
+        val from = now - 3 * 3600_000L
+        val to = now + guideDays * 86_400_000L
+        val channels = list.map { com.titanejstudios.backupguide.BackupGuide.Channel(it.id, it.epgId, it.name) }
+        // Saved a couple of thousand at a time (short writes, little held in memory).
+        val batch = ArrayList<Pair<String, Programme>>(2000)
+        fun flush() {
+            if (batch.isEmpty()) return
+            db.addProgrammes(src.id) { add -> for ((id, p) in batch) add(id, p) }
+            batch.clear()
         }
+        val n = com.titanejstudios.backupguide.BackupGuide.fill(
+            context, channels, from, to,
+            open = { url -> Http.open(url.trim()) },
+            covered = { id -> db.intervals(src.id, id, from, to) },
+            add = { id, p ->
+                batch += id to Programme(p.start, p.stop, p.title, p.desc, p.category, p.image, null)
+                if (batch.size >= 2000) flush()
+            },
+            log = { AppLog.info(it) },
+        )
+        flush()
+        AppLog.info("Backup guide: $n programmes added for ${src.name}")
     }
 
     private fun loadChannels(src: Source): Pair<List<Channel>, String?> = when (src) {

@@ -228,7 +228,19 @@ class Sync(private val config: Config) {
         }
         bestSources?.let { arr ->
             if (config.useTvPlaylists) {
-                val theirs = config.sourcesFromJson(arr)
+                // Passwords come encrypted with your Google account (the TV's side of this): readable copies here.
+                val readable = org.json.JSONArray()
+                for (i in 0 until arr.length()) {
+                    val o = JSONObject(arr.getJSONObject(i).toString())
+                    val pass = o.optString("pass")
+                    if (pass.isNotEmpty()) {
+                        val plain = com.titanejstudios.tuner.data.SyncCrypto.decrypt(pass, config.googleEmail)
+                            ?: com.titanejstudios.tuner.data.SyncCrypto.decrypt(pass, "") ?: continue
+                        o.put("pass", plain)
+                    }
+                    readable.put(o)
+                }
+                val theirs = config.sourcesFromJson(readable)
                 if (theirs.isNotEmpty() && theirs.map { it.toString() } != config.sources.map { it.toString() }) {
                     config.sources = theirs
                     playlistsChanged = true

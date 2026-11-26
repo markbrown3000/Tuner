@@ -91,4 +91,15 @@ class RicherTest {
         assertEquals("Rugby", espn.sport("rugby")?.guideType)
         assertTrue(espn.SPORTS.any { it.key == "darts" && it.leagues.isEmpty() })
     }
+
+    @Test
+    fun playlistPasswordsAreEncryptedForTheAccount() {
+        val c = com.titanejstudios.tuner.data.SyncCrypto
+        val enc = c.encrypt("s3cret-pass", "Mark@Example.com")
+        assertTrue(c.isEncrypted(enc))
+        assertFalse(enc.contains("s3cret"))
+        assertEquals("s3cret-pass", c.decrypt(enc, "mark@example.com"))
+        assertNull(c.decrypt(enc, "someone.else@example.com"))
+        assertEquals("plain", c.decrypt("plain", null))
+    }
 }
