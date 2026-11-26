@@ -75,7 +75,9 @@ fun ThemePickerDialog(vm: TunerViewModel) {
                 GridCells.Adaptive(150.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.height(330.dp),
+                // Room around the tiles: the highlighted one grows, and its outline mustn't be cut off.
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(10.dp),
+                modifier = Modifier.height(350.dp),
             ) {
                 items(themes.size, key = { themes[it].key }) { i ->
                     val t = themes[i]

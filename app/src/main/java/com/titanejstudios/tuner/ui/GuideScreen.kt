@@ -92,7 +92,8 @@ fun GuideScreen(vm: TunerViewModel) {
 
     val startOfNow = remember { floorToHalfHour(System.currentTimeMillis()) }
     val minStart = remember { floorToHalfHour(startOfNow - vm.guideHistoryMs) }
-    val maxStart = startOfNow + 22 * 3600_000L
+    // A week ahead (the guide is saved for 7 days; more is read from storage as you scroll).
+    val maxStart = startOfNow + 7 * 24 * 3600_000L - 3 * 3600_000L
     var windowStart by remember { mutableLongStateOf(startOfNow) }
     var focused by remember { mutableStateOf<Pair<Channel, Programme?>?>(null) }
     var pending by remember { mutableStateOf<PendingFocus?>(null) }

@@ -208,7 +208,7 @@ fun TeamsScreen(vm: TunerViewModel) {
             title = if (list.isEmpty()) "Not found in ESPN's ${sport.label.lowercase()} leagues" else "Pick your team",
             subtitle = if (list.isEmpty()) "Add it by name: its games are found in the TV guide instead." else null,
             items = list.map { t ->
-                MenuItem(t.shortName, t.leagueName + if (football.espnTeams[t.shortName]?.key == t.key) " · following" else "") { football.follow(t) }
+                MenuItem(t.shortName, t.leagueName + if (football.espnTeams[t.shortName]?.key == t.key) " · following" else "") { vm.followEspnTeam(t) }
             } + MenuItem("Just add \"$typed\"", "games found in the TV guide") { if (typed !in football.teams) vm.toggleFollowTeam(typed, sport.key) },
             onDismiss = { results = null },
         )

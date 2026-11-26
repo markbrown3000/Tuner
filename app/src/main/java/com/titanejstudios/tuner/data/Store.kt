@@ -43,6 +43,17 @@ class Store(context: Context) {
     fun lastRefresh(sourceId: String): Long = prefs.getLong("last_refresh_$sourceId", 0L)
     fun setLastRefresh(sourceId: String, t: Long) = prefs.edit().putLong("last_refresh_$sourceId", t).apply()
 
+    /** When each part last finished: the channel list and the TV guide count separately, so an update cut short carries on. */
+    fun lastChannels(sourceId: String): Long = prefs.getLong("last_channels_$sourceId", lastRefresh(sourceId))
+    fun setLastChannels(sourceId: String, t: Long) = prefs.edit().putLong("last_channels_$sourceId", t).apply()
+    fun lastGuide(sourceId: String): Long = prefs.getLong("last_guide_$sourceId", lastRefresh(sourceId))
+    fun setLastGuide(sourceId: String, t: Long) = prefs.edit().putLong("last_guide_$sourceId", t).apply()
+
+    /** Extra TV guide addresses (XMLTV) that fill gaps and add more days to your provider's guide. */
+    var extraGuides: List<String>
+        get() = getList("extra_guides")
+        set(value) = putList("extra_guides", value)
+
     private fun sourceToJson(s: Source): JSONObject = when (s) {
         is Source.M3u -> JSONObject().put("type", "m3u").put("id", s.id).put("name", s.name)
             .put("url", s.playlistUrl).put("epg", s.epgUrl)

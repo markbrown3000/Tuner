@@ -1169,6 +1169,26 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
 
     /** When the guide in memory was read from the database (re-read every few hours). */
     private var epgLoadedAt = 0L
+    private val startedAt = System.currentTimeMillis()
+
+    /** Extra TV guides (XMLTV addresses) used after your provider's. */
+    var extraGuides by mutableStateOf(store.extraGuides); private set
+
+    fun addExtraGuide(url: String) {
+        if (!url.startsWith("http", ignoreCase = true)) return showNotice("That doesn't look like a web address")
+        if (url in extraGuides) return
+        extraGuides = extraGuides + url
+        store.extraGuides = extraGuides
+        showNotice("📅 Guide added – updating the TV guide in the background")
+        refresh(activeSources(), channels = false)
+    }
+
+    fun removeExtraGuide(url: String) {
+        extraGuides = extraGuides - url
+        store.extraGuides = extraGuides
+        showNotice("Guide removed – it'll be gone after the next guide update")
+    }
+    private var guideTriedAt = 0L
     /** How far ahead the guide in memory goes. */
     private var epgUntil = 0L
     private var epgMoreJob: Job? = null
@@ -1407,12 +1427,16 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
             if (profiles.size > 1) resetTo(Screen.ProfilePicker)
             viewModelScope.launch {
                 loadActive()
-                // With "update on start-up" off, playlists only update overnight (or from Settings).
-                val stale = activeSources().filter {
-                    !db.hasChannels(it.id) ||
-                        (refreshOnStart && System.currentTimeMillis() - store.lastRefresh(it.id) > 12 * 3600_000L)
+                // A new playlist: everything now. Otherwise only the channel list, and only with
+                // "update on start-up" on and over a day old – the TV guide updates in the background
+                // once a day (keepGuideFresh), so opening Flicker never waits for it.
+                val t = System.currentTimeMillis()
+                val empty = activeSources().filter { !db.hasChannels(it.id) }
+                if (empty.isNotEmpty()) refresh(empty)
+                else {
+                    val stale = activeSources().filter { refreshOnStart && t - store.lastChannels(it.id) > 24 * 3600_000L }
+                    if (stale.isNotEmpty()) refresh(stale, guide = false)
                 }
-                if (stale.isNotEmpty()) refresh(stale)
             }
         }
 
@@ -1674,15 +1698,40 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         } else if (t - epgLoadedAt > 6 * 3600_000L) {
             viewModelScope.launch { loadGuide() }
         }
+        // Once a day: if the overnight update didn't happen (the TV was off), the guide updates in
+        // the background – a few minutes after Flicker opens, never while it's starting.
+        if (t - startedAt > 3 * 60_000L && t - guideTriedAt > 3600_000L) {
+            val old = activeSources().filter { t - store.lastGuide(it.id) > 24 * 3600_000L }
+            if (old.isNotEmpty()) {
+                guideTriedAt = t // a failed attempt waits an hour before trying again
+                refresh(old, channels = false)
+            }
+        }
     }
 
-    fun refresh(targets: List<Source> = activeSources()) {
+    /**
+     * Downloads [targets]' channel lists and (with [guide]) their TV guides. With [channels] false,
+     * just the guide (the once-a-day background update).
+     */
+    fun refresh(targets: List<Source> = activeSources(), guide: Boolean = true, channels: Boolean = true) {
         if (targets.isEmpty() || refreshJob?.isActive == true) return
         refreshJob = viewModelScope.launch {
             error = null
             val problems = ArrayList<String>()
             for ((i, s) in targets.withIndex()) {
                 val which = if (targets.size > 1) " – ${s.name} (${i + 1} of ${targets.size})" else ""
+                if (!channels) {
+                    try {
+                        status = "Updating the TV guide$which… (everything works meanwhile)"
+                        val list = withContext(Dispatchers.IO) { db.loadChannels(listOf(s.id)) }
+                        val guideError = withContext(Dispatchers.IO) { inBackgroundPriority { repo.refreshGuide(s, list, null) } }
+                        guideError?.let { problems += "${s.name}: TV guide failed ($it)" }
+                    } catch (e: Exception) {
+                        if (e is kotlinx.coroutines.CancellationException) throw e
+                        AppLog.warn("Couldn't update the TV guide for ${s.name}", e)
+                    }
+                    continue
+                }
                 try {
                     status = "Updating channels$which…"
                     val started = System.currentTimeMillis()
@@ -1704,9 +1753,11 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
                     AppLog.info("Channels updated: ${list.size} from ${s.name} in ${(System.currentTimeMillis() - started) / 1000}s")
                     // Show the channels straight away; the guide fills in when it's ready.
                     loadActive()
-                    status = "Updating the TV guide$which… (everything works meanwhile)"
-                    val guideError = withContext(Dispatchers.IO) { inBackgroundPriority { repo.refreshGuide(s, list, playlistEpg) } }
-                    guideError?.let { problems += "${s.name}: TV guide failed ($it)" }
+                    if (guide) {
+                        status = "Updating the TV guide$which… (everything works meanwhile)"
+                        val guideError = withContext(Dispatchers.IO) { inBackgroundPriority { repo.refreshGuide(s, list, playlistEpg) } }
+                        guideError?.let { problems += "${s.name}: TV guide failed ($it)" }
+                    }
                 } catch (e: Exception) {
                     if (e is kotlinx.coroutines.CancellationException) throw e
                     // The provider stopped answering (a minute with nothing) or sent nonsense: keep the channels you had.
@@ -1814,41 +1865,63 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         showNotice(if (mergeVersions) "HD and SD copies now show as one channel" else "Every copy of a channel is shown")
     }
 
-    /** For Home's "In the mood for…" tiles: a few films (title, poster) that fit each mood, changing daily. */
+    /**
+     * For Home's "In the mood for…" tiles: films (title, picture) that fit each mood – a different
+     * film on every tile, changing daily. From your whole Plex film library (read once a day) and
+     * your provider's films when they're loaded.
+     */
     var moodPicks by mutableStateOf<Map<String, List<Pair<String, String>>>>(emptyMap()); private set
     private var moodPicksFrom = ""
+    private var plexMoodFilms: List<com.titanejstudios.tuner.features.PlexFeature.MoodFilm> = emptyList()
+    private var plexMoodFilmsAt = 0L
+    private var moodJob: Job? = null
 
     private fun refreshMoodPicks() {
-        val films = if (hasVod) movies.orEmpty() else emptyList()
-        val plexFilms = (plexFeature.recent + plexFeature.sectionItems.values.flatten()).filter { it.type == "movie" }
-        val day = System.currentTimeMillis() / 86_400_000L
-        val from = "${films.size}|${plexFilms.size}|$day|${activeProfile.id}"
-        if (from == moodPicksFrom) return
-        moodPicksFrom = from
+        if (moodJob?.isActive == true) return
+        val films = if (hasVod && !activeProfile.kids) movies.orEmpty() else emptyList()
+        val t = System.currentTimeMillis()
+        val day = t / 86_400_000L
+        val needPlex = plexLinked && t - plexMoodFilmsAt > 24 * 3_600_000L
+        val from = "${films.size}|${plexMoodFilms.size}|$day|${activeProfile.id}"
+        if (from == moodPicksFrom && !needPlex) return
         val looked = filmLookups
         val kids = activeProfile.kids
-        viewModelScope.launch {
+        moodJob = viewModelScope.launch {
+            if (needPlex) {
+                plexMoodFilmsAt = t
+                // Lite mode: just the recently added films (a whole library is a lot to hold on an older stick).
+                plexMoodFilms = if (liteOn) plexFeature.recent.filter { it.type == "movie" }.map { e ->
+                    com.titanejstudios.tuner.features.PlexFeature.MoodFilm(e.title, e.art, e.image, e.genres, e.durationMs.takeIf { it > 0 }?.let { (it / 60_000).toInt() }, plexFeature.isKidsEntry(e))
+                } else withContext(Dispatchers.IO) { runCatching { plexFeature.allFilmsForMoods() }.getOrDefault(emptyList()) }
+            }
+            val plex = plexMoodFilms
+            moodPicksFrom = "${films.size}|${plex.size}|$day|${activeProfile.id}"
             val picks = withContext(Dispatchers.Default) {
-                com.titanejstudios.tuner.data.Moods.all.associate { m ->
-                    val out = ArrayList<Pair<String, String>>()
-                    for (e in plexFilms) {
-                        if (out.size >= 30) break
-                        val img = e.image ?: continue
-                        if (kids && !plexFeature.isKidsEntry(e)) continue
-                        val mins = e.durationMs.takeIf { it > 0 }?.let { (it / 60_000).toInt() }
-                        if (com.titanejstudios.tuner.data.Moods.fits(m, e.genres, mins)) out += e.title to img
+                val used = HashSet<String>()
+                val out = LinkedHashMap<String, List<Pair<String, String>>>()
+                for (m in com.titanejstudios.tuner.data.Moods.all) {
+                    val fits = ArrayList<Pair<String, String>>()
+                    for (f in plex) {
+                        if (kids && !f.kids) continue
+                        val pic = f.picture ?: f.poster ?: continue
+                        if (com.titanejstudios.tuner.data.Moods.fits(m, f.genres, f.minutes)) fits += f.title to pic
                     }
-                    if (!kids) for (f in films) {
-                        if (out.size >= 30) break
-                        val img = f.poster ?: continue
+                    for (f in films) {
                         val l = looked[f.name.trim()]
+                        val pic = l?.backdrop ?: f.poster ?: continue
                         if (com.titanejstudios.tuner.data.Moods.fits(m, listOf(f.category) + l?.genres.orEmpty(), l?.runtimeMinutes)) {
-                            out += FilmName.parse(f.name).first to img
+                            fits += FilmName.parse(f.name).first to pic
                         }
                     }
-                    // Different films each day.
-                    m.key to out.distinctBy { it.first.lowercase() }.shuffled(kotlin.random.Random(day * 31 + m.key.hashCode())).take(3)
+                    // Different films each day, and never the same film on two moods.
+                    val chosen = fits.distinctBy { it.first.lowercase() }
+                        .shuffled(kotlin.random.Random(day * 31 + m.key.hashCode()))
+                        .filter { it.first.lowercase() !in used }
+                        .take(3)
+                    chosen.firstOrNull()?.let { used += it.first.lowercase() }
+                    out[m.key] = chosen
                 }
+                out
             }
             moodPicks = picks
         }
@@ -5414,6 +5487,12 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     // ---------------- Your football teams (see features/FootballFeature) ----------------
 
 
+    /** Follow a team from ESPN's list, then fetch its fixtures and redraw My teams. */
+    fun followEspnTeam(team: com.titanejstudios.tuner.integrations.Espn.Team) {
+        football.follow(team, fetch = false)
+        refreshTeamFixtures(force = true)
+    }
+
     fun toggleFollowTeam(team: String, sport: String? = null) {
         football.toggleTeam(team, sport)
         refreshTeamFixtures(force = true)
@@ -5716,7 +5795,11 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         val byId = allChannels.associateBy { it.id }
         val soon = dead.filterTo(HashSet()) { id ->
             val ch = byId[id] ?: return@filterTo false
-            programmesFor(id).any { p -> p.stop > t && p.start < t + 3_600_000L && isRealProgramme(p.title, ch.name) }
+            // Only live sport counts: ordinary programmes in the guide don't mean a dead channel works.
+            programmesFor(id).any { p ->
+                p.stop > t && p.start < t + 3_600_000L && isRealProgramme(p.title, ch.name) &&
+                    com.titanejstudios.tuner.data.Sports.classify(p, ch.group) != null && com.titanejstudios.tuner.data.Sports.looksLive(p)
+            }
         }
         if (soon != onAirSoon) {
             val newlyOn = soon - onAirSoon
@@ -7566,16 +7649,28 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         val list = football.fixtures.filter { !it.finished && it.kickoff > t - 3 * 3_600_000L }.take(12)
         // Each team's sport, so a Newcastle rugby fan isn't shown Newcastle United.
         val sportOf = teams.associateWith { football.sportOf(it).guideType }
-        // Catch-up channels: their last few days too, for "Catch up on your teams".
-        val catchupFrom = HashMap<String, Long>()
-        for (c in chans) if (c.hasCatchup) catchupFrom[c.id] = t - c.catchupDays.coerceAtMost(com.titanejstudios.tuner.data.Lite.catchupDays) * 86_400_000L
         var pastGames: List<Pair<Channel, Programme>> = emptyList()
         val result = withContext(Dispatchers.IO) {
-            val week = runCatching { shiftGuide(chans, db.loadEpg(ids, t - 3 * 3_600_000L, t + 8 * 86_400_000L, catchupFrom)) }.getOrDefault(emptyMap())
-            val guideEnd = week.values.maxOfOrNull { l -> l.maxOfOrNull { it.stop } ?: 0L } ?: 0L
             val byId = chans.associateBy { it.id }
             fun names(n: String): List<String> = listOfNotNull(n, espnTeams.values.firstOrNull { it.shortName == n || it.name == n }?.name)
                 .flatMap { listOf(it, it.removeSuffix(" FC").removeSuffix(" AFC").removePrefix("AFC ")) }.distinct()
+            // Only the programmes that mention your teams, straight from the saved guide: reading
+            // every channel's whole week into memory ran big playlists out of memory.
+            val week: Map<String, List<Programme>> = runCatching {
+                val terms = teams.flatMap { names(it) }.map { it.trim() }.filter { it.length >= 3 }.distinct()
+                val hits = HashMap<String, MutableList<Programme>>()
+                val seen = HashSet<String>()
+                for (term in terms) {
+                    val found = db.searchProgrammes(ids, term, t - 7 * 86_400_000L, 150) +
+                        db.searchProgrammes(ids, term, t - 3 * 3_600_000L, 300)
+                    for ((cid, p) in found) {
+                        if (cid !in byId || p.start > t + 8 * 86_400_000L) continue
+                        if (seen.add(cid + "@" + p.start)) hits.getOrPut(cid) { ArrayList() } += p
+                    }
+                }
+                shiftGuide(chans, hits.mapValues { (_, l) -> l.sortedBy { it.start } })
+            }.onFailure { AppLog.warn("My teams: couldn't search the guide", it) }.getOrDefault(emptyMap())
+            val guideEnd = runCatching { db.guideEnd(ids) }.getOrDefault(0L)
             fun mentions(title: String, team: String) = names(team).any { com.titanejstudios.tuner.data.SportFollow.mentions(title, it) }
             fun sportOk(team: String, p: Programme, c: Channel): Boolean {
                 val type = com.titanejstudios.tuner.data.Sports.classify(p, c.group) ?: return false

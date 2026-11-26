@@ -607,10 +607,10 @@ fun HomeScreen(vm: TunerViewModel) {
                         image = null, poster = false, channel = null, progress = null, progressColor = TunerColors.Accent,
                         onClick = { vm.openMood(m.key) }, onLongClick = null,
                         hero = HeroInfo(
-                            m.label,
-                            if (picks.isEmpty()) "Films picked by mood – Plex and your provider together"
-                            else "Like " + picks.joinToString(", ") { it.first } + " – Plex and your provider together",
-                            picks.firstOrNull()?.second, null, null, wide = false, label = "IN THE MOOD FOR",
+                            title = m.label,
+                            subtitle = if (picks.isEmpty()) "Films picked by mood – Plex and your provider together"
+                            else "Like " + picks.joinToString(", ") { it.first },
+                            description = null, channel = null, image = picks.firstOrNull()?.second, wide = true, label = "IN THE MOOD FOR",
                         ),
                         collage = picks.map { it.second }, glow = moodGlow[m.key], emoji = m.emoji,
                     )
@@ -1044,35 +1044,30 @@ private fun HomeTile(c: HomeCard, modifier: Modifier, onFocus: (HeroInfo) -> Uni
     }
 }
 
-/** A mood tile: the mood's colour glowing from one corner, a big emoji, and posters of films that fit fanned on the right. */
+/**
+ * A mood tile: a wide picture from a film that fits, washed with the mood's colour from the left,
+ * and the mood's name in big type. With no film to show, just the colour.
+ */
 @Composable
 private fun androidx.compose.foundation.layout.BoxScope.MoodTileArt(c: HomeCard, focused: Boolean, small: Boolean) {
     val glow = c.glow ?: TunerColors.Accent
-    Box(
-        Modifier.fillMaxSize().background(
-            Brush.linearGradient(listOf(glow.copy(alpha = if (focused) 1f else 0.85f), Color(0xFF0B1030)), start = androidx.compose.ui.geometry.Offset.Zero),
-        ),
-    )
-    // Up to three posters, overlapping and slightly turned, like a hand of cards.
-    val posters = c.collage.take(3)
-    val pw = if (small) 46.dp else 62.dp
-    posters.forEachIndexed { i, url ->
-        val fromRight = posters.size - 1 - i
-        AsyncImage(
-            model = url, contentDescription = null, contentScale = ContentScale.Crop,
-            modifier = Modifier.align(Alignment.TopEnd)
-                .padding(top = (10 + i * 6).dp, end = (10 + fromRight * (if (small) 22 else 30)).dp)
-                .size(width = pw, height = pw * 1.5f)
-                .graphicsLayer { rotationZ = (i - (posters.size - 1) / 2f) * 7f }
-                .clip(RoundedCornerShape(6.dp))
-                .background(Color(0x33000000)),
+    Box(Modifier.fillMaxSize().background(Brush.linearGradient(listOf(glow, Color(0xFF0B1030)))))
+    c.collage.firstOrNull()?.let { pic ->
+        AsyncImage(model = pic, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+        // The mood's colour from the left, fading out across the picture.
+        Box(
+            Modifier.fillMaxSize().background(
+                Brush.horizontalGradient(0f to glow.copy(alpha = if (focused) 0.80f else 0.92f), 0.55f to glow.copy(alpha = 0.35f), 1f to Color.Transparent),
+            ),
         )
     }
-    Text(c.emoji ?: "", fontSize = if (small) 26.sp else 34.sp, modifier = Modifier.align(Alignment.TopStart).padding(10.dp))
-    Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0.5f to Color.Transparent, 1f to Color(0xCC050A1E))))
-    Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp)) {
-        Text(c.title, color = Color.White, fontSize = if (small) 14.sp else 17.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        c.line1?.let { Text(it, color = if (focused) Color.White else Color(0xFFD6DCF0), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+    Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0.45f to Color.Transparent, 1f to Color(0xB3050A1E))))
+    Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp)) {
+        Text(
+            c.title, color = Color.White, fontSize = if (small) 16.sp else 21.sp, fontWeight = FontWeight.ExtraBold,
+            maxLines = 2, overflow = TextOverflow.Ellipsis, lineHeight = if (small) 18.sp else 23.sp,
+        )
+        c.line1?.let { Text(it, color = Color(0xEEFFFFFF), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) }
     }
 }
 
@@ -1238,14 +1233,9 @@ private fun RecordingRail(vm: TunerViewModel, list: List<Recording>, firstModifi
 private fun rowTitleSpec(outer: BringIntoViewSpec, headroom: Float) = object : BringIntoViewSpec {
     override val scrollAnimationSpec: AnimationSpec<Float> = outer.scrollAnimationSpec
 
-    override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float {
-        val trailing = offset + size
-        return when {
-            offset < headroom -> offset - headroom
-            trailing > containerSize -> minOf(trailing - containerSize, offset - headroom)
-            else -> 0f
-        }
-    }
+    // The highlighted row always sits at the top (just under its title), so the row above is
+    // scrolled right out of view instead of peeking out half cut off under the quick buttons.
+    override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float = offset - headroom
 }
 
 /** Films and series (My list, New episodes) as wide picture tiles. */

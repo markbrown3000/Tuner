@@ -182,6 +182,25 @@ class PlexFeature(private val store: Store, private val scope: CoroutineScope) {
         }
     }
 
+    /** A film for mood picks: name, wide picture, genres and length (small, so a whole library fits). */
+    class MoodFilm(val title: String, val picture: String?, val poster: String?, val genres: List<String>, val minutes: Int?, val kids: Boolean)
+
+    /**
+     * Every film in your Plex film libraries, cut down to what mood picks need. Blocking; call
+     * off the main thread (about once a day).
+     */
+    fun allFilmsForMoods(): List<MoodFilm> {
+        val token = activeToken() ?: return emptyList()
+        val c = client()
+        if (servers.isEmpty()) servers = runCatching { c.servers(token) }.getOrDefault(emptyList())
+        val secs = sections.ifEmpty { runCatching { c.sections(servers) }.getOrDefault(emptyList()) }
+        return secs.filter { !it.isShows }.flatMap { sec ->
+            runCatching { c.sectionItems(sec) }.onFailure { AppLog.warn("Mood picks: couldn't read ${sec.title}", it) }.getOrDefault(emptyList())
+                .filter { it.type == "movie" }
+                .map { e -> MoodFilm(e.title, e.art, e.image, e.genres, e.durationMs.takeIf { it > 0 }?.let { (it / 60_000).toInt() }, isKidsEntry(e)) }
+        }
+    }
+
     /** The library picked on the left of the Plex screen – kept while you open shows and films. */
     var libraryCategory by mutableStateOf<String?>(null)
 

@@ -127,14 +127,14 @@ class FootballFeature(
     }
 
     /** Follow a team from ESPN's list (its fixtures come in). */
-    fun follow(team: Espn.Team) {
+    fun follow(team: Espn.Team, fetch: Boolean = true) {
         val name = team.shortName
         espnTeams = espnTeams + (name to team)
         saveTeams()
         Espn.sportOfLeague(team.league)?.let { saveTeamSports(teamSports + (name to it.key)) }
         if (name !in teams) saveTeamNames(teams + name)
         notify("Following $name – their fixtures are on My teams")
-        scope.launch { loadFixtures(force = true) }
+        if (fetch) scope.launch { loadFixtures(force = true) }
     }
 
     /** Follow (or stop following) a team by name. */

@@ -20,6 +20,7 @@ class Repository(context: Context, private val store: Store) {
         val (list, playlistEpg) = loadChannels(src)
         if (list.isEmpty()) throw IOException("the playlist has no channels")
         db.replaceChannels(src.id, list)
+        store.setLastChannels(src.id, System.currentTimeMillis())
         return list to playlistEpg
     }
 
@@ -31,14 +32,68 @@ class Repository(context: Context, private val store: Store) {
         }
         var epgError: String? = null
         if (epgUrl != null) {
+            val started = System.currentTimeMillis()
+            val bytes = Http.received.get()
             try {
                 loadEpg(src.id, epgUrl, list)
+                val secs = (System.currentTimeMillis() - started) / 1000
+                AppLog.info("TV guide updated for ${src.name} in ${secs}s (" + String.format(java.util.Locale.UK, "%.1f MB", (Http.received.get() - bytes) / 1_000_000.0) + ")")
             } catch (e: Exception) {
                 epgError = e.message ?: e.javaClass.simpleName
             }
         }
-        store.setLastRefresh(src.id, System.currentTimeMillis())
+        // Extra guides fill what your provider's guide doesn't have (more days, missing channels).
+        for (extra in store.extraGuides) {
+            val started = System.currentTimeMillis()
+            runCatching { addExtraEpg(src.id, extra, list) }
+                .onSuccess { n -> AppLog.info("Extra TV guide: added $n programmes for ${src.name} in ${(System.currentTimeMillis() - started) / 1000}s") }
+                .onFailure { AppLog.warn("Extra TV guide failed ($extra)", it) }
+        }
+        val t = System.currentTimeMillis()
+        store.setLastGuide(src.id, t)
+        store.setLastRefresh(src.id, t)
         return epgError
+    }
+
+    /** How far ahead the guide is saved: a week, so it only needs fetching once a day (or less). */
+    private val guideDays = 7
+
+    /** Which of your channels each guide id and name belongs to. */
+    private fun matchers(list: List<Channel>): Pair<HashMap<String, MutableList<String>>, HashMap<String, MutableList<String>>> {
+        val overrides = store.epgOverrides
+        val byId = HashMap<String, MutableList<String>>()
+        val byName = HashMap<String, MutableList<String>>()
+        for (c in list) {
+            val manual = overrides[c.id]
+            if (manual != null) byId.getOrPut(manual.lowercase()) { ArrayList() }.add(c.id)
+            else {
+                c.epgId?.let { byId.getOrPut(it.lowercase()) { ArrayList() }.add(c.id) }
+                byName.getOrPut(XmltvParser.normalise(c.name)) { ArrayList() }.add(c.id)
+            }
+        }
+        return byId to byName
+    }
+
+    /**
+     * An extra guide: for each channel, only programmes after what's already saved (so your
+     * provider's own guide wins where it has listings). Returns how many were added.
+     */
+    private fun addExtraEpg(sourceId: String, url: String, list: List<Channel>): Int {
+        val (byId, byName) = matchers(list)
+        val now = System.currentTimeMillis()
+        val have = db.lastStops(sourceId)
+        return Http.open(url.trim()).use { input ->
+            db.addProgrammes(sourceId) { add ->
+                XmltvParser.parse(
+                    input, byId, byName,
+                    from = now - 3 * 3600_000L,
+                    to = now + guideDays * 86_400_000L,
+                    onProgramme = { channelId, p ->
+                        if (p.start >= (have[channelId] ?: 0L)) add(channelId, p)
+                    },
+                )
+            }
+        }
     }
 
     private fun loadChannels(src: Source): Pair<List<Channel>, String?> = when (src) {
@@ -73,7 +128,7 @@ class Repository(context: Context, private val store: Store) {
                 XmltvParser.parse(
                     input, byId, byName,
                     from = now - 3 * 3600_000L,
-                    to = now + 36 * 3600_000L,
+                    to = now + guideDays * 86_400_000L,
                     catchupFrom = catchupFrom,
                     onChannel = addXmlChannel,
                     onChannelLogo = { ids, logo -> for (id in ids) if (id in missingLogo) guideLogos.putIfAbsent(id, logo) },

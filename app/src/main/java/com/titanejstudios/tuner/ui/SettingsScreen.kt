@@ -58,6 +58,8 @@ fun SettingsScreen(vm: TunerViewModel) {
     var nasStep by remember { mutableStateOf(0) }
     /** Typing a key: "tmdb" or "subs". */
     var askKey by remember { mutableStateOf<String?>(null) }
+    var extraGuidesOpen by remember { mutableStateOf(false) }
+    var addingGuide by remember { mutableStateOf(false) }
     val restorer = rememberFocusRestorer()
     RestoreFocusWhenClosed(menuFor != null || confirmDelete != null || profileMenu != null, restorer)
     val first = remember { FocusRequester() }
@@ -167,11 +169,19 @@ fun SettingsScreen(vm: TunerViewModel) {
             }
             item {
                 SettingRow(
-                    "Update when Flicker starts",
-                    subtitle = if (vm.refreshOnStart) "If the saved copy is over 12 hours old (as well as overnight)"
-                    else "Overnight only – Flicker opens straight onto the saved channels",
+                    "Update channels when Flicker starts",
+                    subtitle = if (vm.refreshOnStart) "The channel list, if it's over a day old · the TV guide always updates once a day in the background"
+                    else "Overnight only – the TV guide updates once a day in the background",
                     detail = if (vm.refreshOnStart) "On" else "Off",
                     onClick = { vm.toggleRefreshOnStart() },
+                )
+            }
+            item {
+                SettingRow(
+                    "📅 Extra TV guides",
+                    subtitle = "Fill gaps and add more days to your provider's guide (a week is kept)",
+                    detail = if (vm.extraGuides.isEmpty()) "None" else "${vm.extraGuides.size}",
+                    onClick = { extraGuidesOpen = true },
                 )
             }
 
@@ -906,6 +916,35 @@ fun SettingsScreen(vm: TunerViewModel) {
         }
         }
         }
+    }
+
+    if (extraGuidesOpen) {
+        val presets = listOf(
+            "Freeview – 7 days of the free UK channels" to "https://raw.githubusercontent.com/dp247/Freeview-EPG/master/epg.xml",
+            "EPGTalk UK – 7 days" to "https://raw.githubusercontent.com/acidjesuz/EPGTalk/master/UK_guide.xml.gz",
+            "epgshare01 UK – about 4 days" to "https://epgshare01.online/epgshare01/epg_ripper_UK1.xml.gz",
+        ).filter { it.second !in vm.extraGuides }
+        MenuDialog(
+            title = "Extra TV guides",
+            subtitle = "Used after your provider's guide: they fill in channels it misses and the days after it ends. " +
+                "Free guides from other people – they can change or stop. OK on one you've added to remove it.",
+            items = vm.extraGuides.map { url -> MenuItem("✓ " + url.substringAfter("://").take(60), "OK to remove") { vm.removeExtraGuide(url) } } +
+                presets.map { (name, url) -> MenuItem("+ $name", url.substringAfter("://").substringBefore('/')) { vm.addExtraGuide(url) } } +
+                MenuItem("+ Type a guide address…", "an XMLTV link (.xml or .xml.gz)") { addingGuide = true },
+            onDismiss = { extraGuidesOpen = false },
+        )
+    }
+    if (addingGuide) {
+        TextInputDialog(
+            title = "Add a TV guide",
+            hint = "An XMLTV address, e.g. https://…/guide.xml.gz",
+            label = "Address",
+            onDismiss = { addingGuide = false },
+            onDone = {
+                addingGuide = false
+                if (it.isNotBlank()) vm.addExtraGuide(it.trim())
+            },
+        )
     }
 
     when (askKey) {

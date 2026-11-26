@@ -217,6 +217,48 @@ class Database private constructor(context: Context) :
     }
 
     /** Programme title search across the stored guide. */
+    /** Each channel's last saved programme end (for a source), so an extra guide only adds what's missing. */
+    fun lastStops(sourceId: String): Map<String, Long> {
+        val out = HashMap<String, Long>()
+        readableDatabase.rawQuery("SELECT channel_id, MAX(stop) FROM programmes WHERE source_id = ? GROUP BY channel_id", arrayOf(sourceId)).use { c ->
+            while (c.moveToNext()) out[c.getString(0)] = c.getLong(1)
+        }
+        return out
+    }
+
+    /** Adds programmes from an extra guide (nothing is replaced). */
+    fun addProgrammes(sourceId: String, fill: (addProgramme: (String, Programme) -> Unit) -> Unit): Int {
+        var n = 0
+        writableDatabase.inTransaction {
+            val prog = compileStatement("INSERT INTO programmes VALUES (?,?,?,?,?,?,?,?,?)")
+            fill { channelId, p ->
+                prog.clearBindings()
+                prog.bindString(1, sourceId)
+                prog.bindString(2, channelId)
+                prog.bindLong(3, p.start)
+                prog.bindLong(4, p.stop)
+                prog.str(5, p.title)
+                prog.str(6, p.desc)
+                prog.str(7, p.category)
+                prog.str(8, p.image)
+                prog.str(9, p.extra)
+                prog.executeInsert()
+                n++
+            }
+            prog.close()
+        }
+        return n
+    }
+
+    /** How far ahead the saved guide goes (the latest programme end), or 0. */
+    fun guideEnd(sourceIds: List<String>): Long {
+        if (sourceIds.isEmpty()) return 0L
+        readableDatabase.rawQuery(
+            "SELECT MAX(stop) FROM programmes WHERE source_id IN (${placeholders(sourceIds.size)})",
+            sourceIds.toTypedArray(),
+        ).use { c -> return if (c.moveToFirst()) c.getLong(0) else 0L }
+    }
+
     fun searchProgrammes(sourceIds: List<String>, query: String, after: Long, limit: Int): List<Pair<String, Programme>> {
         if (sourceIds.isEmpty()) return emptyList()
         val like = "%" + query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
