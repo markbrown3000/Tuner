@@ -954,6 +954,7 @@ private fun PhoneHomeBody(
 @Composable
 private fun HomeTile(c: HomeCard, modifier: Modifier, onFocus: (HeroInfo) -> Unit, small: Boolean = false) {
     FocusSurface(
+        memoryKey = "home|${c.key}",
         onClick = c.onClick,
         onLongClick = c.onLongClick,
         onFocused = { onFocus(c.hero) },
@@ -1135,6 +1136,7 @@ private fun RecordingRail(vm: TunerViewModel, list: List<Recording>, firstModifi
         items(list.size, key = { list[it].id }) { i ->
             val r = list[i]
             FocusSurface(
+                memoryKey = "rec|${r.id}",
                 onClick = { vm.playRecording(r) },
                 onFocused = { onFocus(r) },
                 baseColor = TunerColors.Panel,
@@ -1186,6 +1188,7 @@ private fun WatchRail(
         items(list.size, key = { list[it].first.id }) { i ->
             val (w, badge) = list[i]
             FocusSurface(
+                memoryKey = "watch|${w.id}",
                 onClick = { vm.openWatchItem(w) },
                 onLongClick = {
                     if (w.isSeries) w.toSeries()?.let { vm.toggleWatchlist(it) } else w.toVod()?.let { vm.toggleWatchlist(it) }
@@ -1254,6 +1257,7 @@ private fun ResumeRail(vm: TunerViewModel, list: List<ResumeEntry>, firstModifie
         items(list.size, key = { list[it].contentId }) { i ->
             val e = list[i]
             FocusSurface(
+                memoryKey = "resume|${e.contentId}",
                 onClick = { vm.playResume(e) },
                 onFocused = { onFocus(e) },
                 baseColor = TunerColors.Panel,
@@ -1284,6 +1288,7 @@ private fun PickRail(vm: TunerViewModel, picks: List<HomeFeed.Pick>, firstModifi
             val p = pick.programme
             val upcoming = p.start > vm.now
             FocusSurface(
+                memoryKey = "pick|${pick.channel.id}|${p.start}",
                 onClick = {
                     if (upcoming && p.start - vm.now > 2 * 60_000L) vm.toggleReminder(pick.channel, p)
                     else vm.play(pick.channel, channels)
@@ -1329,6 +1334,7 @@ private fun AppRail(vm: TunerViewModel, apps: List<TvApp>, firstModifier: Modifi
 @Composable
 fun AppTile(vm: TunerViewModel, app: TvApp, modifier: Modifier, dimmed: Boolean = false, onFocus: () -> Unit = {}) {
     FocusSurface(
+        memoryKey = "app|${app.packageName}",
         onClick = { vm.launchApp(app) },
         onLongClick = { vm.toggleHideApp(app) },
         onFocused = onFocus,

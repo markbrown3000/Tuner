@@ -55,7 +55,8 @@ fun CatchupScreen(vm: TunerViewModel) {
             addAll(vm.groupNames.filter { it in present && it != ALL_CATCHUP })
         }
     }
-    var group by remember { mutableStateOf(ALL_CATCHUP) }
+    // Saved with the screen, so coming back from watching finds the same category and channel.
+    var group by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(ALL_CATCHUP) }
     val channels = remember(all, group, vm.favouriteSet) {
         when (group) {
             ALL_CATCHUP -> all
@@ -63,12 +64,13 @@ fun CatchupScreen(vm: TunerViewModel) {
             else -> all.filter { it.group == group }
         }
     }
-    var selected by remember { mutableStateOf(channels.firstOrNull()) }
+    var selectedId by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(channels.firstOrNull()?.id) }
+    val selected = channels.firstOrNull { it.id == selectedId }
     LaunchedEffect(group) {
-        if (selected == null || channels.none { it.id == selected?.id }) selected = channels.firstOrNull()
+        if (channels.none { it.id == selectedId }) selectedId = channels.firstOrNull()?.id
     }
     val first = remember { FocusRequester() }
-    var query by remember { mutableStateOf("") }
+    var query by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
     var searching by remember { mutableStateOf(false) }
     LaunchedEffect(query) {
         delay(80)
@@ -116,6 +118,7 @@ fun CatchupScreen(vm: TunerViewModel) {
             LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
                 items(groups, key = { it }) { g ->
                     FocusSurface(
+                        memoryKey = "cug|$g",
                         onClick = { group = g },
                         onFocused = { group = g },
                         selected = g == group,
@@ -139,7 +142,7 @@ fun CatchupScreen(vm: TunerViewModel) {
         // Phones: channels as a row of chips, programmes underneath.
         if (narrowScreen()) {
             CategoryChips(channels.map { it.id }, selected?.id, label = { id -> channels.firstOrNull { it.id == id }?.name ?: id }) { id ->
-                selected = channels.firstOrNull { it.id == id }
+                selectedId = id
             }
             Spacer(Modifier.height(10.dp))
             selected?.let { ch -> CatchupList(vm, ch, channels) }
@@ -150,8 +153,9 @@ fun CatchupScreen(vm: TunerViewModel) {
                 items(channels.size, key = { group + "|" + channels[it].id }) { i ->
                     val c = channels[i]
                     FocusSurface(
-                        onClick = { selected = c },
-                        onFocused = { selected = c },
+                        memoryKey = "cuch|${c.id}",
+                        onClick = { selectedId = c.id },
+                        onFocused = { selectedId = c.id },
                         selected = selected?.id == c.id,
                         baseColor = TunerColors.Panel,
                         modifier = (if (i == 0) Modifier.focusRequester(first) else Modifier).fillMaxWidth().height(56.dp),
@@ -192,6 +196,7 @@ private fun CatchupList(vm: TunerViewModel, ch: Channel, channels: List<Channel>
             }
             item(key = ch.id + "|" + p.start) {
                 FocusSurface(
+                    memoryKey = "cup|${ch.id}|${p.start}",
                     onClick = { vm.playCatchup(ch, p, channels) },
                     baseColor = TunerColors.Panel,
                     modifier = Modifier.fillMaxWidth().height(62.dp),
@@ -254,6 +259,7 @@ private fun CatchupResults(vm: TunerViewModel, all: List<Channel>, query: String
             items(list.size, key = { list[it].first.id + "|" + list[it].second.start }) { i ->
                 val (ch, p) = list[i]
                 FocusSurface(
+                    memoryKey = "cus|${ch.id}|${p.start}",
                     onClick = { vm.playCatchup(ch, p, all) },
                     baseColor = TunerColors.Panel,
                     modifier = (if (i == 0) Modifier.focusRequester(first) else Modifier).fillMaxWidth().height(66.dp),

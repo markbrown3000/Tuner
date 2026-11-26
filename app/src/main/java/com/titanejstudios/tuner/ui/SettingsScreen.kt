@@ -629,7 +629,7 @@ fun SettingsScreen(vm: TunerViewModel) {
             item {
                 SettingRow(
                     "Hide offline channels",
-                    subtitle = "Otherwise they're just marked ⚠ offline",
+                    subtitle = "Rechecked every few hours, and any with a match on in the guide come back · hold OK on a channel for \"Match-day channel\"",
                     detail = if (vm.hideDead) "On" else "Off",
                     onClick = { vm.toggleHideDead() },
                 )
@@ -948,6 +948,7 @@ fun SettingRow(
     FocusSurface(
         onClick = onClick,
         baseColor = TunerColors.Panel,
+        memoryKey = "row|$title",
         // Phones: the row grows so long explanations wrap instead of being cut off.
         modifier = modifier.fillMaxWidth().then(
             if (narrowScreen()) Modifier.heightIn(min = 58.dp) else Modifier.height(if (subtitle != null) 72.dp else 58.dp)

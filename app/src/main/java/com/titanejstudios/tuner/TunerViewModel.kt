@@ -214,6 +214,18 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     val screen: Screen get() = stack.last()
     val canGoBack: Boolean get() = stack.size > 1
 
+    /** One key per place in the back stack ("2/Catchup"): each screen's saved state and last highlighted item. */
+    val screenKey: String get() = "${stack.size - 1}/${stack.last().name}"
+    val stackKeys: List<String> get() = stack.mapIndexed { i, s -> "$i/${s.name}" }
+    /** Where the highlight was on each screen, so Back puts you back there. */
+    val places = com.titanejstudios.tuner.ui.PlaceMemory { screenKey }
+
+    /** What the screen under the player should highlight when you come back (the episode now playing). */
+    private fun rememberUnderPlayer(key: String) {
+        val i = stack.indexOfLast { it != Screen.Player }
+        if (i >= 0) places.set("$i/${stack[i].name}", key)
+    }
+
     fun navigate(to: Screen) {
         // Kids get their own small Settings page; everything else needs a grown-up.
         if (to == Screen.Settings) grownUpSettings = false
@@ -255,6 +267,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         if (stack.size <= 1) return
         val left = stack.removeAt(stack.size - 1)
         if (Screen.Settings !in stack) grownUpSettings = false
+        places.returnedTo(screenKey)
         when (left) {
             // Phones: leaving the player keeps it going in the mini player along the bottom.
             Screen.Player -> when (mode) {
@@ -291,6 +304,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
 
     /** Live TV keeps playing in the preview on Channels/Guide; anything else stops it. */
     private fun afterNavigation() {
+        places.keepOnly(stackKeys)
         // The guide's corner preview: kept if you went full screen, stopped if you left the guide another way.
         if (guidePreviewing && screen != Screen.Guide) {
             guidePreviewing = false
@@ -315,6 +329,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     fun openGuide() {
         if (stack.contains(Screen.Guide)) {
             while (stack.last() != Screen.Guide) stack.removeAt(stack.size - 1)
+            places.returnedTo(screenKey)
             afterNavigation()
         } else navigate(Screen.Guide)
     }
@@ -1338,6 +1353,11 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
 
     // Channel health, fast switching, timeshift, phone remote settings
     var deadChannels by mutableStateOf<Set<String>>(emptySet()); private set
+    /** Your match-day channels (hold OK on a channel): never hidden when offline. */
+    var matchDayChannels by mutableStateOf(store.matchDayChannels); private set
+    /** Offline channels the guide says have something on now or within the hour (a match day). */
+    var onAirSoon by mutableStateOf<Set<String>>(emptySet()); private set
+    private var offlineRecheckedAt = System.currentTimeMillis()
     var hideDead by mutableStateOf(false); private set
     var healthNightly by mutableStateOf(false); private set
     var healthScope by mutableStateOf("favourites"); private set
@@ -1424,6 +1444,8 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
                 if (ticks % 2 == 0 && mode is PlayMode.Vod && playback.isPlaying) saveResume(syncHome = false)
                 if (ticks % 4 == 3) refreshHomeFeed()
                 if (ticks % 4 == 1) keepGuideFresh()
+                // Every 5 minutes: offline channels with a match on come back (see matchDayCheck).
+                if (ticks % 20 == 2) matchDayCheck()
                 // Tuner can stay open for days: look for updates (at most once a day).
                 if (ticks % 240 == 239) updates.autoCheck()
                 // A minute without crashing: start-up crashes no longer count towards safe mode.
@@ -1680,7 +1702,8 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
 
     private fun recomputeVisible() {
         val hiddenCh = hiddenChannels
-        val dead = if (hideDead) deadChannels else emptySet()
+        // Offline channels stay hidden, except match-day ones and any with something on soon.
+        val dead = if (hideDead) deadChannels - onAirSoon - matchDayChannels else emptySet()
         originalGroups = allChannels.mapTo(HashSet()) { it.group }
         // Your renamed / merged categories.
         val renames = groupRenames
@@ -3353,6 +3376,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     }
 
     fun playEpisode(e: Episode, all: List<Episode>, fromStart: Boolean) {
+        rememberUnderPlayer("ep|${e.id}")
         val s = openSeries
         if (s != null) {
             saveFollowed(Watchlist.watched(followedSeries, WatchItem.of(s, System.currentTimeMillis()), all.size.takeIf { it > 0 }, System.currentTimeMillis()))
@@ -4377,6 +4401,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         /** The show's name for an episode (when the show's page isn't open). */
         showTitle: String? = null,
     ) {
+        if (entry.type == "episode") rememberUnderPlayer("pep|${entry.ratingKey}")
         // Kids with an age limit: Plex's own rating for it (else TMDB's).
         if (!ageChecked && activeProfile.kids && activeProfile.maxCertificate.isNotBlank()) {
             val plexCert = com.titanejstudios.tuner.integrations.Tmdb.ukCertificate(entry.contentRating)
@@ -5587,6 +5612,70 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         healthCancel = true
     }
 
+    // ---------------- Match-day channels ----------------
+
+    /** Offline, and nothing on it in the guide soon: shown greyed as "off air". */
+    fun isOffAir(channelId: String): Boolean = channelId in deadChannels && channelId !in onAirSoon
+
+    fun toggleMatchDay(channelId: String) {
+        matchDayChannels = if (channelId in matchDayChannels) matchDayChannels - channelId else matchDayChannels + channelId
+        store.matchDayChannels = matchDayChannels
+        recomputeVisible()
+        showNotice(if (channelId in matchDayChannels) "⚽ Match-day channel – never hidden, just \"off air\" between matches" else "No longer a match-day channel")
+    }
+
+    /**
+     * Event channels are only live on match days, so a check on a quiet day marks them offline.
+     * Every few minutes: any offline channel the guide says has a real programme on now or within
+     * the hour comes back ("🔴 On today"); every few hours (while nothing's playing, since many
+     * providers allow one connection) the offline ones are quietly checked again.
+     */
+    private fun matchDayCheck() {
+        val dead = deadChannels
+        if (dead.isEmpty()) {
+            if (onAirSoon.isNotEmpty()) onAirSoon = emptySet()
+            return
+        }
+        val t = System.currentTimeMillis()
+        val byId = allChannels.associateBy { it.id }
+        val soon = dead.filterTo(HashSet()) { id ->
+            val ch = byId[id] ?: return@filterTo false
+            programmesFor(id).any { p -> p.stop > t && p.start < t + 3_600_000L && isRealProgramme(p.title, ch.name) }
+        }
+        if (soon != onAirSoon) {
+            val newlyOn = soon - onAirSoon
+            onAirSoon = soon
+            recomputeVisible()
+            if (newlyOn.isNotEmpty()) AppLog.info("Match day: ${newlyOn.size} offline channel(s) have something on soon – showing them")
+        }
+        val every = if (liteOn) 6 * 3_600_000L else 3 * 3_600_000L
+        if (t - offlineRecheckedAt < every || mode != null || healthJob?.isActive == true) return
+        offlineRecheckedAt = t
+        // The ones on soon first, then the rest (up to 60, so it's over in a minute or two).
+        val targets = dead.mapNotNull { byId[it] }.sortedByDescending { it.id in soon }.take(60)
+        if (targets.isEmpty()) return
+        healthJob = viewModelScope.launch {
+            val stillDead = withContext(Dispatchers.IO) { HealthCheck.run(targets, { mode != null || healthCancel }) }
+            // Stopped part-way because something started playing: keep what we know.
+            if (mode != null) return@launch
+            val back = targets.map { it.id }.toSet() - stillDead
+            if (back.isNotEmpty()) {
+                deadChannels = deadChannels - back
+                store.deadChannels = deadChannels
+                recomputeVisible()
+                AppLog.info("Offline recheck: ${back.size} channel(s) working again")
+            }
+        }
+    }
+
+    /** A programme worth showing a channel for (not "No event", "Off air" or just the channel's name). */
+    private fun isRealProgramme(title: String, channelName: String): Boolean {
+        val t = title.trim().lowercase()
+        if (t.length < 3 || t == channelName.trim().lowercase()) return false
+        val empty = listOf("no event", "no events", "off air", "no information", "no programme", "no program", "closedown", "to be announced", "tba", "no stream", "event not started")
+        return empty.none { t == it || t.startsWith("$it ") || t.startsWith("$it:") || t.startsWith("$it -") }
+    }
+
     fun clearDead(channelId: String? = null) {
         deadChannels = if (channelId == null) emptySet() else deadChannels - channelId
         store.deadChannels = deadChannels
@@ -6657,6 +6746,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     private fun startNextEpisode(m: PlayMode.Vod) {
         val next = episodeQueue.firstOrNull() ?: return
         episodeQueue = episodeQueue.drop(1)
+        rememberUnderPlayer("ep|${next.id}")
         startVod(
             PlayMode.Vod(next.id, m.title, "S${next.season} E${next.number}  ${next.title}", next.image ?: m.poster, next.url, m.seriesId),
             fromStart = true,

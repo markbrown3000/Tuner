@@ -92,6 +92,7 @@ internal fun PosterCard(
     onLongClick: (() -> Unit)? = null,
 ) {
     FocusSurface(
+        memoryKey = "poster|$title",
         onClick = onClick,
         onLongClick = onLongClick,
         baseColor = TunerColors.Panel,
@@ -248,6 +249,7 @@ private fun <T> CatalogueScreen(
                     items(categories, key = { it }) { c ->
                         val selected = c == category
                         FocusSurface(
+                            memoryKey = "cat|$c",
                             onClick = { category = c },
                             onFocused = { category = c },
                             selected = selected,
@@ -525,6 +527,7 @@ val paneA: @Composable (Modifier) -> Unit = { pane ->
                 items(shown, key = { it.id }) { e ->
                     val r = vm.resume[e.id]
                     FocusSurface(
+                        memoryKey = "ep|${e.id}",
                         onClick = { if (r != null) resumeAsk = e else vm.playEpisode(e, eps, fromStart = true) },
                         onLongClick = { episodeMenu = e },
                         baseColor = TunerColors.Panel,

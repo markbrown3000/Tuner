@@ -182,6 +182,7 @@ private fun SportRow(vm: TunerViewModel, ev: SportEvent, now: Long, restorer: Fo
     val recording = vm.recordingFor(main, p) != null
     val key = p.title + p.start
     FocusSurface(
+        memoryKey = "sp|$key",
         onClick = {
             if (onNow) vm.play(main, vm.channelsFor(ALL)) else vm.toggleReminder(main, p)
         },
