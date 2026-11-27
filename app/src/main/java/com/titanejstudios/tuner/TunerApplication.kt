@@ -16,6 +16,8 @@ class TunerApplication : Application(), ImageLoaderFactory {
         com.titanejstudios.tuner.data.Lite.init(this)
         // After Lite (it uses the memory check).
         runCatching { com.titanejstudios.tuner.subtitles.LiveSubtitles.init(this) }
+        // Writes down what Flicker was doing if the screen stops responding.
+        runCatching { com.titanejstudios.tuner.data.FreezeWatch.start() }
         com.titanejstudios.tuner.ui.ProfilePhotos.dir = java.io.File(filesDir, "avatars")
         if (com.titanejstudios.tuner.data.SafeMode.active) AppLog.info("Started in safe mode")
         AppLog.info("Device: " + com.titanejstudios.tuner.data.Lite.summary())

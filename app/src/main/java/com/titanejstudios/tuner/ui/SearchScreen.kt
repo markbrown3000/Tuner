@@ -1,5 +1,10 @@
 package com.titanejstudios.tuner.ui
 
+import com.titanejstudios.tuner.recordProgramme
+import com.titanejstudios.tuner.recordingFor
+import com.titanejstudios.tuner.updateSearch
+import com.titanejstudios.tuner.voiceHeard
+import com.titanejstudios.tuner.whereToWatch
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement

@@ -150,4 +150,14 @@ class RicherTest {
         assertEquals("TMDB 8.5", com.titanejstudios.tuner.integrations.Tmdb.ratingText(8.5))
         assertNull(com.titanejstudios.tuner.integrations.Tmdb.ratingText(0.0))
     }
+
+    @Test
+    fun freezeReportsStartJustBeforeFlickersOwnCode() {
+        val frames = (1..10).map { "android.os.Internal$it.run(X.java:1)" } +
+            listOf("com.titanejstudios.tuner.TunerViewModel.slowThing(TunerViewModel.kt:42)") +
+            (1..40).map { "android.os.Looper.loop$it(Looper.java:1)" }
+        val kept = com.titanejstudios.tuner.data.FreezeWatch.interesting(frames)
+        assertEquals(25, kept.size)
+        assertEquals("com.titanejstudios.tuner.TunerViewModel.slowThing(TunerViewModel.kt:42)", kept[6])
+    }
 }

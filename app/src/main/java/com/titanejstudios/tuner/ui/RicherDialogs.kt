@@ -1,5 +1,9 @@
 package com.titanejstudios.tuner.ui
 
+import com.titanejstudios.tuner.closeChannelSchedule
+import com.titanejstudios.tuner.closeWhereTo
+import com.titanejstudios.tuner.openMood
+import com.titanejstudios.tuner.updateSearch
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box

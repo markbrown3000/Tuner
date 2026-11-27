@@ -1,5 +1,6 @@
 package com.titanejstudios.tuner.ui
 
+import com.titanejstudios.tuner.openStats
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.aspectRatio

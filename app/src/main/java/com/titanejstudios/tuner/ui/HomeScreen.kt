@@ -2,6 +2,10 @@
 
 package com.titanejstudios.tuner.ui
 
+import com.titanejstudios.tuner.openMood
+import com.titanejstudios.tuner.playRecording
+import com.titanejstudios.tuner.recordProgramme
+import com.titanejstudios.tuner.recordingFor
 import com.titanejstudios.tuner.R
 import androidx.compose.ui.res.painterResource
 import androidx.activity.compose.BackHandler
@@ -73,7 +77,7 @@ import com.titanejstudios.tuner.data.ResumeEntry
 import kotlinx.coroutines.delay
 
 /** What the big area at the top describes – whatever tile is highlighted. */
-private class HeroInfo(
+internal class HeroInfo(
     val title: String,
     val subtitle: String,
     val description: String?,
@@ -113,7 +117,7 @@ enum class HomeRow(val title: String) {
 }
 
 /** One tile on Home – live TV, Plex, a film, a recording… all drawn the same way. */
-private class HomeCard(
+internal class HomeCard(
     val key: String,
     val tag: String?,
     val tagBg: Color,
@@ -864,7 +868,7 @@ private fun LoadingMore(text: String) {
 }
 
 @Composable
-private fun HomeCardRail(cards: List<HomeCard>, firstModifier: Modifier, small: Boolean = false, onFocus: (HeroInfo) -> Unit) {
+internal fun HomeCardRail(cards: List<HomeCard>, firstModifier: Modifier, small: Boolean = false, onFocus: (HeroInfo) -> Unit) {
     val state = androidx.compose.foundation.lazy.rememberLazyListState()
     // Which tile you're on, and whether this row has the highlight at all.
     var focusedKey by remember { mutableStateOf<String?>(null) }
@@ -1005,7 +1009,7 @@ private fun PhoneHomeBody(
 }
 
 @Composable
-private fun HomeTile(c: HomeCard, modifier: Modifier, onFocus: (HeroInfo) -> Unit, small: Boolean = false) {
+internal fun HomeTile(c: HomeCard, modifier: Modifier, onFocus: (HeroInfo) -> Unit, small: Boolean = false) {
     FocusSurface(
         memoryKey = "home|${c.key}",
         onClick = c.onClick,
