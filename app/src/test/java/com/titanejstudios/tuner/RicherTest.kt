@@ -137,4 +137,17 @@ class RicherTest {
         assertEquals("\"main\" prio=5 tid=1 Blocked", shown[2])
         assertEquals("26 Nov 22:05:20  INFO  started", shown[4])
     }
+
+    @Test
+    fun releaseNotesAreTidiedForTheTv() {
+        val raw = "## What's Changed\n* **Live subtitles** by @markbrown3000 in https://github.com/x/y/pull/12\n- See [the log](https://example.com)\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\nhttps://claude.ai/code/session_x"
+        val t = com.titanejstudios.tuner.apps.Updater.tidyNotes(raw)
+        assertEquals("What's Changed\n• Live subtitles\n• See the log", t)
+    }
+
+    @Test
+    fun tmdbScoresAreLabelled() {
+        assertEquals("TMDB 8.5", com.titanejstudios.tuner.integrations.Tmdb.ratingText(8.5))
+        assertNull(com.titanejstudios.tuner.integrations.Tmdb.ratingText(0.0))
+    }
 }

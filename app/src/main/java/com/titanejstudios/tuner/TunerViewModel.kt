@@ -1264,6 +1264,8 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
     /** The film/series info card: shown while [filmInfoOpen]; null info while loading or not found. */
     var filmInfoOpen by mutableStateOf(false); private set
     var filmInfo by mutableStateOf<Tmdb.Info?>(null); private set
+    /** IMDb's score for the film info card (shown instead of TMDB's when known). */
+    var filmInfoImdb by mutableStateOf<Double?>(null); private set
     var filmInfoStatus by mutableStateOf<String?>(null); private set
     var subtitleHits by mutableStateOf<List<OpenSubtitles.Hit>?>(null); private set
     var subtitleStatus by mutableStateOf<String?>(null); private set
@@ -1505,6 +1507,7 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
         extrasStarted = true
         // Even in safe mode – a newer version may be the fix.
         updates.autoCheck()
+        updates.checkWhatsNew()
         runCatching { GuideRefreshWorker.schedule(app) }
         runCatching { RecordingScheduler.rescheduleAll(app) }
         loadApps()
@@ -3086,7 +3089,26 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
                 TrendingItem(tr, plex?.takeIf { !activeProfile.kids || plexFeature.isKidsEntry(it) }, film, show)
             }
             trending = out
+            // IMDb's score for each (cached a month), so the tiles match IMDb rather than TMDB's own.
+            requestRatings(out.filter { !it.trend.isTv }.map { trendName(it.trend) }, false)
+            requestRatings(out.filter { it.trend.isTv }.map { trendName(it.trend) }, true)
         }
+    }
+
+    /** The name a trending title is looked up (and cached) by. */
+    fun trendName(t: com.titanejstudios.tuner.integrations.Tmdb.Trend): String = t.title + (t.year?.let { " ($it)" } ?: "")
+
+    /**
+     * "IMDb 7.9" when Flicker has IMDb's score (looked up, or from Plex), otherwise TMDB's labelled
+     * ("TMDB 8.5") – never a bare star that could be either.
+     */
+    fun trendScore(item: TrendingItem): String? {
+        val t = item.trend
+        vodRatings[ratingKey(trendName(t), t.isTv)]?.takeIf { it.value > 0.0 }?.let { r ->
+            return (if (r.source == "IMDb") "IMDb " else "TMDB ") + String.format(Locale.UK, "%.1f", r.value)
+        }
+        item.plex?.rating?.takeIf { it.startsWith("IMDb") }?.let { return it }
+        return com.titanejstudios.tuner.integrations.Tmdb.ratingText(t.rating)
     }
 
     /** OK on a trending tile: play it where you have it, otherwise show its info. */
@@ -6454,6 +6476,11 @@ class TunerViewModel(private val app: Application) : AndroidViewModel(app), Remo
             val r = withContext(Dispatchers.IO) { runCatching { Tmdb.lookup(key, name, isSeries) } }
             r.onSuccess { info ->
                 filmInfo = info
+                filmInfoImdb = null
+                val omdb = BuildConfig.OMDB_KEY.takeIf { it.isNotBlank() }
+                if (info?.imdbId != null && omdb != null) launch {
+                    filmInfoImdb = withContext(Dispatchers.IO) { runCatching { Omdb.imdbRating(omdb, info.imdbId) }.getOrNull() }?.takeIf { it > 0.0 }
+                }
                 filmCollection = null
                 if (info != null && !isSeries) filmCollection = loadCollection(info)
                 filmInfoStatus = if (info == null) "Couldn't find \"${Tmdb.cleanTitle(name).first}\" on TMDB" else null

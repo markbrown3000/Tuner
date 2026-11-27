@@ -51,8 +51,16 @@ val generateKeys by tasks.registering {
 }
 
 val copyShared by tasks.registering(Copy::class) {
-    from("../app/src/main/java/com/titanejstudios/tuner") { include(sharedFiles) }
-    into(layout.buildDirectory.dir("shared/com/titanejstudios/tuner"))
+    into(layout.buildDirectory.dir("shared"))
+    from("../app/src/main/java/com/titanejstudios/tuner") {
+        include(sharedFiles)
+        into("com/titanejstudios/tuner")
+    }
+    // Backup guide (remove with the module): the matching, shared with the TV app.
+    from("../backupguide/src/main/java/com/titanejstudios/backupguide") {
+        include("BackupGuideCore.kt")
+        into("com/titanejstudios/backupguide")
+    }
 }
 
 kotlin {

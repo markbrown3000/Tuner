@@ -66,6 +66,7 @@ import com.titanejstudios.tuner.ui.ReminderPopup
 import com.titanejstudios.tuner.ui.SearchScreen
 import com.titanejstudios.tuner.ui.SelfTestScreen
 import com.titanejstudios.tuner.ui.FilmInfoDialog
+import com.titanejstudios.tuner.ui.WhatsNewDialog
 import com.titanejstudios.tuner.ui.FixtureChannelsDialog
 import com.titanejstudios.tuner.ui.StillWatchingDialog
 import com.titanejstudios.tuner.ui.UpdateDialog
@@ -343,6 +344,7 @@ private fun TunerApp(vm: TunerViewModel) {
             if (vm.stillWatchingAsk) StillWatchingDialog(vm)
             // Never while something's playing: pressing OK to pause would install it and close Flicker mid-show.
             if (vm.screen != Screen.Player) vm.updateOffer?.let { UpdateDialog(vm, it) }
+            if (vm.screen != Screen.Player && vm.updateOffer == null) vm.updates.whatsNew?.let { (v, notes) -> WhatsNewDialog(vm, v, notes) }
             // Joined a film part way and said yes: where to watch it from the beginning.
             vm.startOver?.takeIf { vm.startOverChoosing }?.let { o ->
                 MenuDialog(

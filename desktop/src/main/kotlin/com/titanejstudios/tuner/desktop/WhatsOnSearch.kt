@@ -24,6 +24,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -174,18 +176,29 @@ internal fun TeamsView(app: AppState) {
         if (!list.isNullOrEmpty()) {
             item { SectionTitle("Fixtures") }
             items(list, key = { it.id }) { m ->
-                // Which of your channels shows it: both teams named, around kick-off.
-                val on = remember(m.id, app.guide) {
-                    app.visibleChannels.firstNotNullOfOrNull { c ->
+                // Every channel of yours showing it (both teams named, around kick-off) – you choose which.
+                val ons = remember(m.id, app.guide) {
+                    app.visibleChannels.mapNotNull { c ->
                         app.guide[c.id]?.firstOrNull { p ->
                             p.start <= m.kickoff + 30 * 60_000L && p.stop >= m.kickoff - 30 * 60_000L &&
                                 SportFollow.mentions(p.title, m.home) && SportFollow.mentions(p.title, m.away)
                         }?.let { c to it }
                     }
                 }
+                val on = ons.firstOrNull()
+                var choosing by remember(m.id) { mutableStateOf(false) }
+                Box {
                 Row(
                     Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Panel)
-                        .clickable(enabled = on != null) { on?.let { (c, p) -> if (p.start <= app.now) app.playChannel(c) else app.toggleReminder(c, p) } }
+                        .clickable(enabled = on != null) {
+                            on?.let { (c, p) ->
+                                when {
+                                    p.start > app.now -> app.toggleReminder(c, p)
+                                    ons.size > 1 -> choosing = true
+                                    else -> app.playChannel(c)
+                                }
+                            }
+                        }
                         .padding(12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -195,8 +208,23 @@ internal fun TeamsView(app: AppState) {
                     )
                     Column(Modifier.weight(1f)) {
                         Text("${m.home} v ${m.away}", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                        Text(listOfNotNull(m.competition, on?.first?.name ?: "Not in the guide yet").joinToString(" · "), color = Soft, fontSize = 12.sp)
+                        Text(
+                            listOfNotNull(m.competition, on?.first?.name?.let { it + if (ons.size > 1) " + ${ons.size - 1} more" else "" } ?: "Not in the guide yet").joinToString(" · "),
+                            color = Soft, fontSize = 12.sp,
+                        )
                     }
+                }
+                DropdownMenu(expanded = choosing, onDismissRequest = { choosing = false }) {
+                    for ((c, p) in ons) {
+                        DropdownMenuItem(
+                            text = { Text(c.name + "  ·  " + clock(p.start) + "–" + clock(p.stop)) },
+                            onClick = {
+                                choosing = false
+                                app.playChannel(c)
+                            },
+                        )
+                    }
+                }
                 }
             }
         }

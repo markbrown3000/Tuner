@@ -33,8 +33,8 @@ fun BackupGuideSettings(vm: TunerViewModel) {
     var findingChannel by remember { mutableStateOf(false) }
     var channelResults by remember { mutableStateOf<List<Channel>?>(null) }
     var channel by remember { mutableStateOf<Channel?>(null) }
-    var pickSource by remember { mutableStateOf<BackupGuide.Source?>(null) }
-    var sourceResults by remember { mutableStateOf<List<BackupGuide.SourceChannel>?>(null) }
+    var pickSource by remember { mutableStateOf<com.titanejstudios.backupguide.BackupGuideCore.Source?>(null) }
+    var sourceResults by remember { mutableStateOf<List<com.titanejstudios.backupguide.BackupGuideCore.SourceChannel>?>(null) }
 
     fun changed() {
         version++

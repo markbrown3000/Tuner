@@ -83,6 +83,14 @@ jobs:
           name: tuner-apk
           path: app/build/outputs/apk/release/*.apk
 
+      - name: Keep the TV-size screen pictures from the layout tests
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: tv-screenshots
+          path: app/build/outputs/roborazzi/
+          if-no-files-found: ignore
+
       - name: Keep the test report if something failed
         if: failure()
         uses: actions/upload-artifact@v5

@@ -275,13 +275,14 @@ private fun trendingCard(vm: TunerViewModel, item: com.titanejstudios.tuner.Tren
         else -> "Not in your library · OK for info and trailer"
     }
     val what = if (t.isTv) "TV" else "Film"
+    val score = vm.trendScore(item)
     return HomeCard(
         key = "tr" + t.rank + t.title,
         tag = "#${t.rank} TRENDING",
         tagBg = if (item.available) Color(0xFFFFB648) else Color(0xCC050816),
         tagFg = if (item.available) Color.Black else Color.White,
         title = t.title,
-        line1 = listOfNotNull(t.year, what, t.rating?.let { String.format(java.util.Locale.UK, "★ %.1f", it) }).joinToString(" · "),
+        line1 = listOfNotNull(t.year, what, score).joinToString(" · "),
         line2 = where,
         image = t.backdrop ?: t.poster,
         poster = t.backdrop == null,
@@ -292,7 +293,7 @@ private fun trendingCard(vm: TunerViewModel, item: com.titanejstudios.tuner.Tren
         onLongClick = null,
         hero = HeroInfo(
             t.title,
-            listOfNotNull(t.year, what, t.rating?.let { String.format(java.util.Locale.UK, "★ %.1f", it) }, where).joinToString("  ·  "),
+            listOfNotNull(t.year, what, score, where).joinToString("  ·  "),
             t.overview, null, t.backdrop ?: t.poster, wide = t.backdrop != null,
             label = "#${t.rank} TRENDING THIS WEEK",
         ),

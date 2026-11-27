@@ -594,6 +594,11 @@ class Store(context: Context) {
     var updateCheckedAt: Long
         get() = prefs.getLong("update_checked_at", 0L)
         set(value) = prefs.edit().putLong("update_checked_at", value).apply()
+    /** The version that last showed "What's new" (null on a fresh install). */
+    var lastSeenVersion: String?
+        get() = prefs.getString("last_seen_version", null)
+        set(value) = prefs.edit().putString("last_seen_version", value).apply()
+
     var updateDismissed: String?
         get() = prefs.getString("update_dismissed", null)
         set(value) = prefs.edit().putString("update_dismissed", value).apply()

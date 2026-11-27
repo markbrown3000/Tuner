@@ -31,7 +31,7 @@ class Sync(private val config: Config) {
     }
 
     /** What changed, so the screens can reload. */
-    class Result(val playlistsChanged: Boolean, val listsChanged: Boolean, val devices: List<String>, val linkKeyChanged: Boolean = false)
+    class Result(val playlistsChanged: Boolean, val listsChanged: Boolean, val devices: List<String>, val linkKeyChanged: Boolean = false, val guideChanged: Boolean = false)
 
     private fun deviceName(): String =
         "PC – " + (runCatching { InetAddress.getLocalHost().hostName }.getOrNull() ?: System.getenv("COMPUTERNAME") ?: "Windows")
@@ -66,6 +66,7 @@ class Sync(private val config: Config) {
         val all = root.optJSONObject("devices") ?: JSONObject()
         val me = "pc-" + config.deviceId
         var playlistsChanged = false
+        var guideChanged = false
         var listsChanged = false
         var linkKeyChanged = false
         var teamsAt = -1L
@@ -93,6 +94,14 @@ class Sync(private val config: Config) {
                 if (k != config.linkKey) {
                     config.linkKey = k
                     linkKeyChanged = true
+                }
+            }
+            // Backup guide (remove with the module): the TV's settings, newest wins.
+            d.optJSONObject("guide")?.optJSONObject("backup")?.let { b ->
+                val mine = runCatching { JSONObject(config.backupGuide).optLong("at") }.getOrDefault(0L)
+                if (b.length() > 0 && b.optLong("at") > mine) {
+                    config.backupGuide = b.toString()
+                    guideChanged = true
                 }
             }
             d.optJSONArray("sources")?.let { s ->
@@ -258,6 +267,6 @@ class Sync(private val config: Config) {
         config.driveFileId = drive.write(token, found?.first ?: config.driveFileId, root.toString())
         config.lastSync = System.currentTimeMillis()
         config.save()
-        return Result(playlistsChanged, listsChanged, names, linkKeyChanged)
+        return Result(playlistsChanged, listsChanged, names, linkKeyChanged, guideChanged)
     }
 }

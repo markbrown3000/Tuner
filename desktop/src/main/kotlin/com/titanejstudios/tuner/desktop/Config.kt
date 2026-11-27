@@ -55,6 +55,10 @@ class Config {
     var deviceId: String = UUID.randomUUID().toString()
     var sources: List<Source> = emptyList()
     var englishOnly = false
+    /** Backup guide (remove with the module): the TV's settings (synced) – at, enabled, custom, overrides. */
+    var backupGuide = "{}"
+    /** Backup guide: what worked for each channel on this PC. */
+    var backupGuideRemembered = "{}"
     var mergeVersions = true
     var lastChannel: String? = null
     /** Channels watched lately, newest first. */
@@ -226,6 +230,8 @@ class Config {
             deviceId = o.optString("device").ifBlank { deviceId }
             sources = sourcesFromJson(o.optJSONArray("sources") ?: JSONArray())
             englishOnly = o.optBoolean("englishOnly")
+            backupGuide = o.optString("backupGuide", "{}")
+            backupGuideRemembered = o.optString("backupGuideRemembered", "{}")
             mergeVersions = o.optBoolean("merge", true)
             lastChannel = o.optString("last").ifBlank { null }
             recents = o.optJSONArray("recents")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList()
@@ -318,6 +324,7 @@ class Config {
         val favs = JSONObject()
         for ((k, v) in favourites) favs.put(k, JSONArray(v))
         val o = JSONObject().put("device", deviceId).put("sources", sourcesToJson()).put("englishOnly", englishOnly).put("merge", mergeVersions)
+            .put("backupGuide", backupGuide).put("backupGuideRemembered", backupGuideRemembered)
             .put("last", lastChannel ?: "").put("recents", JSONArray(recents)).put("volume", volume)
             .put("gRefresh", googleRefresh ?: "").put("gEmail", googleEmail ?: "").put("gFile", driveFileId ?: "")
             .put("tvPlaylists", useTvPlaylists)

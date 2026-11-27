@@ -67,6 +67,39 @@ object Updater {
         }
     }
 
+    /** The notes written for that version's release ("v6.6.8" or "6.6.8"), or null. Blocking. */
+    fun notesFor(repo: String, version: String): String? {
+        val v = version.trim().trimStart('v', 'V')
+        for (tag in listOf("v$v", v)) {
+            val conn = (URL("https://api.github.com/repos/${repo.trim().trim('/')}/releases/tags/$tag").openConnection() as HttpURLConnection).apply {
+                connectTimeout = 10_000
+                readTimeout = 15_000
+                setRequestProperty("Accept", "application/vnd.github+json")
+            }
+            try {
+                if (conn.responseCode != 200) continue
+                val o = JSONObject(conn.inputStream.use { it.readBytes().toString(Charsets.UTF_8) })
+                return o.optString("body").trim().takeIf { it.isNotBlank() }
+            } finally {
+                conn.disconnect()
+            }
+        }
+        return null
+    }
+
+    /** GitHub's notes made readable on a TV: no headings marks, links or "**", and no PR boilerplate. */
+    fun tidyNotes(raw: String): String = raw.lines()
+        .map { l -> l.trim().removePrefix("#").removePrefix("#").removePrefix("#").trim() }
+        .filter { l -> l.isNotEmpty() && !l.startsWith("🤖") && !l.contains("claude.ai/code") && !l.startsWith("**Full Changelog**") }
+        .map { l ->
+            l.replace("**", "")
+                // GitHub's generated notes: "Fix X by @someone in https://…/pull/12"
+                .replace(Regex(" by @\\S+ in https?://\\S+"), "")
+                .replace(Regex("\\[([^\\]]+)]\\([^)]+\\)"), "$1")
+                .replace(Regex("^[-*] "), "• ")
+        }
+        .joinToString("\n")
+
     fun download(url: String, to: File) {
         var u = URL(url)
         repeat(5) {

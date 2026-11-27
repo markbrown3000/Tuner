@@ -20,6 +20,35 @@ class UpdateFeature(private val context: Context, private val store: Store, priv
     /** A newer version found by the daily check – shown as a pop-up until you choose. */
     var offered by mutableStateOf<Updater.Release?>(null); private set
 
+    /** After an update: the new version and its release notes, shown once. */
+    var whatsNew by mutableStateOf<Pair<String, String>?>(null); private set
+
+    /** On start: if Flicker has just been updated, fetch that release's notes for "What's new". */
+    fun checkWhatsNew() {
+        val now = installedVersion
+        val last = store.lastSeenVersion
+        if (last == null) {
+            // A fresh install: nothing's "new" yet.
+            store.lastSeenVersion = now
+            return
+        }
+        if (last == now || !Updater.newer(now, last)) {
+            store.lastSeenVersion = now
+            return
+        }
+        val r = repo
+        scope.launch {
+            val notes = if (r == null) null else withContext(Dispatchers.IO) { runCatching { Updater.notesFor(r, now) }.getOrNull() }
+            val text = notes?.let { Updater.tidyNotes(it) }?.takeIf { it.isNotBlank() }
+            store.lastSeenVersion = now
+            if (text != null) whatsNew = now to text
+        }
+    }
+
+    fun closeWhatsNew() {
+        whatsNew = null
+    }
+
     /**
      * Once a day: quietly looks for a newer release. Skips versions you've said "Later" to
      * until the next day's check finds them again, and never asks twice for the same one in a day.
