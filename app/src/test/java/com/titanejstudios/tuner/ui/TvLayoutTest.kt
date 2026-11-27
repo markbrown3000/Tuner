@@ -29,12 +29,23 @@ class TvLayoutTest {
 
     private fun shot(name: String) = compose.onRoot().captureRoboImage("build/outputs/roborazzi/$name.png")
 
+    /** Where things are drawn (for the failure message): visible bounds, then position and full size. */
+    private fun where(vararg texts: String): String = texts.joinToString("\n") { t ->
+        runCatching {
+            val n = compose.onNodeWithText(t, substring = true, useUnmergedTree = true).fetchSemanticsNode()
+            "  $t: visible ${n.boundsInRoot}, at ${n.positionInRoot}, size ${n.size}"
+        }.getOrElse { "  $t: ${it.message?.lineSequence()?.firstOrNull()}" }
+    }
+
+    private var landmarks: Array<String> = emptyArray()
+
     /** The text is on the screen, whole, and not squashed flat. */
     private fun fullyOnScreen(text: String, minHeightPx: Float = 10f) {
         val root = compose.onRoot().fetchSemanticsNode().boundsInRoot
         val b = compose.onNodeWithText(text, substring = true).fetchSemanticsNode().boundsInRoot
-        assertTrue("\"$text\" is cut off or off the screen: $b (screen $root)", b.top >= root.top && b.bottom <= root.bottom + 0.5f && b.left >= root.left && b.right <= root.right + 0.5f)
-        assertTrue("\"$text\" is squashed: ${b.height}px tall", b.height >= minHeightPx)
+        val detail = "screen $root\n" + where(*(landmarks + text))
+        assertTrue("\"$text\" is cut off or off the screen: $b\n$detail", b.top >= root.top && b.bottom <= root.bottom + 0.5f && b.left >= root.left && b.right <= root.right + 0.5f)
+        assertTrue("\"$text\" is squashed: ${b.height}px tall\n$detail", b.height >= minHeightPx)
     }
 
     private val longPlot = "Henry, son of Greg and Pam Focker, aims to marry Olivia, who appears to be his complete mismatch. " +
@@ -58,6 +69,7 @@ class TvLayoutTest {
             )
         }
         compose.waitForIdle()
+        landmarks = arrayOf("Focker In-Law", "Henry, son", "With Robert", "Close", "Where to watch", "Meet the Parents Collection")
         shot("film_info")
         // The buttons are on screen without scrolling.
         fullyOnScreen("Trailer")
