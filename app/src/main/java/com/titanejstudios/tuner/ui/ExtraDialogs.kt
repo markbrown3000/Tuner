@@ -128,7 +128,7 @@ fun FilmInfoCard(
                 }
                 return@Column
             }
-            Box(Modifier.fillMaxWidth().aspectRatio(2.4f).heightIn(max = 210.dp)) {
+            Box(Modifier.fillMaxWidth().height(200.dp)) {
                 val pic = info.backdrop ?: info.poster
                 if (pic != null) AsyncImage(model = pic, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
                 // The trailer quietly takes over the picture after a moment (muted).
