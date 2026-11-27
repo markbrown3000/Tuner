@@ -556,7 +556,7 @@ fun SettingsScreen(vm: TunerViewModel) {
                 )
             }
 
-            section("Plex, scores & updates")
+            section("Plex & scores")
             if (vm.traktAvailable) item {
                 SettingRow(
                     "Trakt",
@@ -607,13 +607,6 @@ fun SettingsScreen(vm: TunerViewModel) {
                         onClick = { if (vm.preferredCopy != null) vm.choosePreferredCopy(null) else vm.showNotice("Next time you're asked which copy, choose \"☆ Always use…\"") },
                     )
                 }
-            }
-            item {
-                SettingRow(
-                    "Update Flicker",
-                    subtitle = "Install a new version from your computer's browser, or from GitHub · this is ${vm.installedVersion}",
-                    onClick = { vm.openUpdates() },
-                )
             }
 
             section("Google TV")
@@ -896,6 +889,15 @@ fun SettingsScreen(vm: TunerViewModel) {
                         },
                     )
                 }
+            }
+
+            section("Updates")
+            item {
+                SettingRow(
+                    "⬆ Update Flicker",
+                    subtitle = "Install a new version from your computer's browser, or from GitHub · this is ${vm.installedVersion}",
+                    onClick = { vm.openUpdates() },
+                )
             }
 
             section("About")
