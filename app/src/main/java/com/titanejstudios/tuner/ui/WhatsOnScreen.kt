@@ -1,5 +1,9 @@
 package com.titanejstudios.tuner.ui
 
+import com.titanejstudios.tuner.openStats
+import com.titanejstudios.tuner.recordProgramme
+import com.titanejstudios.tuner.recordingFor
+import com.titanejstudios.tuner.stopRecording
 import androidx.compose.foundation.background
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll

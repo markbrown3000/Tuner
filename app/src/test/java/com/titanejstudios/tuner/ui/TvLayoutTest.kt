@@ -107,4 +107,61 @@ class TvLayoutTest {
         fullyOnScreen("Newcastle v Sunderland")
         fullyOnScreen("Channel 1 HD")
     }
+
+    @Test
+    fun homeRowTilesAreWholeAtTvSize() {
+        val long = "Spider-Man: Brand New Day – The Extended Edition With a Very Long Name"
+        val cards = (1..8).map { i ->
+            HomeCard(
+                key = "c$i", tag = "#$i TRENDING", tagBg = androidx.compose.ui.graphics.Color(0xFFE5A00D), tagFg = androidx.compose.ui.graphics.Color.Black,
+                title = if (i == 1) long else "Film $i", line1 = "2026 · Film · IMDb 7.9", line2 = if (i == 1) "On your Plex · *Movies (4K)" else "On Plex",
+                image = null, poster = false, channel = null, progress = 0.4f, progressColor = androidx.compose.ui.graphics.Color.Red,
+                onClick = {}, onLongClick = null, hero = HeroInfo("Film $i", "2026", null, null, null),
+            )
+        }
+        compose.setContent {
+            HomeCardRail(cards, androidx.compose.ui.Modifier) {}
+        }
+        compose.waitForIdle()
+        shot("home_rows")
+        landmarks = arrayOf("#1 TRENDING", "Film 2")
+        fullyOnScreen("#1 TRENDING")
+        fullyOnScreen("Spider-Man: Brand New Day")
+        fullyOnScreen("On your Plex", minHeightPx = 10f)
+    }
+
+    @Test
+    fun myTeamsRowsShowTimeMatchAndChannel() {
+        compose.setContent {
+            androidx.compose.foundation.layout.Column {
+                FixtureRow("ON NOW", true, "Cowboys v Eagles", "Regular Season  ·  CA: RDS + 3 more", narrow = false) {}
+                FixtureRow("Sun 29 Nov  14:05", false, "Brighton & Hove Albion v Newcastle United", "English Premier League  ·  Sky Sports Main Event UHD + 2 more", narrow = false) {}
+            }
+        }
+        compose.waitForIdle()
+        shot("my_teams_rows")
+        fullyOnScreen("ON NOW")
+        fullyOnScreen("Cowboys v Eagles")
+        fullyOnScreen("Sun 29 Nov")
+        fullyOnScreen("Brighton & Hove Albion")
+        fullyOnScreen("English Premier League")
+    }
+
+    @Test
+    fun settingRowsKeepTheirValueOnScreen() {
+        compose.setContent {
+            androidx.compose.foundation.layout.Column {
+                SettingRow("💬 Live subtitles", subtitle = "Subtitles made from the sound as you watch, for channels with none · English · about 1–2 s behind · also in the player's Subtitles menu", detail = "Download (about 55 MB)") {}
+                SettingRow("⬆ Update Flicker", subtitle = "Install a new version from your computer's browser, or from GitHub · this is 6.6.9") {}
+                SettingRow("📅 Use extra guide sources", subtitle = "Personal use · fills channels with no listings, and gaps, from free guides (EPGTalk UK & US, Freeview-EPG, epg.pw Hong Kong)", detail = "Off") {}
+            }
+        }
+        compose.waitForIdle()
+        shot("setting_rows")
+        fullyOnScreen("Live subtitles")
+        fullyOnScreen("Download (about 55 MB)")
+        fullyOnScreen("Update Flicker")
+        fullyOnScreen("Use extra guide sources")
+        fullyOnScreen("Off")
+    }
 }

@@ -1,5 +1,8 @@
 package com.titanejstudios.tuner.ui
 
+import com.titanejstudios.tuner.playRecording
+import com.titanejstudios.tuner.recordProgramme
+import com.titanejstudios.tuner.recordingFor
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -106,26 +109,18 @@ fun TeamsScreen(vm: TunerViewModel) {
                 val f = list[i]
                 val m = f.match
                 val on = m.live || (f.programme != null && f.programme.start <= now && f.programme.stop > now)
-                FocusSurface(onClick = { if (on && f.channel != null) vm.watchFixture(f) else fixtureMenu = f }, modifier = Modifier.fillMaxWidth()) { _ ->
-                    Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            if (on) "ON NOW" else day.format(Date(m.kickoff)) + "  " + (if (m.timeKnown) hhmm(m.kickoff) else "TBC"),
-                            color = if (on) Color(0xFFFF5252) else TunerColors.Gold, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.width(if (narrow) 110.dp else 150.dp),
-                        )
-                        Column(Modifier.weight(1f)) {
-                            Text(f.title, color = Color.White, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Text(
-                                listOfNotNull(
-                                    m.competition,
-                                    f.channel?.let { c -> c.name + if (f.channels.size > 1) " + ${f.channels.size - 1} more" else "" }
-                                        ?: if (f.guideCoversIt) "Not on your channels" else "Not in the guide yet",
-                                ).joinToString("  ·  "),
-                                color = TunerColors.TextSecondary, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                    }
-                }
+                FixtureRow(
+                    time = if (on) "ON NOW" else day.format(Date(m.kickoff)) + "  " + (if (m.timeKnown) hhmm(m.kickoff) else "TBC"),
+                    live = on,
+                    title = f.title,
+                    detail = listOfNotNull(
+                        m.competition,
+                        f.channel?.let { c -> c.name + if (f.channels.size > 1) " + ${f.channels.size - 1} more" else "" }
+                            ?: if (f.guideCoversIt) "Not on your channels" else "Not in the guide yet",
+                    ).joinToString("  ·  "),
+                    narrow = narrow,
+                    onClick = { if (on && f.channel != null) vm.watchFixture(f) else fixtureMenu = f },
+                )
             }
         }
         // Catch up: your teams' recent games still on catch-up, and any you recorded.
@@ -264,4 +259,22 @@ fun FixtureChannelsDialog(vm: TunerViewModel, f: com.titanejstudios.tuner.TeamFi
         },
         onDismiss = { vm.fixtureChoice = null },
     )
+}
+
+/** One fixture in My teams: when (or ON NOW), the match, and the competition and channel. */
+@Composable
+fun FixtureRow(time: String, live: Boolean, title: String, detail: String, narrow: Boolean, onClick: () -> Unit) {
+    FocusSurface(onClick = onClick, modifier = Modifier.fillMaxWidth()) { _ ->
+        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                time,
+                color = if (live) Color(0xFFFF5252) else TunerColors.Gold, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.width(if (narrow) 110.dp else 150.dp),
+            )
+            Column(Modifier.weight(1f)) {
+                Text(title, color = Color.White, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(detail, color = TunerColors.TextSecondary, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+    }
 }

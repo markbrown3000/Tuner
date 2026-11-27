@@ -1,5 +1,7 @@
 package com.titanejstudios.tuner.ui
 
+import com.titanejstudios.tuner.startPhoneSetup
+import com.titanejstudios.tuner.stopPhoneSetup
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.verticalScroll

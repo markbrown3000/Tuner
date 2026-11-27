@@ -1,5 +1,8 @@
 package com.titanejstudios.tuner.ui
 
+import com.titanejstudios.tuner.recordProgramme
+import com.titanejstudios.tuner.recordingFor
+import com.titanejstudios.tuner.stopRecording
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box

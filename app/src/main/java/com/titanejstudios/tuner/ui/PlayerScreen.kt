@@ -1,5 +1,9 @@
 package com.titanejstudios.tuner.ui
 
+import com.titanejstudios.tuner.recordNow
+import com.titanejstudios.tuner.recordProgramme
+import com.titanejstudios.tuner.recordingFor
+import com.titanejstudios.tuner.stopRecording
 import com.titanejstudios.tuner.playback.ScrubPreview
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.runtime.DisposableEffect

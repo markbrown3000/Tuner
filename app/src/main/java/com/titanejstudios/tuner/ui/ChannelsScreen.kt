@@ -1,5 +1,9 @@
 package com.titanejstudios.tuner.ui
 
+import com.titanejstudios.tuner.clearDead
+import com.titanejstudios.tuner.openEpgMapping
+import com.titanejstudios.tuner.recordNow
+import com.titanejstudios.tuner.toggleMatchDay
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement

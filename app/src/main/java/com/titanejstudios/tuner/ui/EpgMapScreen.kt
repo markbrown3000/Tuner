@@ -1,5 +1,6 @@
 package com.titanejstudios.tuner.ui
 
+import com.titanejstudios.tuner.setEpgOverride
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
