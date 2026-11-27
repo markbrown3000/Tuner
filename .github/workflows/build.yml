@@ -71,8 +71,25 @@ jobs:
           done
           exit 1
 
+      # The layout tests' Android (Robolectric, ~150 MB) is kept between runs.
+      - name: Keep Robolectric's Android between runs
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository/org/robolectric
+          key: robolectric-4.14.1-sdk34
+
       - name: Run the tests
-        run: gradle --no-daemon testDebugUnitTest
+        run: |
+          # Robolectric fetches its Android from Maven Central the first time; if that's refused
+          # for a moment, wait and try again rather than failing the build.
+          for attempt in 1 2 3; do
+            if gradle --no-daemon testDebugUnitTest > test.log 2>&1; then cat test.log; exit 0; fi
+            cat test.log
+            if ! grep -q "Failed to fetch maven artifact" test.log; then exit 1; fi
+            echo "Robolectric's download was refused (attempt $attempt) – waiting a minute"
+            sleep 60
+          done
+          exit 1
 
       - name: Build the APK
         run: gradle --no-daemon assembleRelease
