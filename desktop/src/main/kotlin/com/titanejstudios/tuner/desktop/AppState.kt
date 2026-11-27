@@ -358,11 +358,71 @@ class AppState(val config: Config, val player: Player, private val scope: Corout
             versions = loaded.versions
             applyEpgMap()
             scheduleSeriesLinks()
+            fillBackupGuide()
             problems = loaded.problems
             status = null
             now = System.currentTimeMillis()
             movies = null
             series = null
+        }
+    }
+
+    // ---------------- Backup guide (remove with the module) ----------------
+
+    /** "Use extra guide sources", as set on the TV (or here). */
+    var backupGuideOn by mutableStateOf(runCatching { JSONObject(config.backupGuide).optBoolean("enabled") }.getOrDefault(false)); private set
+    var backupGuideStatus by mutableStateOf<String?>(null)
+
+    fun setBackupGuide(on: Boolean) {
+        val o = runCatching { JSONObject(config.backupGuide) }.getOrDefault(JSONObject())
+        config.backupGuide = o.put("enabled", on).put("at", System.currentTimeMillis()).toString()
+        backupGuideOn = on
+        config.save()
+        if (on) fillBackupGuide() else reload()
+    }
+
+    /** Fills channels with no listings, and gaps, from the free guides – like the TV does. */
+    fun fillBackupGuide() {
+        backupGuideOn = runCatching { JSONObject(config.backupGuide).optBoolean("enabled") }.getOrDefault(false)
+        if (!backupGuideOn) return
+        val o = runCatching { JSONObject(config.backupGuide) }.getOrDefault(JSONObject())
+        val core = com.titanejstudios.backupguide.BackupGuideCore
+        val settings = com.titanejstudios.backupguide.BackupGuideCore.Settings(
+            core.readList(o.optJSONArray("custom")?.toString()),
+            core.readMap(o.optJSONObject("overrides")?.toString()),
+            core.readMap(config.backupGuideRemembered).toMutableMap(),
+        )
+        val chans = channels
+        val base = guide
+        scope.launch {
+            backupGuideStatus = "Filling gaps in the guide from free sources…"
+            val t = System.currentTimeMillis()
+            val from = t - 3 * 3_600_000L
+            val to = t + 7 * 86_400_000L
+            val added = HashMap<String, MutableList<Programme>>()
+            val n = withContext(Dispatchers.IO) {
+                runCatching {
+                    core.fill(
+                        settings, chans.map { com.titanejstudios.backupguide.BackupGuideCore.Channel(it.id, it.epgId, it.name) }, from, to,
+                        open = { url -> com.titanejstudios.tuner.data.Http.open(url.trim()) },
+                        covered = { id ->
+                            base[id]?.sortedBy { it.start }?.let { l -> LongArray(l.size * 2).also { a -> l.forEachIndexed { i, p -> a[i * 2] = p.start; a[i * 2 + 1] = p.stop } } }
+                        },
+                        add = { id, p -> added.getOrPut(id) { ArrayList() } += Programme(p.start, p.stop, p.title, p.desc, p.category, p.image) },
+                        log = { com.titanejstudios.tuner.data.AppLog.info(it) },
+                        newParser = { android.util.Xml.newPullParser() },
+                        saveChannels = { _, _ -> },
+                    )
+                }.onFailure { com.titanejstudios.tuner.data.AppLog.warn("Backup guide failed", it) }.getOrDefault(0)
+            }
+            if (added.isNotEmpty()) {
+                val g = guide.toMutableMap()
+                for ((id, l) in added) g[id] = (g[id].orEmpty() + l).sortedBy { it.start }
+                guide = g
+            }
+            config.backupGuideRemembered = JSONObject(settings.remembered as Map<*, *>).toString()
+            config.save()
+            backupGuideStatus = if (n > 0) "Backup guide: $n programmes added" else null
         }
     }
 
@@ -2535,6 +2595,7 @@ class AppState(val config: Config, val player: Player, private val scope: Corout
                 if (config.activeProfile == null && config.profiles.size > 1) askWhoIsWatching = true
                 profileId = config.profileKey
                 if (res.playlistsChanged) reload()
+                else if (res.guideChanged) fillBackupGuide()
             }.onFailure { syncStatus = "Couldn't sync: ${it.message}" }
         }
     }

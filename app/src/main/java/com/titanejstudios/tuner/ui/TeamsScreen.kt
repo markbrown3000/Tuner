@@ -118,7 +118,8 @@ fun TeamsScreen(vm: TunerViewModel) {
                             Text(
                                 listOfNotNull(
                                     m.competition,
-                                    f.channel?.name ?: if (f.guideCoversIt) "Not on your channels" else "Not in the guide yet",
+                                    f.channel?.let { c -> c.name + if (f.channels.size > 1) " + ${f.channels.size - 1} more" else "" }
+                                        ?: if (f.guideCoversIt) "Not on your channels" else "Not in the guide yet",
                                 ).joinToString("  ·  "),
                                 color = TunerColors.TextSecondary, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
                             )
@@ -230,7 +231,10 @@ fun TeamsScreen(vm: TunerViewModel) {
             subtitle = listOfNotNull(f.match.competition, day.format(Date(f.match.kickoff)) + " " + hhmm(f.match.kickoff), ch?.name).joinToString(" · "),
             items = buildList {
                 if (ch != null && p != null) {
-                    if (vm.now >= p.start - 15 * 60_000L) add(MenuItem("▶ Watch on ${ch.name}") { vm.watchFixture(f) })
+                    if (vm.now >= p.start - 15 * 60_000L) {
+                        if (f.channels.size > 1) add(MenuItem("▶ Watch…", "on ${f.channels.size} channels – choose one") { vm.watchFixture(f) })
+                        else add(MenuItem("▶ Watch on ${ch.name}") { vm.watchFixture(f) })
+                    }
                     if (vm.now < p.start) add(MenuItem(if (vm.hasReminder(ch, p)) "Cancel the reminder" else "⏰ Remind me", "pops up before kick-off") { vm.toggleReminder(ch, p) })
                     if (vm.recordingFor(ch, p) == null) add(MenuItem("● Record it") { vm.recordProgramme(ch, p) })
                 }
@@ -239,4 +243,25 @@ fun TeamsScreen(vm: TunerViewModel) {
             onDismiss = { fixtureMenu = null },
         )
     }
+}
+
+/** A match on several of your channels: choose which to watch (best match first, ★ = favourite). */
+@Composable
+fun FixtureChannelsDialog(vm: TunerViewModel, f: com.titanejstudios.tuner.TeamFixture) {
+    val favs = vm.favouriteSet
+    MenuDialog(
+        title = f.title,
+        subtitle = "On ${f.channels.size} of your channels – which one?",
+        items = f.channels.map { (c, p) ->
+            MenuItem(
+                (if (c.id in favs) "★ " else "") + c.name,
+                listOfNotNull(
+                    hhmm(p.start) + "–" + hhmm(p.stop),
+                    p.title.takeIf { !it.equals(f.title, ignoreCase = true) },
+                    c.group.takeIf { it.isNotBlank() },
+                ).joinToString("  ·  "),
+            ) { vm.watchFixtureOn(c) }
+        },
+        onDismiss = { vm.fixtureChoice = null },
+    )
 }

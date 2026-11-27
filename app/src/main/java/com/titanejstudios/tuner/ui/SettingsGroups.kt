@@ -18,10 +18,10 @@ object SettingsGroups {
         Group("watching", "▶  Watching", setOf("Playback", "Skipping & previews", "Sound & subtitles", "Languages")),
         Group("look", "🎨  Look & Home", setOf("Look", "Easier to see and hear", "Home & recommendations")),
         Group("profiles", "👤  Profiles & parental controls", setOf("Profiles", "Parental controls")),
-        Group("films", "🎬  Films, series & Plex", setOf("Films & series", "Plex, scores & updates")),
+        Group("films", "🎬  Films, series & Plex", setOf("Films & series", "Plex & scores")),
         Group("recordings", "⏺  Recordings & reminders", setOf("Recordings", "Reminders")),
         Group("connected", "🔗  Connected", setOf("Devices & sync", "Google TV", "Phone remote", "Apps", "VPN", "Home Assistant")),
-        Group("thistv", "ℹ  This TV, backup & help", setOf("Start-up", "When the TV turns on", "This TV", "Help", "Backup", "About")),
+        Group("thistv", "ℹ  This TV, updates & help", setOf("Start-up", "When the TV turns on", "This TV", "Help", "Backup", "Updates", "About")),
     )
 
     fun groupOf(section: String): String = all.firstOrNull { section in it.sections }?.key ?: "thistv"

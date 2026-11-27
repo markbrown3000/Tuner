@@ -45,6 +45,18 @@ object LiveSubtitles {
 
     /** Read by the audio tap on every buffer, so a plain volatile. */
     @Volatile var listening = false; private set
+    /** The full-screen player is showing (not Home's or the guide's small live pictures). */
+    @Volatile private var inPlayer = false
+
+    /** Live subtitles only listen in the full-screen player, so the speech model isn't loaded while browsing. */
+    fun setInPlayer(value: Boolean) {
+        inPlayer = value
+        listening = on && value
+        if (!value) {
+            caption = ""
+            Recognizer.stop()
+        }
+    }
 
     /** About how much is downloaded, for the Settings row. */
     const val DOWNLOAD_MB = 55
@@ -83,7 +95,7 @@ object LiveSubtitles {
             else -> Status.NotDownloaded
         }
         on = status == Status.Ready && context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean("on", false)
-        listening = on
+        listening = on && inPlayer
     }
 
     val supported: Boolean get() = status !is Status.NotAvailable
@@ -110,7 +122,7 @@ object LiveSubtitles {
     /** Turns them on or off in the player (remembered). */
     fun setOn(context: Context, value: Boolean) {
         on = value && ready
-        listening = on
+        listening = on && inPlayer
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean("on", on).apply()
         if (!on) {
             caption = ""

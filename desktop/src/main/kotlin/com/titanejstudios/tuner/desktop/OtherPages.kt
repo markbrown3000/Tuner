@@ -367,6 +367,15 @@ fun SettingsPage(app: AppState) {
                     }
                     Pill("↻ Reload channels and guide") { app.reload() }
                 }
+                // Backup guide (remove with the module) – personal use.
+                Spacer(Modifier.height(10.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Pill(if (app.backupGuideOn) "✓ Use extra guide sources" else "Use extra guide sources") { app.setBackupGuide(!app.backupGuideOn) }
+                    Text(
+                        app.backupGuideStatus ?: "Fills channels with no listings from free guides (EPGTalk, Freeview-EPG, epg.pw). Matches you fix on the TV come across with the sync.",
+                        color = Soft, fontSize = 12.sp,
+                    )
+                }
                 Spacer(Modifier.height(10.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Pill("☰ Manage groups and channels", selected = true) { managing = true }

@@ -121,4 +121,33 @@ class RicherTest {
         assertEquals("short", l.tail("short", 20))
         assertEquals("over the lazy dog", l.tail("the quick brown fox jumps over the lazy dog", 18))
     }
+
+    @Test
+    fun problemLogShowsNewestEntriesFirstButEachTheRightWayUp() {
+        val lines = listOf(
+            "26 Nov 22:05:20  INFO  started",
+            "26 Nov 22:05:26  PROBLEM  Last closed: it froze",
+            "\"main\" prio=5 tid=1 Blocked",
+            "  at com.example.Thing.wait(Thing.kt:1)",
+            "26 Nov 22:05:32  PROBLEM  low on memory",
+        )
+        val shown = com.titanejstudios.tuner.data.AppLog.newestFirst(lines).lines()
+        assertEquals("26 Nov 22:05:32  PROBLEM  low on memory", shown[0])
+        assertEquals("26 Nov 22:05:26  PROBLEM  Last closed: it froze", shown[1])
+        assertEquals("\"main\" prio=5 tid=1 Blocked", shown[2])
+        assertEquals("26 Nov 22:05:20  INFO  started", shown[4])
+    }
+
+    @Test
+    fun releaseNotesAreTidiedForTheTv() {
+        val raw = "## What's Changed\n* **Live subtitles** by @markbrown3000 in https://github.com/x/y/pull/12\n- See [the log](https://example.com)\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\nhttps://claude.ai/code/session_x"
+        val t = com.titanejstudios.tuner.apps.Updater.tidyNotes(raw)
+        assertEquals("What's Changed\n• Live subtitles\n• See the log", t)
+    }
+
+    @Test
+    fun tmdbScoresAreLabelled() {
+        assertEquals("TMDB 8.5", com.titanejstudios.tuner.integrations.Tmdb.ratingText(8.5))
+        assertNull(com.titanejstudios.tuner.integrations.Tmdb.ratingText(0.0))
+    }
 }

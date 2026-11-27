@@ -278,7 +278,8 @@ object Tmdb {
         }
     }
 
-    fun ratingText(r: Double?): String? = r?.let { String.format(Locale.UK, "★ %.1f", it) }
+    /** TMDB's own score, labelled ("TMDB 7.1") so it isn't mistaken for IMDb's. */
+    fun ratingText(r: Double?): String? = r?.takeIf { it > 0.0 }?.let { String.format(Locale.UK, "TMDB %.1f", it) }
 
     /** One film or show in this week's trending list. */
     class Trend(

@@ -98,6 +98,12 @@ android {
     testOptions {
         // Unit tests run on the computer, not the TV: Android calls (like Log) just return defaults.
         unitTests.isReturnDefaultValues = true
+        // The TV-size layout tests (Robolectric) need the app's resources, and save pictures of each screen.
+        unitTests.isIncludeAndroidResources = true
+        unitTests.all { test ->
+            test.systemProperty("roborazzi.test.record", "true")
+            test.maxHeapSize = "2g"
+        }
     }
     lint {
         abortOnError = false
@@ -146,6 +152,14 @@ dependencies {
 
     // Tests of the pure logic (run with ./gradlew testDebugUnitTest, and on GitHub with every build).
     testImplementation("junit:junit:4.13.2")
+    // TV-size layout tests: draws screens at 1920×1080 on the build computer, checks nothing is cut
+    // off or squashed, and saves a picture of each (in the build's "tv-screenshots").
+    testImplementation("org.robolectric:robolectric:4.14.1")
+    testImplementation(composeBom)
+    testImplementation("androidx.compose.ui:ui-test-junit4")
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
+    testImplementation("io.github.takahirom.roborazzi:roborazzi:1.39.0")
+    testImplementation("io.github.takahirom.roborazzi:roborazzi-compose:1.39.0")
     // The real org.json, because Android's copy only exists on the TV.
     testImplementation("org.json:json:20240303")
 }
