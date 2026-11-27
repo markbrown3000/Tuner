@@ -387,7 +387,7 @@ class AppState(val config: Config, val player: Player, private val scope: Corout
         if (!backupGuideOn) return
         val o = runCatching { JSONObject(config.backupGuide) }.getOrDefault(JSONObject())
         val core = com.titanejstudios.backupguide.BackupGuideCore
-        val settings = core.Settings(
+        val settings = com.titanejstudios.backupguide.BackupGuideCore.Settings(
             core.readList(o.optJSONArray("custom")?.toString()),
             core.readMap(o.optJSONObject("overrides")?.toString()),
             core.readMap(config.backupGuideRemembered).toMutableMap(),
@@ -403,7 +403,7 @@ class AppState(val config: Config, val player: Player, private val scope: Corout
             val n = withContext(Dispatchers.IO) {
                 runCatching {
                     core.fill(
-                        settings, chans.map { core.Channel(it.id, it.epgId, it.name) }, from, to,
+                        settings, chans.map { com.titanejstudios.backupguide.BackupGuideCore.Channel(it.id, it.epgId, it.name) }, from, to,
                         open = { url -> com.titanejstudios.tuner.data.Http.open(url.trim()) },
                         covered = { id ->
                             base[id]?.sortedBy { it.start }?.let { l -> LongArray(l.size * 2).also { a -> l.forEachIndexed { i, p -> a[i * 2] = p.start; a[i * 2 + 1] = p.stop } } }
