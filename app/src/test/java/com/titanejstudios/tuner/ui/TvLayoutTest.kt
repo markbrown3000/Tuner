@@ -4,7 +4,10 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
-import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.performScrollToNode
 import com.github.takahirom.roborazzi.captureRoboImage
 import com.titanejstudios.tuner.TunerViewModel
 import com.titanejstudios.tuner.integrations.Tmdb
@@ -76,7 +79,11 @@ class TvLayoutTest {
         fullyOnScreen("Close")
         fullyOnScreen("IMDb 6.4")
         // The collection can be scrolled to, at full size (it was squashed to a sliver).
-        compose.onNodeWithText("1. Meet the Parents").performScrollTo().assertIsDisplayed()
+        // (Down from the buttons on the remote does the same: the card scrolls.)
+        compose.onNode(SemanticsMatcher.keyIsDefined(SemanticsProperties.VerticalScrollAxisRange))
+            .performScrollToNode(hasText("1. Meet the Parents", substring = true))
+        compose.waitForIdle()
+        compose.onNodeWithText("1. Meet the Parents").assertIsDisplayed()
         fullyOnScreen("1. Meet the Parents")
         shot("film_info_scrolled")
     }
