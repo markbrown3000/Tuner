@@ -160,4 +160,14 @@ class RicherTest {
         assertEquals(25, kept.size)
         assertEquals("com.titanejstudios.tuner.TunerViewModel.slowThing(TunerViewModel.kt:42)", kept[6])
     }
+
+    @Test
+    fun anUpdateIsNotAnUnexpectedClose() {
+        val s = com.titanejstudios.tuner.data.SafeMode
+        val closed = 1_700_000_000_000L
+        assertTrue(s.wasUpdate(closed, closed + 20_000L))
+        assertTrue(s.wasUpdate(closed, closed - 60_000L))
+        assertFalse(s.wasUpdate(closed, closed - 3 * 86_400_000L))
+        assertFalse(s.wasUpdate(closed, 0L))
+    }
 }

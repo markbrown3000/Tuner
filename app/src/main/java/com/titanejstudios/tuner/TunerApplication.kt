@@ -23,7 +23,7 @@ class TunerApplication : Application(), ImageLoaderFactory {
         AppLog.info("Device: " + com.titanejstudios.tuner.data.Lite.summary())
         logHowItLastClosed()
         // Older Android (Fire OS 6/7) keeps no record of why: Flicker's own note tells us.
-        com.titanejstudios.tuner.data.SafeMode.endedWhileOpen()?.let { what ->
+        com.titanejstudios.tuner.data.SafeMode.endedWhileOpen(updatedAt())?.let { what ->
             AppLog.warn(what)
             com.titanejstudios.tuner.data.SafeMode.noteExit("Closed while you were using it – most likely the TV ran out of memory", System.currentTimeMillis() - 1)
         }
@@ -56,6 +56,9 @@ class TunerApplication : Application(), ImageLoaderFactory {
      * the TV running out of memory, a freeze ("not responding"), or a crash inside the video decoder.
      * Writes any new ones to the problem log (and makes them the "closed unexpectedly" notice).
      */
+    /** When this version of Flicker was installed. */
+    private fun updatedAt(): Long = runCatching { packageManager.getPackageInfo(packageName, 0).lastUpdateTime }.getOrDefault(0L)
+
     private fun logHowItLastClosed() {
         if (android.os.Build.VERSION.SDK_INT < 30) return
         runCatching {
@@ -86,12 +89,15 @@ class TunerApplication : Application(), ImageLoaderFactory {
                     else -> "reason ${e.reason}"
                 }
                 val memory = if (e.pss > 0) " · it was using ${e.pss / 1024} MB" else ""
-                val unexpected = e.reason in setOf(
+                // Installing an update can end the old Flicker with a signal: that's expected.
+                val updating = com.titanejstudios.tuner.data.SafeMode.wasUpdate(e.timestamp, updatedAt()) &&
+                    e.reason != android.app.ApplicationExitInfo.REASON_CRASH_NATIVE && e.reason != android.app.ApplicationExitInfo.REASON_ANR
+                val unexpected = !updating && e.reason in setOf(
                     android.app.ApplicationExitInfo.REASON_LOW_MEMORY, android.app.ApplicationExitInfo.REASON_ANR,
                     android.app.ApplicationExitInfo.REASON_CRASH_NATIVE, android.app.ApplicationExitInfo.REASON_SIGNALED,
                     android.app.ApplicationExitInfo.REASON_EXCESSIVE_RESOURCE_USAGE,
                 )
-                val line = "Last closed ${fmt.format(java.util.Date(e.timestamp))}: $why$memory" + (e.description?.let { " ($it)" } ?: "")
+                val line = "Last closed ${fmt.format(java.util.Date(e.timestamp))}: ${if (updating) "it was updated" else why}$memory" + (e.description?.let { " ($it)" } ?: "")
                 if (unexpected) {
                     AppLog.warn(line + (trace?.let { "\n$it" } ?: ""))
                     com.titanejstudios.tuner.data.SafeMode.noteExit("${why.replaceFirstChar { it.uppercase() }}$memory", e.timestamp)

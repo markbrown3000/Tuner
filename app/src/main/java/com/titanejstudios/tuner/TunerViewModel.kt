@@ -1566,6 +1566,8 @@ class TunerViewModel(internal val app: Application) : AndroidViewModel(app), Rem
         loadLanguages()
         epgOverrides = store.epgOverrides
         deadChannels = store.deadChannels
+        com.titanejstudios.tuner.data.AppLog.info("Offline list: ${deadChannels.size} channel(s), last checked " +
+            (store.healthCheckedAt.takeIf { it > 0 }?.let { java.text.SimpleDateFormat("d MMM HH:mm", java.util.Locale.UK).format(java.util.Date(it)) } ?: "never"))
         hideDead = store.hideDead
         healthNightly = store.healthNightly
         healthScope = store.healthScope
