@@ -170,4 +170,11 @@ class RicherTest {
         assertFalse(s.wasUpdate(closed, closed - 3 * 86_400_000L))
         assertFalse(s.wasUpdate(closed, 0L))
     }
+
+    @Test
+    fun teamNamesCoverTheGuidesWaysOfWritingThem() {
+        assertEquals(listOf("Newcastle United FC", "Newcastle United"), teamNames("Newcastle United FC"))
+        assertEquals(listOf("AFC Bournemouth", "Bournemouth"), teamNames("AFC Bournemouth"))
+        assertEquals(listOf("Eagles"), teamNames("Eagles"))
+    }
 }

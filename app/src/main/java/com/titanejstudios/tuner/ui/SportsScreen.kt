@@ -40,6 +40,8 @@ import com.titanejstudios.tuner.data.Programme
 import com.titanejstudios.tuner.data.Sports
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import androidx.compose.runtime.saveable.rememberSaveable
+import com.titanejstudios.tuner.chooseFixtureChannel
 import kotlinx.coroutines.withContext
 import java.util.Calendar
 
@@ -90,6 +92,12 @@ fun SportsScreen(vm: TunerViewModel) {
         }
     }
 
+    // "guide": sport in your TV guide today and tomorrow; "fixtures": every match this week (ESPN).
+    var view by rememberSaveable { mutableStateOf("guide") }
+    if (view == "fixtures") {
+        AllFixtures(vm, onBack = { view = "guide" })
+        return
+    }
     var filter by remember { mutableStateOf("All") }
     var liveOnly by remember { mutableStateOf(false) }
     var menuFor by remember { mutableStateOf<SportEvent?>(null) }
@@ -116,6 +124,9 @@ fun SportsScreen(vm: TunerViewModel) {
         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             item {
                 PillButton("All (${all?.size ?: 0})", { filter = "All" }, Modifier.focusRequester(first), selected = filter == "All", compact = true)
+            }
+            item(key = "fixtures") {
+                PillButton("📅 All fixtures this week", { view = "fixtures" }, compact = true)
             }
             items(Sports.TYPES.filter { (counts[it] ?: 0) > 0 }, key = { it }) { t ->
                 PillButton("$t (${counts[t]})", { filter = t }, selected = filter == t, compact = true)
@@ -241,3 +252,76 @@ private fun SportRow(vm: TunerViewModel, ev: SportEvent, now: Long, restorer: Fo
         }
     }
 }
+
+/**
+ * Every match this week, from ESPN (football leagues and cups, rugby, NFL, NBA, NHL, MLB), by day.
+ * Choosing one finds it in your TV guide: pick the channel to watch it on, or for a reminder.
+ */
+@Composable
+private fun AllFixtures(vm: TunerViewModel, onBack: () -> Unit) {
+    val feature = vm.allFixtures
+    LaunchedEffect(Unit) { feature.load() }
+    val now = vm.now
+    var sport by rememberSaveable { mutableStateOf("all") }
+    val first = remember { FocusRequester() }
+    LaunchedEffect(Unit) {
+        delay(60)
+        runCatching { first.requestFocus() }
+    }
+    val narrow = narrowScreen()
+    val entries = feature.entries
+    val sports = entries.orEmpty().groupingBy { it.sport.key }.eachCount()
+    val shown = entries.orEmpty().filter { sport == "all" || it.sport.key == sport }
+    androidx.activity.compose.BackHandler(onBack = onBack)
+
+    Column(Modifier.fillMaxSize().skyBackground().padding(horizontal = if (narrow) 12.dp else 48.dp, vertical = if (narrow) 10.dp else 28.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("All fixtures", fontSize = 32.sp, fontWeight = FontWeight.Bold, color = TunerColors.TextPrimary)
+            Spacer(Modifier.width(16.dp))
+            Text("This week · choose one to pick its channel", fontSize = 16.sp, color = TunerColors.TextSecondary)
+        }
+        Spacer(Modifier.height(12.dp))
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            item(key = "back") { PillButton("← Sport in the guide", onBack, Modifier.focusRequester(first), compact = true) }
+            item(key = "all") { PillButton("All (${entries?.size ?: 0})", { sport = "all" }, selected = sport == "all", compact = true) }
+            items(com.titanejstudios.tuner.integrations.Espn.SPORTS.filter { (sports[it.key] ?: 0) > 0 }, key = { it.key }) { s ->
+                PillButton("${s.emoji} ${s.label} (${sports[s.key]})", { sport = s.key }, selected = sport == s.key, compact = true)
+            }
+            item(key = "refresh") { PillButton("↻", { feature.load(force = true) }, compact = true) }
+        }
+        Spacer(Modifier.height(14.dp))
+        when {
+            entries == null || (feature.loading && entries.isEmpty()) -> { CenterMessage("Getting this week's fixtures…"); return@Column }
+            shown.isEmpty() -> { CenterMessage("No fixtures found this week."); return@Column }
+        }
+        val todayEnd = endOfDay(now, 0)
+        val tomorrowEnd = endOfDay(now, 1)
+        val byDay = shown.groupBy { e ->
+            val k = e.fixture.kickoff
+            when {
+                e.fixture.live || k <= now -> "On now"
+                k <= todayEnd -> "Today"
+                k <= tomorrowEnd -> "Tomorrow"
+                else -> dayLabel(k)
+            }
+        }
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            byDay.forEach { (day, list) ->
+                item(key = "h-$day") { Text(day, color = TunerColors.TextPrimary, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 10.dp, bottom = 4.dp)) }
+                items(list, key = { it.fixture.id + it.fixture.kickoff }) { e ->
+                    val f = e.fixture
+                    val on = f.live || f.kickoff <= now
+                    FixtureRow(
+                        time = if (on) "ON NOW" else if (f.timeKnown) hhmm(f.kickoff) else "TBC",
+                        live = on,
+                        title = "${e.sport.emoji}  ${f.home} v ${f.away}",
+                        detail = f.competition ?: e.sport.label,
+                        narrow = narrow,
+                        onClick = { vm.chooseFixtureChannel(f) },
+                    )
+                }
+            }
+        }
+    }
+}
+

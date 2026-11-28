@@ -149,27 +149,55 @@ object Espn {
         val events = o.optJSONArray("events") ?: JSONArray()
         val out = ArrayList<Fixture>()
         for (i in 0 until events.length()) {
-            val e = events.optJSONObject(i) ?: continue
-            val comp = e.optJSONArray("competitions")?.optJSONObject(0) ?: continue
-            val sides = comp.optJSONArray("competitors") ?: continue
-            var home: String? = null
-            var away: String? = null
-            for (j in 0 until sides.length()) {
-                val s = sides.optJSONObject(j) ?: continue
-                val n = s.optJSONObject("team")?.let { it.optString("shortDisplayName").ifBlank { it.optString("displayName") } } ?: continue
-                if (s.optString("homeAway") == "home") home = n else away = n
-            }
-            if (home == null || away == null) continue
-            val kickoff = parseTime(e.optString("date").ifBlank { comp.optString("date") }) ?: continue
-            val state = comp.optJSONObject("status")?.optJSONObject("type")?.optString("state")
-                ?: e.optJSONObject("status")?.optJSONObject("type")?.optString("state") ?: "pre"
-            val competition = e.optJSONObject("league")?.optString("name")?.ifBlank { null }
-                ?: e.optJSONObject("seasonType")?.optString("name")?.ifBlank { null }
-                ?: team.leagueName
-            out += Fixture(
-                e.optString("id").ifBlank { "$home-$away-$kickoff" }, home, away, kickoff, competition,
-                state.ifBlank { "pre" }, comp.optBoolean("timeValid", e.optBoolean("timeValid", true)), followedName,
-            )
+            out += parseEvent(events.optJSONObject(i) ?: continue, team.leagueName, followedName) ?: continue
+        }
+        return out.sortedBy { it.kickoff }
+    }
+
+    /** One ESPN event as a fixture, or null if it isn't a two-sided match. */
+    private fun parseEvent(e: JSONObject, defaultCompetition: String, followedName: String): Fixture? {
+        val comp = e.optJSONArray("competitions")?.optJSONObject(0) ?: return null
+        val sides = comp.optJSONArray("competitors") ?: return null
+        var home: String? = null
+        var away: String? = null
+        for (j in 0 until sides.length()) {
+            val s = sides.optJSONObject(j) ?: continue
+            val n = s.optJSONObject("team")?.let { it.optString("shortDisplayName").ifBlank { it.optString("displayName") } } ?: continue
+            if (s.optString("homeAway") == "home") home = n else away = n
+        }
+        if (home == null || away == null) return null
+        val kickoff = parseTime(e.optString("date").ifBlank { comp.optString("date") }) ?: return null
+        val state = comp.optJSONObject("status")?.optJSONObject("type")?.optString("state")
+            ?: e.optJSONObject("status")?.optJSONObject("type")?.optString("state") ?: "pre"
+        val competition = e.optJSONObject("league")?.optString("name")?.ifBlank { null }
+            ?: e.optJSONObject("seasonType")?.optString("name")?.ifBlank { null }
+            ?: defaultCompetition
+        return Fixture(
+            e.optString("id").ifBlank { "$home-$away-$kickoff" }, home, away, kickoff, competition,
+            state.ifBlank { "pre" }, comp.optBoolean("timeValid", e.optBoolean("timeValid", true)), followedName,
+        )
+    }
+
+    /** Cups and European competitions, for the Sports page's full fixture list (football). */
+    val CUPS = listOf(
+        "uefa.champions" to "Champions League",
+        "uefa.europa" to "Europa League",
+        "uefa.europa.conf" to "Conference League",
+        "eng.fa" to "FA Cup",
+        "eng.league_cup" to "Carabao Cup",
+        "sco.tennents" to "Scottish Cup",
+    )
+
+    /** Every match in one competition between two days ("20261128", "20261205"), soonest first. Blocking. */
+    fun scoreboard(league: String, leagueName: String, fromDay: String, toDay: String): List<Fixture> {
+        val o = get("$BASE/${path(league)}/scoreboard?dates=$fromDay-$toDay&limit=300")
+        val name = o.optJSONArray("leagues")?.optJSONObject(0)?.optString("name")?.ifBlank { null } ?: leagueName
+        val events = o.optJSONArray("events") ?: return emptyList()
+        val out = ArrayList<Fixture>()
+        for (i in 0 until events.length()) {
+            val f = parseEvent(events.optJSONObject(i) ?: continue, name, "") ?: continue
+            // Each competition's own name (the event's "league" can be the season type).
+            out += Fixture(f.id, f.home, f.away, f.kickoff, name, f.state, f.timeKnown, "")
         }
         return out.sortedBy { it.kickoff }
     }
