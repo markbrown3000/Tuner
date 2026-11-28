@@ -94,6 +94,10 @@ jobs:
       - name: Build the APK
         run: gradle --no-daemon assembleRelease
 
+      - name: Check the APK prepares Flicker's screens ahead (baseline profile)
+        run: |
+          unzip -l app/build/outputs/apk/release/app-release.apk | grep -E "assets/dexopt/baseline.prof" || { echo "The baseline profile is missing from the APK"; exit 1; }
+
       - name: Keep the APK (download from this run's Artifacts)
         uses: actions/upload-artifact@v5
         with:

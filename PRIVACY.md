@@ -28,4 +28,4 @@ Flicker has kids' profiles to limit what children can watch. Flicker doesn't col
 
 ## Contact
 
-Questions: open an issue at https://github.com/markbrown3000/Tuner/issues
+Questions: open an issue at https://github.com/titanejstudios/Flicker/issues
