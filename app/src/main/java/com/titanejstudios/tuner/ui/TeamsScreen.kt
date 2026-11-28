@@ -244,18 +244,29 @@ fun TeamsScreen(vm: TunerViewModel) {
 @Composable
 fun FixtureChannelsDialog(vm: TunerViewModel, f: com.titanejstudios.tuner.TeamFixture) {
     val favs = vm.favouriteSet
+    val now = System.currentTimeMillis()
+    // Not started yet: choosing a channel sets a reminder on it (it opens that channel at kick-off).
+    val later = (f.programme?.start ?: f.match.kickoff) > now + 15 * 60_000L
     MenuDialog(
         title = f.title,
-        subtitle = "On ${f.channels.size} of your channels – which one?",
+        subtitle = (if (f.channels.size > 1) "On ${f.channels.size} of your channels" else "On ${f.channels.first().first.name}") +
+            (if (later) " – choose one for a reminder" else " – which one?"),
         items = f.channels.map { (c, p) ->
+            val reminded = vm.hasReminder(c, p)
             MenuItem(
                 (if (c.id in favs) "★ " else "") + c.name,
                 listOfNotNull(
-                    hhmm(p.start) + "–" + hhmm(p.stop),
+                    (if (later) dayLabel(p.start) + " " else "") + hhmm(p.start) + "–" + hhmm(p.stop),
                     p.title.takeIf { !it.equals(f.title, ignoreCase = true) },
                     c.group.takeIf { it.isNotBlank() },
+                    if (reminded) "🔔 reminder set – choose to cancel" else null,
                 ).joinToString("  ·  "),
-            ) { vm.watchFixtureOn(c) }
+            ) {
+                if (later) {
+                    vm.fixtureChoice = null
+                    vm.toggleReminder(c, p)
+                } else vm.watchFixtureOn(c)
+            }
         },
         onDismiss = { vm.fixtureChoice = null },
     )

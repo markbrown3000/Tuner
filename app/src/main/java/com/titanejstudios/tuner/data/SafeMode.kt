@@ -67,10 +67,15 @@ object SafeMode {
     }
 
     /** At start: was Flicker ended while it was on screen last time? Returns a description, once. */
-    fun endedWhileOpen(): String? {
+    fun endedWhileOpen(updatedAt: Long = 0L): String? {
         val p = prefs ?: return null
         val at = p.getLong("hb_at", 0L)
         if (at == 0L) return null
+        // Installing an update ends the old Flicker while it's on screen: that's expected, not a crash.
+        if (wasUpdate(at, updatedAt)) {
+            p.edit().remove("hb_at").apply()
+            return null
+        }
         val doing = p.getString("hb_doing", null) ?: "using Flicker"
         val memory = p.getString("hb_memory", null).orEmpty()
         p.edit().remove("hb_at").apply()
@@ -157,4 +162,8 @@ object SafeMode {
             else -> null
         }
     }
+
+    /** Flicker was installed (updated) after it last said it was running, or within a few minutes of it closing. */
+    fun wasUpdate(closedAt: Long, updatedAt: Long): Boolean =
+        updatedAt > 0 && closedAt > 0 && updatedAt >= closedAt - 5 * 60_000L && updatedAt <= closedAt + 10 * 60_000L
 }

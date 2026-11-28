@@ -278,7 +278,7 @@ internal fun TunerViewModel.runHealthCheck() {
             }
         }
         val checked = targets.take(done).map { it.id }.toSet()
-        deadChannels = (deadChannels - checked) + dead
+        deadChannels = (store.deadChannels - checked) + dead
         store.deadChannels = deadChannels
         healthCheckedAt = System.currentTimeMillis()
         store.healthCheckedAt = healthCheckedAt
@@ -337,12 +337,12 @@ internal fun TunerViewModel.matchDayCheck() {
     val targets = dead.mapNotNull { byId[it] }.sortedByDescending { it.id in soon }.take(60)
     if (targets.isEmpty()) return
     healthJob = viewModelScope.launch {
-        val stillDead = withContext(Dispatchers.IO) { HealthCheck.run(targets, { mode != null || healthCancel }) }
-        // Stopped part-way because something started playing: keep what we know.
-        if (mode != null) return@launch
-        val back = targets.map { it.id }.toSet() - stillDead
+        var done = 0
+        val stillDead = withContext(Dispatchers.IO) { HealthCheck.run(targets, { mode != null || healthCancel }) { d, _, _ -> done = d } }
+        // Only the channels it actually got to count (it stops part-way if something starts playing).
+        val back = targets.take(done).map { it.id }.toSet() - stillDead
         if (back.isNotEmpty()) {
-            deadChannels = deadChannels - back
+            deadChannels = store.deadChannels - back
             store.deadChannels = deadChannels
             recomputeVisible()
             AppLog.info("Offline recheck: ${back.size} channel(s) working again")
@@ -359,7 +359,8 @@ internal fun TunerViewModel.isRealProgramme(title: String, channelName: String):
 }
 
 internal fun TunerViewModel.clearDead(channelId: String? = null) {
-    deadChannels = if (channelId == null) emptySet() else deadChannels - channelId
+    deadChannels = if (channelId == null) emptySet() else store.deadChannels - channelId
+    if (channelId == null) com.titanejstudios.tuner.data.AppLog.info("Offline list cleared by hand")
     store.deadChannels = deadChannels
     recomputeVisible()
 }

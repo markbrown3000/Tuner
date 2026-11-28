@@ -369,7 +369,7 @@ class TunerViewModel(internal val app: Application) : AndroidViewModel(app), Rem
     private var groupOrder: List<String> = emptyList()
 
     // Pre-sorted lists so switching category is a lookup, not a filter over every channel.
-    private var allowedAll: List<Channel> = emptyList()
+    internal var allowedAll: List<Channel> = emptyList()
     private var byGroup: Map<String, List<Channel>> = emptyMap()
     internal var byId: Map<String, Channel> = emptyMap()
     /** Same-named channels, for backup links when a stream fails. Built off the main thread. */
@@ -1140,6 +1140,8 @@ class TunerViewModel(internal val app: Application) : AndroidViewModel(app), Rem
     private var plexPlaying: Plex.Item? = null
 
     val football = FootballFeature(store, viewModelScope) { showNotice(it) }
+    /** Every fixture this week (Sports page). */
+    val allFixtures = com.titanejstudios.tuner.features.FixturesFeature(viewModelScope)
     /** Your teams' coming matches with their channels (My teams, Home). */
     var teamFixtures by mutableStateOf<List<TeamFixture>>(emptyList()); private set
     /** Your teams' recent games you can still watch on catch-up (newest first). */
@@ -1566,6 +1568,8 @@ class TunerViewModel(internal val app: Application) : AndroidViewModel(app), Rem
         loadLanguages()
         epgOverrides = store.epgOverrides
         deadChannels = store.deadChannels
+        com.titanejstudios.tuner.data.AppLog.info("Offline list: ${deadChannels.size} channel(s), last checked " +
+            (store.healthCheckedAt.takeIf { it > 0 }?.let { java.text.SimpleDateFormat("d MMM HH:mm", java.util.Locale.UK).format(java.util.Date(it)) } ?: "never"))
         hideDead = store.hideDead
         healthNightly = store.healthNightly
         healthScope = store.healthScope
@@ -2005,7 +2009,7 @@ class TunerViewModel(internal val app: Application) : AndroidViewModel(app), Rem
     // ---------------- Guide time fix ----------------
 
     /** Moves each playlist's guide by its chosen number of minutes. */
-    private fun shiftGuide(chs: List<Channel>, guide: Map<String, List<Programme>>): Map<String, List<Programme>> {
+    internal fun shiftGuide(chs: List<Channel>, guide: Map<String, List<Programme>>): Map<String, List<Programme>> {
         val shifts = store.epgShift.mapValues { (_, v) -> (v.toLongOrNull() ?: 0L) * 60_000L }.filterValues { it != 0L }
         if (shifts.isEmpty()) return guide
         val sourceOf = chs.associate { it.id to it.sourceId }
