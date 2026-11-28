@@ -1,0 +1,6 @@
+# Baseline profile: Android prepares (compiles ahead) all of Flicker's own code when it's installed,
+# instead of running it slowly the first few times each screen is opened. This is what stops the
+# short pauses when moving between menus on slower sticks (Fire TV Stick 4K 1st gen).
+# Compose and the other libraries bring their own profiles; this covers Flicker's code.
+HSPLcom/titanejstudios/tuner/**;->**(**)**
+Lcom/titanejstudios/tuner/**;

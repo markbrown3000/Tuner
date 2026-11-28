@@ -588,7 +588,14 @@ class Store(context: Context) {
     /** App updates from a GitHub repo's releases ("owner/repo"). */
     /** GitHub repo checked for updates ("owner/repo"). Defaults to Tuner's own repo; "" = turned off. */
     var updateRepo: String?
-        get() = prefs.getString("update_repo", null).let { if (it == null) DEFAULT_UPDATE_REPO else it.takeIf { r -> r.isNotBlank() } }
+        get() = prefs.getString("update_repo", null).let {
+            when {
+                it == null -> DEFAULT_UPDATE_REPO
+                // The repo moved (GitHub redirects, but don't rely on it).
+                it.equals("markbrown3000/Tuner", ignoreCase = true) -> DEFAULT_UPDATE_REPO
+                else -> it.takeIf { r -> r.isNotBlank() }
+            }
+        }
         set(value) = prefs.edit().putString("update_repo", value ?: "").apply()
     /** When Tuner last looked for an update by itself, and a version you said "Later" to. */
     var updateCheckedAt: Long
@@ -1164,7 +1171,7 @@ class Store(context: Context) {
                 maxCertificate = o.optString("cert"),
             )
         }
-        const val DEFAULT_UPDATE_REPO = "markbrown3000/Tuner"
+        const val DEFAULT_UPDATE_REPO = "titanejstudios/Flicker"
         private val RECORDING_LOCK = Any()
     }
 

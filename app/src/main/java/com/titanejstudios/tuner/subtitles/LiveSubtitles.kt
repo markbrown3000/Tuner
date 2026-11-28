@@ -66,13 +66,13 @@ object LiveSubtitles {
     private val MODEL_URLS = listOf(
         "https://alphacephei.com/vosk/models/$MODEL_NAME.zip",
         // A copy can be attached to a GitHub release tagged "live-subtitles", in case their site moves.
-        "https://github.com/markbrown3000/Tuner/releases/download/live-subtitles/$MODEL_NAME.zip",
+        "https://github.com/titanejstudios/Flicker/releases/download/live-subtitles/$MODEL_NAME.zip",
     )
     // The speech engine for Android, straight from Maven Central (only this device's part is kept).
     private val ENGINE_URLS = listOf(
         "https://repo1.maven.org/maven2/com/alphacephei/vosk-android/$ENGINE_VERSION/vosk-android-$ENGINE_VERSION.aar",
         "https://repo.maven.apache.org/maven2/com/alphacephei/vosk-android/$ENGINE_VERSION/vosk-android-$ENGINE_VERSION.aar",
-        "https://github.com/markbrown3000/Tuner/releases/download/live-subtitles/vosk-android-$ENGINE_VERSION.aar",
+        "https://github.com/titanejstudios/Flicker/releases/download/live-subtitles/vosk-android-$ENGINE_VERSION.aar",
     )
 
     private const val PREFS = "live_subtitles"

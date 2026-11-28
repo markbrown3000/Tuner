@@ -115,7 +115,7 @@ class Recorder(private val main: Player) {
 
 /** New versions of Flicker for Windows from the GitHub releases (the same ones as the TV's). */
 object Updater {
-    const val REPO = "markbrown3000/Tuner"
+    const val REPO = "titanejstudios/Flicker"
 
     class Release(val version: String, val msiUrl: String, val notes: String?)
 

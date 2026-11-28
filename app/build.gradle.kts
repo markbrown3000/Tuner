@@ -151,6 +151,8 @@ dependencies {
     implementation("com.pierfrancescosoffritti.androidyoutubeplayer:core:12.1.2")
 
     // Tests of the pure logic (run with ./gradlew testDebugUnitTest, and on GitHub with every build).
+    // Installs the baseline profile (src/main/baseline-prof.txt) on the TV, so screens are ready ahead.
+    implementation("androidx.profileinstaller:profileinstaller:1.4.1")
     testImplementation("junit:junit:4.13.2")
     // TV-size layout tests: draws screens at 1920×1080 on the build computer, checks nothing is cut
     // off or squashed, and saves a picture of each (in the build's "tv-screenshots").
